@@ -115,7 +115,11 @@ There are two ways to deploy: a true one-command path with the Azure Developer C
 
 ### Option A — one command, no Docker required
 
+Requires [git](https://git-scm.com/), the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/), and the [Azure CLI](https://learn.microsoft.com/cli/azure/) installed locally. Clone the repo first — `azd` reads `azure.yaml`/`infra/`/`api/`/`web/` from your local copy, it doesn't deploy directly from GitHub:
+
 ```powershell
+git clone https://github.com/Saby007/MeghKoshaAI.git
+cd MeghKoshaAI
 azd auth login
 azd env new my-environment
 azd env set AZURE_LOCATION <region>
