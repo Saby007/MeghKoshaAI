@@ -111,15 +111,21 @@ Two other top-level views round out the app:
 
 ## Deploying to Azure
 
-Deployment is a two-stage process: stand up the infrastructure, then point it at built container images.
+> **The Deploy to Azure button below only provisions infrastructure** — a resource group, network, Container Apps environment, container registry, and managed identities. It does **not** build or run the application. To get a working app, you also need to push the code as container images (step 2) and point the deployment at them (step 3). Follow all steps in order — steps 1 and 3 use the **same** environment name, so the second run updates your existing deployment instead of creating a new one.
 
 ### 1. Deploy the foundation
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FSaby007%2FMeghKoshaAI%2Fmain%2Finfra%2Fmain.json)
 
-Clicking the button above opens the Azure portal's subscription-scope custom deployment experience against this repo's [ARM template](infra/main.json) (compiled from [main.bicep](infra/main.bicep)). Pick the target subscription, an environment name, and a profile (`core`, `data`, or `ai`), and provision. Leaving the image parameters blank deploys only the foundation — no application container runs yet.
+Clicking the button opens the Azure portal's subscription-scope custom deployment experience against this repo's [ARM template](infra/main.json) (compiled from [main.bicep](infra/main.bicep)). Pick the target subscription, choose an **environment name** (write it down — you'll reuse it in step 3) and a **profile** (`core`, `data`, or `ai`), leave `apiImage`/`webImage` blank, and provision.
 
-Alternatively, if you have the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/) installed:
+When it finishes, open the deployment's **Outputs** tab and note:
+
+- `AZURE_RESOURCE_GROUP`
+- `AZURE_CONTAINER_REGISTRY_NAME`
+- `AZURE_CONTAINER_REGISTRY_ENDPOINT`
+
+Alternatively, with the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/):
 
 ```powershell
 azd auth login
@@ -127,24 +133,58 @@ azd env new my-environment
 azd provision
 ```
 
-### 2. Build and publish the application images
+### 2. Push the code as container images
 
-The API and web images are built from [api/Dockerfile](api/Dockerfile) and [web/Dockerfile](web/Dockerfile). Build them, push them to any container registry your subscription can pull from (Azure Container Registry, GitHub Container Registry, etc.), and either:
+Step 1 created an Azure Container Registry (ACR) but left it empty — this step builds [api/Dockerfile](api/Dockerfile) and [web/Dockerfile](web/Dockerfile) from this repo and pushes them into it.
 
-- re-run the Deploy to Azure template supplying `apiImage`/`webImage` (and `processorImage` if you enabled the `data` profile's scheduled worker), or
-- run `azd deploy` if you used the `azd` flow above.
+**No local Docker needed — build directly in ACR:**
 
-Both application containers only start once **both** image parameters are non-empty — there is no placeholder application deployed by default.
+```powershell
+az acr build --registry <AZURE_CONTAINER_REGISTRY_NAME> --image cost-app/api:latest --file api/Dockerfile ./api
+az acr build --registry <AZURE_CONTAINER_REGISTRY_NAME> --image cost-app/web:latest --file web/Dockerfile ./web
+```
 
-### 3. Configure sign-in
+**Or, with local Docker installed:**
+
+```powershell
+az acr login --name <AZURE_CONTAINER_REGISTRY_NAME>
+docker build -t <AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/api:latest -f api/Dockerfile ./api
+docker build -t <AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/web:latest -f web/Dockerfile ./web
+docker push <AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/api:latest
+docker push <AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/web:latest
+```
+
+If you provisioned with `azd` in step 1, `azd deploy` does all of this in one command (build, push, and update the running containers) — skip straight to step 4 afterward.
+
+### 3. Point the deployment at your images
+
+Re-run the **same** deployment — same `environmentName` (and `resourceGroupName`, if you set one) as step 1 — this time supplying the images you just pushed, so it updates the existing resources in place rather than creating new ones.
+
+**Portal:** Use the Deploy to Azure button again with identical `environmentName`/`profile`, and fill in:
+
+- `apiImage`: `<AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/api:latest`
+- `webImage`: `<AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/web:latest`
+
+**CLI:**
+
+```powershell
+az deployment sub create --location <location> --template-file infra/main.json `
+  --parameters environmentName=<same-environment-name> profile=<same-profile> `
+  apiImage=<AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/api:latest `
+  webImage=<AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/web:latest
+```
+
+Both containers only start once **both** image parameters are non-empty. Wait for the two Container Apps (`ca-api-*`, `ca-web-*`) to report **Running** before continuing.
+
+### 4. Configure sign-in
 
 Register two Entra ID app registrations in your tenant (a public-client SPA and a confidential-client API), following your organization's normal app-registration process. [scripts/bootstrap-identity.ps1](scripts/bootstrap-identity.ps1) will preview (and, with `-Apply`, create) the required redirect URIs, API scope, and federated credential for you. Populate the resulting client IDs into the deployment (`apiClientId`/`webClientId`, or `MEGHKOSHA_API_CLIENT_ID`/`MEGHKOSHA_WEB_CLIENT_ID` if using `azd`/`.env`).
 
-### 4. Grant access to the subscriptions you want to assess
+### 5. Grant access to the subscriptions you want to assess
 
 See [the three manual role assignments](#the-three-manual-role-assignments) below — this is the only manual, per-subscription step in the whole flow.
 
-### 5. Open the app
+### 6. Open the app
 
 Sign in, open **Schedules**, and use **Refresh schedules**. Once the roles above are visible, the app finishes export and schedule setup on its own. After the first six-month cycle completes, open **Report** and select **Run report**.
 
