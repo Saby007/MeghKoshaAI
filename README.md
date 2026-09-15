@@ -134,6 +134,14 @@ To provision the `data` profile (needed for the app to actually create/schedule 
 azd env set APP_PROFILE data
 ```
 
+To also enable the scheduled six-month FOCUS worker, set `APP_ENABLE_PROCESSOR=true` and point the processor at the **same image `azd` already built for the `api` service** — don't invent a separate image name, since nothing will have pushed one:
+
+```powershell
+azd env set APP_ENABLE_PROCESSOR true
+azd env set SERVICE_PROCESSOR_IMAGE_NAME (azd env get-value SERVICE_API_IMAGE_NAME)
+azd up
+```
+
 Re-running `azd up` (or `azd deploy` alone) later picks up any code changes and updates the deployment in place.
 
 > If `azd up`/`azd provision` crashes with a Go panic mentioning `HooksMiddleware`, that's a known `azd` bug ([azure-dev#10037](https://github.com/Azure/azure-dev/issues/10037)) unrelated to this repo — try upgrading `azd` (`azd version` to check, then reinstall the latest). If it persists, use Option B below instead.
