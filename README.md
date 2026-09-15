@@ -206,7 +206,7 @@ This step creates two Microsoft Entra ID app registrations: a **public-client SP
 
 ```powershell
 $AZURE_TENANT_ID = azd env get-value AZURE_TENANT_ID
-$AZURE_SUBSCRIPTION_ID = az account show --query id -o tsv
+$AZURE_SUBSCRIPTION_ID = azd env get-value AZURE_SUBSCRIPTION_ID
 $AZURE_ENV_NAME = azd env get-value AZURE_ENV_NAME
 $APP_WEB_ORIGIN = azd env get-value APP_WEB_ORIGIN
 $MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID = azd env get-value MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID
