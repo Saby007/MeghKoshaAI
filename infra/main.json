@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "155471521419518649"
+      "templateHash": "6955016999994117765"
     }
   },
   "definitions": {
@@ -531,7 +531,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "5087084090478599990"
+              "templateHash": "14939464888166122771"
             }
           },
           "parameters": {
@@ -704,6 +704,52 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[1])]",
                 "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[1])]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleDefinitions",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), 'export-storage-setup')]",
+              "properties": {
+                "roleName": "[format('Cost Assessment Export Storage Setup {0}', parameters('resourceToken'))]",
+                "description": "Lets the API identity complete the native FOCUS export destination role assignment on this account only. No keys, deletion or data actions.",
+                "type": "CustomRole",
+                "assignableScopes": [
+                  "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]"
+                ],
+                "permissions": [
+                  {
+                    "actions": [
+                      "Microsoft.Storage/storageAccounts/read",
+                      "Microsoft.Storage/storageAccounts/write",
+                      "Microsoft.Storage/storageAccounts/blobServices/containers/read",
+                      "Microsoft.Authorization/permissions/read",
+                      "Microsoft.Authorization/roleAssignments/read",
+                      "Microsoft.Authorization/roleAssignments/write"
+                    ],
+                    "notActions": [],
+                    "dataActions": [],
+                    "notDataActions": []
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), parameters('apiPrincipalId'), resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), 'export-storage-setup')))]",
+              "properties": {
+                "principalId": "[parameters('apiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), 'export-storage-setup'))]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), 'export-storage-setup'))]"
               ]
             },
             {

@@ -95,6 +95,43 @@ resource apiReportWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   }
 }
 
+// Azure's own native FOCUS export creation grants Storage Blob Data Contributor to the export's
+// system-assigned identity on the destination container as a side effect - but only if the caller
+// creating the export (the API identity) itself has role-assignment write on this account. This
+// custom role is scoped to only this app's own storage account, never customer resources.
+resource storageSetupRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
+  name: guid(storage.id, 'export-storage-setup')
+  properties: {
+    roleName: 'Cost Assessment Export Storage Setup ${resourceToken}'
+    description: 'Lets the API identity complete the native FOCUS export destination role assignment on this account only. No keys, deletion or data actions.'
+    type: 'CustomRole'
+    assignableScopes: [storage.id]
+    permissions: [{
+      actions: [
+        'Microsoft.Storage/storageAccounts/read'
+        'Microsoft.Storage/storageAccounts/write'
+        'Microsoft.Storage/storageAccounts/blobServices/containers/read'
+        'Microsoft.Authorization/permissions/read'
+        'Microsoft.Authorization/roleAssignments/read'
+        'Microsoft.Authorization/roleAssignments/write'
+      ]
+      notActions: []
+      dataActions: []
+      notDataActions: []
+    }]
+  }
+}
+
+resource apiStorageSetupAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storage.id, apiPrincipalId, storageSetupRole.id)
+  scope: storage
+  properties: {
+    principalId: apiPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: storageSetupRole.id
+  }
+}
+
 resource processorWriters 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for containerIndex in range(0, 3): {
   name: guid(containers[containerIndex].id, processorIdentity.id, 'processor-writer')
   scope: containers[containerIndex]
