@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.compute/virtualmachines'
+| extend powerState = tostring(properties.extended.instanceView.powerState.code)
+| where powerState =~ 'PowerState/stopped'
+| project id, name, resourceGroup, subscriptionId, location, powerState, vmSize = tostring(properties.hardwareProfile.vmSize), tags

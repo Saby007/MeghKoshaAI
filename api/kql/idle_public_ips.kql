@@ -1,0 +1,4 @@
+resources
+| where type =~ 'microsoft.network/publicipaddresses'
+| where isnull(properties.ipConfiguration) and isnull(properties.natGateway)
+| project id, name, resourceGroup, subscriptionId, location, sku = sku.name, allocationMethod = tostring(properties.publicIPAllocationMethod), tags

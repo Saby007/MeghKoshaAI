@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.compute/availabilitysets'
+| extend virtualMachineCount = array_length(coalesce(properties.virtualMachines, dynamic([])))
+| where virtualMachineCount == 0
+| project id, name, resourceGroup, subscriptionId, location, virtualMachineCount, tags

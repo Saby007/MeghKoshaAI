@@ -1,0 +1,36 @@
+/** Mirrors api/findings/engine.py's CATEGORY_DISPLAY_NAMES - used for table headers
+ * (e.g. Subscription Breakdown) that need every category name up front, not just
+ * the ones present in a given report.
+ */
+export const CATEGORY_DISPLAY_NAMES: Record<string, string> = {
+  unattached_disks: 'Unattached managed disks',
+  stopped_vms: 'VMs stopped but not deallocated',
+  idle_public_ips: 'Idle / unattached public IPs',
+  empty_backend_pools: 'Application Gateways with empty backend pool',
+  empty_load_balancer_backend_pools: 'Load Balancers with empty backend pools',
+  idle_virtual_network_gateways: 'Virtual Network Gateways with zero monthly traffic',
+  idle_nat_gateways: 'NAT Gateways with zero monthly traffic',
+  idle_expressroute_circuits: 'ExpressRoute circuits with zero monthly traffic',
+  old_snapshots: 'Snapshots older than the stale threshold',
+  unattached_network_interfaces: 'Unattached network interfaces',
+  unassociated_network_security_groups: 'Network security groups with no association',
+  unassociated_route_tables: 'Route tables with no subnet association',
+  empty_availability_sets: 'Empty availability sets',
+  deallocated_virtual_machines: 'Deallocated virtual machines',
+  zero_instance_vm_scale_sets: 'Virtual machine scale sets with zero instances',
+  empty_app_service_plans: 'App Service plans with no apps',
+  stopped_web_apps: 'Stopped web apps and function apps',
+  empty_virtual_networks: 'Virtual networks with no subnets in use',
+  disconnected_private_endpoints: 'Private endpoints not in an approved state',
+  stopped_aks_clusters: 'Stopped AKS clusters',
+  empty_resource_groups: 'Empty resource groups',
+  old_custom_images: 'Custom images older than the stale threshold',
+  sql_databases_and_pools: 'SQL databases, elastic pools, and logical servers',
+  sql_managed_instances_and_pools: 'SQL Managed Instances and instance pools',
+  sql_virtual_machines: 'SQL Server virtual machines',
+  compute_ahb_candidates: 'Windows Server Azure Hybrid Benefit candidates',
+  ai_cognitive_accounts: 'Azure AI Services and OpenAI accounts',
+  ai_foundry_projects: 'Microsoft Foundry projects',
+  ai_ml_workspaces: 'Azure Machine Learning workspaces',
+  ai_search_services: 'Azure AI Search services',
+};

@@ -1,0 +1,9 @@
+resources
+| where type =~ 'microsoft.network/virtualnetworks'
+| extend subnets = coalesce(properties.subnets, dynamic([]))
+| extend subnetCount = array_length(subnets)
+| mv-expand subnet = iff(subnetCount == 0, dynamic([{}]), subnets)
+| summarize subnetCount = max(subnetCount), usedSubnetCount = countif(array_length(coalesce(subnet.properties.ipConfigurations, dynamic([]))) > 0) by id, name, resourceGroup, subscriptionId, location, tostring(tags)
+| where usedSubnetCount == 0
+| extend tags = parse_json(tags)
+| project id, name, resourceGroup, subscriptionId, location, subnetCount, usedSubnetCount, tags

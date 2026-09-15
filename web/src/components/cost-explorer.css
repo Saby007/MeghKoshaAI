@@ -1,0 +1,286 @@
+.resource-availability-cell {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 120px;
+}
+
+.cost-budget-context {
+    border-top: 1px solid var(--color-ash-stroke);
+    padding-block: var(--space-3);
+}
+
+.cost-budget-context th small {
+    display: block;
+    font-weight: 400;
+}
+
+.cost-budget-context pre {
+    max-width: 380px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: var(--font-size-sm);
+}
+
+.budget-status {
+    font-weight: 600;
+}
+
+.cost-budget-context .budget-status {
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    white-space: normal;
+}
+
+.budget-within {
+    color: var(--color-metric-green);
+}
+
+.budget-warning {
+    color: var(--color-warning);
+}
+
+.budget-over {
+    color: var(--color-error);
+}
+
+.budget-unknown {
+    color: var(--color-pale-stone);
+}
+
+.cost-window-overview,
+.subscription-cost-breakdown,
+.period-cost-anomalies {
+    min-width: 0;
+    padding-block: var(--space-4);
+}
+
+.app-shell :is(.cost-window-overview, .subscription-cost-breakdown, .period-cost-anomalies, .hourly-cost-panel, .required-tag-costs, .saved-report-controls) .ghost-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-height: var(--touch-height);
+    padding: var(--space-2) var(--space-3);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    color: var(--color-bone);
+    background: var(--color-surface);
+    border: 1px solid var(--color-ash-stroke);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.app-shell :is(.cost-window-overview, .subscription-cost-breakdown, .period-cost-anomalies, .hourly-cost-panel, .required-tag-costs, .saved-report-controls) .ghost-button:hover {
+    background: var(--color-surface-hover);
+}
+
+.app-shell :is(.cost-window-overview, .subscription-cost-breakdown, .period-cost-anomalies, .hourly-cost-panel, .required-tag-costs, .saved-report-controls) .ghost-button:disabled {
+    cursor: default;
+    opacity: .65;
+}
+
+.cost-range-controls .time-range-selector button {
+    min-width: 44px;
+    min-height: 44px;
+    font-size: var(--font-size-sm);
+}
+
+.cost-range-controls,
+.cost-section-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-block: var(--space-3);
+}
+
+.cost-section-heading {
+    justify-content: space-between;
+}
+
+.cost-section-heading h2,
+.cost-section-heading h3 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+}
+
+.cost-range-controls input {
+    min-height: 40px;
+    font: inherit;
+    color: var(--color-bone);
+    background: var(--color-surface);
+    border: 1px solid var(--color-ash-stroke);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2);
+}
+
+.cost-detail-filters .billing-filter {
+    flex: 1 1 145px;
+    max-width: 260px;
+    min-width: 0;
+}
+
+.cost-detail-filters select {
+    max-width: 100%;
+}
+
+.cost-chart-scroll {
+    position: relative;
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.cost-comparison-chart {
+    display: block;
+    width: 100%;
+    min-width: 720px;
+    height: auto;
+    color: var(--color-bone);
+}
+
+.cost-comparison-chart text {
+    fill: var(--color-bone);
+    font: 13px var(--font-geist);
+}
+
+.cost-chart-grid {
+    stroke: var(--color-ash-stroke);
+    stroke-width: 1;
+}
+
+.cost-chart-current,
+.cost-chart-previous {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+}
+
+.cost-chart-previous {
+    stroke-dasharray: 3 5;
+}
+
+.cost-comparison-chart circle[role='button'] {
+    cursor: pointer;
+}
+
+.cost-comparison-chart circle[role='button']:focus {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 4px;
+}
+
+.cost-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    font-size: var(--font-size-sm);
+    margin-block: var(--space-3);
+}
+
+.cost-chart-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    overflow-wrap: anywhere;
+}
+
+.cost-chart-legend i {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 12px;
+    border-radius: 2px;
+}
+
+.cost-detail-scroll {
+    max-height: 600px;
+}
+
+.cost-detail-table {
+    min-width: 900px;
+}
+
+.cost-detail-table th:first-child {
+    min-width: 210px;
+    max-width: 340px;
+}
+
+.cost-detail-table small,
+.cost-source-detail span,
+.cost-source-detail small,
+.cost-resource-id {
+    display: block;
+    font-weight: 400;
+    color: var(--color-pale-stone);
+    overflow-wrap: anywhere;
+}
+
+.cost-source-detail {
+    padding-block: var(--space-2);
+    border-top: 1px solid var(--color-ash-stroke);
+}
+
+.cost-day-drilldown {
+    border-top: 2px solid var(--color-ash-stroke);
+    padding-top: var(--space-3);
+}
+
+.cost-daily-values {
+    margin-block: var(--space-3);
+}
+
+.cost-export-control {
+    max-width: 100%;
+}
+
+.cost-export-control p {
+    color: var(--color-error);
+    overflow-wrap: anywhere;
+}
+
+.period-anomaly-link {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    text-align: left;
+    background: var(--color-accent-subtle);
+    color: var(--color-bone);
+    border: 1px solid var(--color-ash-stroke);
+    border-radius: var(--radius-sm);
+    padding: var(--space-3);
+    min-width: 0;
+}
+
+.period-anomaly-link strong {
+    font-size: var(--font-size-xl);
+}
+
+.period-anomaly-link span,
+.period-anomaly-link small {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.cost-count {
+    font-size: var(--font-size-lg);
+    color: var(--color-cost-increase);
+}
+
+@media (max-width: 640px) {
+    .cost-range-controls .billing-filter {
+        flex: 1 1 145px;
+        min-width: 0;
+    }
+    .cost-range-controls input {
+        width: 100%;
+        box-sizing: border-box;
+    }
+    .cost-detail-filters .billing-filter {
+        max-width: none;
+    }
+    .cost-window-metrics {
+        grid-template-columns: 1fr;
+    }
+}

@@ -1,0 +1,6 @@
+resources
+| where type =~ 'microsoft.network/networkinterfaces'
+| where isempty(tostring(properties.virtualMachine.id))
+| where isempty(tostring(properties.privateEndpoint.id))
+| extend ipConfigurationCount = array_length(coalesce(properties.ipConfigurations, dynamic([])))
+| project id, name, resourceGroup, subscriptionId, location, ipConfigurationCount, tags

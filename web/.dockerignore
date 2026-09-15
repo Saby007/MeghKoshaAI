@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+.env.*
+.azure
+.git
+browser
+test-results
+playwright-report
+coverage
+**/*.test.ts
+**/*.test.tsx
+*.tsbuildinfo
+*.log

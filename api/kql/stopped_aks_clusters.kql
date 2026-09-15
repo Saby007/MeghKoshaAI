@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.containerservice/managedclusters'
+| extend powerState = tostring(properties.powerState.code)
+| where powerState !~ 'Running'
+| project id, name, resourceGroup, subscriptionId, location, powerState, kubernetesVersion = tostring(properties.kubernetesVersion), tags

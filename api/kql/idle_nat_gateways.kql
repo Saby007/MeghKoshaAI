@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.network/natgateways'
+| extend subnetCount = array_length(coalesce(properties.subnets, dynamic([])))
+| project id, name, resourceGroup, subscriptionId, location,
+    sku = tostring(sku.name), subnetCount, tags

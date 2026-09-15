@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.web/sites'
+| extend state = tostring(properties.state)
+| where state !~ 'Running'
+| project id, name, resourceGroup, subscriptionId, location, state, kind, serverFarmId = tostring(properties.serverFarmId), tags

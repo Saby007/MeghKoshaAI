@@ -1,0 +1,7 @@
+resources
+| where type =~ 'microsoft.sql/managedinstances' or type =~ 'microsoft.sql/instancepools'
+| extend resourceKind = case(type =~ 'microsoft.sql/managedinstances', 'SQL Managed Instance', 'Managed Instance pool')
+| extend skuName = tostring(sku.name), skuTier = tostring(sku.tier), skuFamily = tostring(sku.family), capacity = toint(sku.capacity)
+| extend licenseType = tostring(properties.licenseType), state = tostring(properties.state), instancePoolId = tostring(properties.instancePoolId)
+| extend storageSizeInGB = tostring(properties.storageSizeInGB), zoneRedundant = tostring(properties.zoneRedundant), currentBackupStorageRedundancy = tostring(properties.currentBackupStorageRedundancy)
+| project id, name, type, resourceGroup, subscriptionId, location, resourceKind, skuName, skuTier, skuFamily, capacity, licenseType, state, instancePoolId, storageSizeInGB, zoneRedundant, currentBackupStorageRedundancy, tags

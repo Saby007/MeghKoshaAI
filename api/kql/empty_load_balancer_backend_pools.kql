@@ -1,0 +1,11 @@
+resources
+| where type =~ 'microsoft.network/loadbalancers'
+| extend tagsText = tostring(tags)
+| mv-expand pool = coalesce(properties.backendAddressPools, dynamic([]))
+| extend nicBackends = array_length(coalesce(pool.properties.backendIPConfigurations, dynamic([])))
+| extend addressBackends = array_length(coalesce(pool.properties.loadBalancerBackendAddresses, dynamic([])))
+| extend poolSize = nicBackends + addressBackends
+| summarize backendPoolCount = count(), maxPoolSize = max(poolSize) by id, name, resourceGroup, subscriptionId, location, sku = tostring(sku.name), tagsText
+| where backendPoolCount > 0 and maxPoolSize == 0
+| extend tags = parse_json(tagsText)
+| project id, name, resourceGroup, subscriptionId, location, sku, backendPoolCount, tags

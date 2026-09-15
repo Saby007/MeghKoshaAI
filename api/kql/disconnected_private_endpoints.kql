@@ -1,0 +1,6 @@
+resources
+| where type =~ 'microsoft.network/privateendpoints'
+| mv-expand connection = coalesce(properties.privateLinkServiceConnections, dynamic([]))
+| extend connectionStatus = tostring(connection.properties.privateLinkServiceConnectionState.status)
+| where connectionStatus !~ 'Approved'
+| project id, name, resourceGroup, subscriptionId, location, connectionStatus, tags

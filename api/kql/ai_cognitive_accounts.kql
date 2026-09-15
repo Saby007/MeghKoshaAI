@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.cognitiveservices/accounts'
+| extend resourceKind = case(kind =~ 'OpenAI', 'Azure OpenAI account', 'Cognitive Services account')
+| extend accountKind = tostring(kind), skuName = tostring(sku.name)
+| project id, name, resourceGroup, subscriptionId, location, resourceKind, accountKind, skuName

@@ -1,0 +1,8 @@
+resources
+| where type =~ 'microsoft.network/expressroutecircuits'
+| where properties.serviceProviderProvisioningState =~ 'Provisioned'
+| project id, name, resourceGroup, subscriptionId, location,
+    skuTier = tostring(sku.tier),
+    skuFamily = tostring(sku.family),
+    bandwidthInMbps = toint(properties.serviceProviderProperties.bandwidthInMbps),
+    tags

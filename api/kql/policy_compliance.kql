@@ -1,0 +1,14 @@
+PolicyResources
+| where type =~ 'microsoft.policyinsights/policystates'
+| extend complianceState = tostring(properties.complianceState)
+| extend evaluatedResourceId = tostring(properties.resourceId)
+| extend policyAssignmentId = tostring(properties.policyAssignmentId)
+| summarize
+    compliantEvaluations = countif(complianceState == 'Compliant'),
+    nonCompliantEvaluations = countif(complianceState == 'NonCompliant'),
+    conflictEvaluations = countif(complianceState == 'Conflict'),
+    exemptEvaluations = countif(complianceState == 'Exempt'),
+    notStartedEvaluations = countif(complianceState == 'NotStarted'),
+    nonCompliantResources = dcountif(evaluatedResourceId, complianceState == 'NonCompliant'),
+    policyAssignmentCount = dcount(policyAssignmentId)
+  by subscriptionId

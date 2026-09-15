@@ -1,0 +1,8 @@
+resources
+| where type =~ 'microsoft.compute/virtualmachines'
+| extend osType = tostring(properties.storageProfile.osDisk.osType), licenseType = tostring(properties.licenseType)
+| extend offer = tostring(properties.storageProfile.imageReference.offer), imageSku = tostring(properties.storageProfile.imageReference.sku)
+| extend vmSize = tostring(properties.hardwareProfile.vmSize)
+| where osType =~ 'Windows'
+| where licenseType !~ 'Windows_Server' and licenseType !~ 'Windows_Client'
+| project id, name, resourceGroup, subscriptionId, location, osType, licenseType, offer, imageSku, vmSize

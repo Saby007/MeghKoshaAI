@@ -1,0 +1,10 @@
+resources
+| where type =~ 'microsoft.sql/servers' or type =~ 'microsoft.sql/servers/databases' or type =~ 'microsoft.sql/servers/elasticpools'
+| where type !~ 'microsoft.sql/servers/databases' or (name !~ 'master' and name !endswith '/master' and id !endswith '/databases/master')
+| extend resourceKind = case(type =~ 'microsoft.sql/servers', 'SQL logical server', type =~ 'microsoft.sql/servers/databases', 'SQL Database', 'Elastic pool')
+| extend skuName = tostring(sku.name), skuTier = tostring(sku.tier), skuFamily = tostring(sku.family), capacity = toint(sku.capacity)
+| extend licenseType = tostring(properties.licenseType), elasticPoolId = tostring(properties.elasticPoolId)
+| extend autoPauseDelay = tostring(properties.autoPauseDelay), minCapacity = tostring(properties.minCapacity)
+| extend zoneRedundant = tostring(properties.zoneRedundant), state = tostring(properties.status)
+| extend maxSizeBytes = tostring(properties.maxSizeBytes), readScale = tostring(properties.readScale), currentBackupStorageRedundancy = tostring(properties.currentBackupStorageRedundancy), requestedBackupStorageRedundancy = tostring(properties.requestedBackupStorageRedundancy)
+| project id, name, type, resourceGroup, subscriptionId, location, resourceKind, skuName, skuTier, skuFamily, capacity, licenseType, elasticPoolId, autoPauseDelay, minCapacity, zoneRedundant, state, maxSizeBytes, readScale, currentBackupStorageRedundancy, requestedBackupStorageRedundancy, tags

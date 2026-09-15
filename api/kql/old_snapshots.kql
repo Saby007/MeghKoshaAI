@@ -1,0 +1,7 @@
+resources
+| where type =~ 'microsoft.compute/snapshots'
+| extend createdOn = todatetime(properties.timeCreated)
+| extend ageDays = datetime_diff('day', now(), createdOn)
+| extend sizeGb = toint(properties.diskSizeGB)
+| where ageDays > {StaleDays}
+| project id, name, resourceGroup, subscriptionId, location, createdOn, ageDays, sizeGb, tags

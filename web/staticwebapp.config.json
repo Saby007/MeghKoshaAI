@@ -1,0 +1,51 @@
+{
+    "auth": {
+        "identityProviders": {
+            "azureActiveDirectory": {
+                "registration": {
+                    "openIdIssuer": "https://login.microsoftonline.com/16b3c013-d300-468d-ac64-7eda0820b6d3/v2.0",
+                    "clientIdSettingName": "MEGHKOSHA_AUTH_CLIENT_ID",
+                    "clientSecretSettingName": "MEGHKOSHA_AUTH_CLIENT_SECRET"
+                }
+            }
+        }
+    },
+    "routes": [{
+            "route": "/",
+            "headers": {
+                "Cache-Control": "no-store, max-age=0"
+            }
+        },
+        {
+            "route": "/index.html",
+            "headers": {
+                "Cache-Control": "no-store, max-age=0"
+            }
+        },
+        {
+            "route": "/assets/*",
+            "headers": {
+                "Cache-Control": "public, max-age=31536000, immutable"
+            }
+        },
+        {
+            "route": "/api/onboarding/template",
+            "allowedRoles": ["anonymous"]
+        },
+        {
+            "route": "/api/storage-onboarding/template",
+            "allowedRoles": ["anonymous"]
+        },
+        {
+            "route": "/api/*",
+            "allowedRoles": ["authenticated"]
+        }
+    ],
+    "navigationFallback": {
+        "rewrite": "/index.html",
+        "exclude": ["/assets/*"]
+    },
+    "responseOverrides": {
+        "401": { "redirect": "/.auth/login/aad", "statusCode": 302 }
+    }
+}

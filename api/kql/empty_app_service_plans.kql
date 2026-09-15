@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.web/serverfarms'
+| extend siteCount = toint(properties.numberOfSites)
+| where siteCount == 0
+| project id, name, resourceGroup, subscriptionId, location, siteCount, sku = tostring(sku.name), tier = tostring(sku.tier), workers = toint(sku.capacity), tags

@@ -1,0 +1,8 @@
+resources
+| where type =~ 'microsoft.network/virtualnetworkgateways'
+| where properties.gatewayType =~ 'Vpn'
+| project id, name, resourceGroup, subscriptionId, location,
+    gatewayType = tostring(properties.gatewayType),
+    sku = tostring(properties.sku.name),
+    generation = tostring(properties.vpnGatewayGeneration),
+    tags

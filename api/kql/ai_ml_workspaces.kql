@@ -1,0 +1,4 @@
+resources
+| where type =~ 'microsoft.machinelearningservices/workspaces'
+| extend resourceKind = 'Azure Machine Learning workspace', workspaceKind = tostring(kind), skuName = tostring(sku.name)
+| project id, name, resourceGroup, subscriptionId, location, resourceKind, workspaceKind, skuName

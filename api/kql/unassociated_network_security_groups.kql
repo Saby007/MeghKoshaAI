@@ -1,0 +1,7 @@
+resources
+| where type =~ 'microsoft.network/networksecuritygroups'
+| extend networkInterfaceCount = array_length(coalesce(properties.networkInterfaces, dynamic([])))
+| extend subnetCount = array_length(coalesce(properties.subnets, dynamic([])))
+| where networkInterfaceCount == 0 and subnetCount == 0
+| extend ruleCount = array_length(coalesce(properties.securityRules, dynamic([])))
+| project id, name, resourceGroup, subscriptionId, location, networkInterfaceCount, subnetCount, ruleCount, tags

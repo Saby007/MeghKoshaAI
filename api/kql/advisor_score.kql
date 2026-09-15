@@ -1,0 +1,3 @@
+advisorresources
+| where type =~ 'microsoft.advisor/advisorscore'
+| project subscriptionId, name, properties

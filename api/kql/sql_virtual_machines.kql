@@ -1,0 +1,7 @@
+resources
+| where type =~ 'microsoft.sqlvirtualmachine/sqlvirtualmachines'
+| extend resourceKind = 'SQL Server VM'
+| extend sqlServerLicenseType = tostring(properties.sqlServerLicenseType), sqlManagement = tostring(properties.sqlManagement)
+| extend billingResourceId = tostring(properties.virtualMachineResourceId)
+| extend offer = tostring(properties.sqlImageOffer), imageSku = tostring(properties.sqlImageSku)
+| project id, name, type, resourceGroup, subscriptionId, location, resourceKind, sqlServerLicenseType, sqlManagement, billingResourceId, offer, imageSku, tags

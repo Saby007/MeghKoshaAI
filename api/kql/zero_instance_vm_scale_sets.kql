@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.compute/virtualmachinescalesets'
+| extend capacity = toint(sku.capacity)
+| where capacity == 0
+| project id, name, resourceGroup, subscriptionId, location, capacity, sku = tostring(sku.name), tags

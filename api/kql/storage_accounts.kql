@@ -1,0 +1,4 @@
+resources
+| where type =~ 'microsoft.storage/storageaccounts'
+| extend currentTier = tostring(properties.accessTier)
+| project id, name, resourceGroup, subscriptionId, location, currentTier, kind, skuName = tostring(sku.name)

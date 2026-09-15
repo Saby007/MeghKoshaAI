@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.cognitiveservices/accounts/projects'
+| extend resourceKind = 'Microsoft Foundry project', parentAccountId = substring(id, 0, indexof(id, '/projects/'))
+| extend suppressCost = true
+| project id, name, resourceGroup, subscriptionId, location, resourceKind, parentAccountId, suppressCost

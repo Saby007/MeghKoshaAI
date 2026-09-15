@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.compute/disks'
+| where isnull(managedBy)
+| extend sizeGb = toint(properties.diskSizeGB)
+| project id, name, resourceGroup, subscriptionId, location, sizeGb, sku = sku.name, tags

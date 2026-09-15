@@ -1,0 +1,166 @@
+.sql-analysis {
+    margin-block: 24px;
+    color: var(--color-bone);
+}
+
+.sql-analysis-heading,
+.sql-check header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.sql-analysis h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 20px;
+    margin: 0;
+}
+
+.sql-analysis h3 {
+    font-size: 15px;
+    margin: 12px 0;
+}
+
+.sql-analysis h4 {
+    font-size: 13px;
+    margin: 12px 0 4px;
+}
+
+.sql-analysis p,
+.sql-analysis li {
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.sql-analysis-filters {
+    display: grid;
+    grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(150px, 1fr));
+    gap: 12px;
+    padding-block: 18px;
+}
+
+.sql-analysis-filters label {
+    display: grid;
+    gap: 6px;
+    font-size: 12px;
+    min-width: 0;
+}
+
+.sql-analysis-filters input,
+.sql-analysis-filters select {
+    min-width: 0;
+    width: 100%;
+    height: 36px;
+    border: 1px solid var(--color-ash-stroke);
+    border-radius: 4px;
+    padding: 0 8px;
+    background: var(--color-carbon-lift);
+    color: var(--color-bone);
+    font: inherit;
+}
+
+.sql-analysis-resource {
+    border-block-start: 1px solid var(--color-ash-stroke);
+}
+
+.sql-analysis-resource:last-child {
+    border-block-end: 1px solid var(--color-ash-stroke);
+}
+
+.sql-analysis-resource summary {
+    padding-block: 16px;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+}
+
+.sql-analysis-resource summary span {
+    display: inline-block;
+    margin-inline-start: 18px;
+}
+
+.sql-resource-content {
+    padding: 0 8px 24px;
+    min-width: 0;
+}
+
+.sql-resource-content>code {
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.sql-configuration {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    padding-block: 12px;
+    border-block: 1px solid var(--color-ash-stroke);
+}
+
+.sql-configuration dt {
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.sql-configuration dd {
+    margin: 4px 0 0;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.sql-table-scroll {
+    overflow-x: auto;
+}
+
+.sql-evidence table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.sql-evidence th,
+.sql-evidence td {
+    text-align: left;
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--color-ash-stroke);
+}
+
+.sql-check {
+    padding-block: 14px;
+    border-top: 1px solid var(--color-ash-stroke);
+}
+
+.sql-check-state {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.sql-check-state.review {
+    color: var(--color-signal-orange);
+}
+
+.sql-check ol {
+    padding-inline-start: 22px;
+}
+
+.sql-saving-status {
+    font-weight: 600;
+}
+
+@media (max-width: 650px) {
+    .sql-analysis-filters {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .sql-analysis-resource summary span {
+        display: block;
+        margin: 6px 0 0 16px;
+    }
+    .sql-evidence table {
+        min-width: 540px;
+    }
+}

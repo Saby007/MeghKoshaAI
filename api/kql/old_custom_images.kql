@@ -1,0 +1,7 @@
+resources
+| where type in~ ('microsoft.compute/images', 'microsoft.compute/galleries/images/versions')
+| extend createdOn = coalesce(todatetime(properties.timeCreated), todatetime(properties.publishingProfile.publishedDate))
+| where isnotnull(createdOn)
+| extend ageDays = datetime_diff('day', now(), createdOn)
+| where ageDays > {StaleDays}
+| project id, name, resourceGroup, subscriptionId, location, createdOn, ageDays, imageType = type, tags

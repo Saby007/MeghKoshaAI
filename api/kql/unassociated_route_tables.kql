@@ -1,0 +1,6 @@
+resources
+| where type =~ 'microsoft.network/routetables'
+| extend subnetCount = array_length(coalesce(properties.subnets, dynamic([])))
+| where subnetCount == 0
+| extend routeCount = array_length(coalesce(properties.routes, dynamic([])))
+| project id, name, resourceGroup, subscriptionId, location, subnetCount, routeCount, tags

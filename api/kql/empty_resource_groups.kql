@@ -1,0 +1,11 @@
+resourcecontainers
+| where type =~ 'microsoft.resources/subscriptions/resourcegroups'
+| extend resourceGroupKey = tolower(id)
+| join kind=leftouter (
+    resources
+    | extend resourceGroupKey = tolower(strcat('/subscriptions/', subscriptionId, '/resourcegroups/', resourceGroup))
+    | summarize resourceCount = count() by resourceGroupKey
+) on resourceGroupKey
+| extend resourceCount = coalesce(resourceCount, 0)
+| where resourceCount == 0
+| project id, name, resourceGroup = name, subscriptionId, location, resourceCount, tags

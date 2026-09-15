@@ -1,0 +1,9 @@
+resources
+| where type =~ 'microsoft.network/applicationgateways'
+| extend tagsText = tostring(tags)
+| mv-expand pool = properties.backendAddressPools
+| extend poolSize = array_length(coalesce(pool.properties.backendAddresses, dynamic([])))
+| summarize maxPoolSize = max(poolSize) by id, name, resourceGroup, subscriptionId, location, tagsText
+| where maxPoolSize == 0
+| extend tags = parse_json(tagsText)
+| project id, name, resourceGroup, subscriptionId, location, tags

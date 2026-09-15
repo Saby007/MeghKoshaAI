@@ -1,0 +1,40 @@
+version: v1.1.0
+stepTimeout: 90
+steps:
+  - id: phase2-api
+    cmd: '{{.Run.Registry}}/{{.Values.apiImage}}'
+    disableWorkingDirectoryOverride: true
+    detach: true
+    env:
+      - MEGHKOSHA_AI_ENABLED=false
+      - AZURE_TENANT_ID=11111111-1111-1111-1111-111111111111
+      - MEGHKOSHA_API_CLIENT_ID=33333333-3333-3333-3333-333333333333
+      - MEGHKOSHA_WEB_CLIENT_ID=44444444-4444-4444-4444-444444444444
+  - id: phase2-web
+    cmd: '{{.Run.Registry}}/{{.Values.webImage}}'
+    disableWorkingDirectoryOverride: true
+    detach: true
+    env:
+      - API_HOST=phase2-api
+  - id: nginx-configuration
+    cmd: '{{.Run.Registry}}/{{.Values.webImage}} nginx -t'
+    disableWorkingDirectoryOverride: true
+    env:
+      - API_HOST=phase2-api
+  - id: runtime-smoke
+    cmd: '{{.Run.Registry}}/{{.Values.apiImage}} /usr/bin/python /workspace/container-smoke.py'
+    retries: 3
+    retryDelay: 2
+    timeout: 60
+  - id: export-api-image
+    cmd: 'docker image save --output /workspace/api-image.tar {{.Run.Registry}}/{{.Values.apiImage}}'
+  - id: export-web-image
+    cmd: 'docker image save --output /workspace/web-image.tar {{.Run.Registry}}/{{.Values.webImage}}'
+  - id: scan-api-image
+    cmd: 'aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 image --input /workspace/api-image.tar --cache-dir /workspace/trivy-api-cache --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --timeout 10m --format json --quiet'
+    timeout: 660
+    when: [export-web-image]
+  - id: scan-web-image
+    cmd: 'aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 image --input /workspace/web-image.tar --cache-dir /workspace/trivy-web-cache --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --timeout 10m --format json --quiet'
+    timeout: 660
+    when: [export-web-image]

@@ -1,0 +1,43 @@
+name: cost-assessment-app
+metadata:
+  template: cost-assessment-app@0.1.0
+requiredVersions:
+  azd: '>= 1.32.0'
+infra:
+  provider: bicep
+  path: infra
+  module: main
+services:
+  api:
+    project: ./api
+    language: docker
+    host: containerapp
+    resourceName: ${SERVICE_API_RESOURCE_NAME}
+    docker:
+      path: Dockerfile
+      context: .
+      platform: linux/amd64
+      remoteBuild: false
+  web:
+    project: ./web
+    language: docker
+    host: containerapp
+    resourceName: ${SERVICE_WEB_RESOURCE_NAME}
+    docker:
+      path: Dockerfile
+      context: .
+      platform: linux/amd64
+      remoteBuild: false
+hooks:
+  preprovision:
+    shell: pwsh
+    run: ./scripts/validate-deployment-inputs.ps1 -Operation Provision
+  prepublish:
+    shell: pwsh
+    run: ./scripts/validate-deployment-inputs.ps1 -Operation Publish
+  predeploy:
+    shell: pwsh
+    run: ./scripts/validate-deployment-inputs.ps1 -Operation Deploy
+  predown:
+    shell: pwsh
+    run: ./scripts/validate-deployment-inputs.ps1 -Operation Down

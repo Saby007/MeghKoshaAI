@@ -1,0 +1,5 @@
+resources
+| where type =~ 'microsoft.search/searchservices'
+| extend resourceKind = 'Azure AI Search service', skuName = tostring(sku.name)
+| extend replicaCount = toint(properties.replicaCount), partitionCount = toint(properties.partitionCount), hostingMode = tostring(properties.hostingMode)
+| project id, name, resourceGroup, subscriptionId, location, resourceKind, skuName, replicaCount, partitionCount, hostingMode
