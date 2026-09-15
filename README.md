@@ -262,7 +262,7 @@ Sign in, open **Schedules**, and use **Refresh schedules**. Once the roles above
 
 ## The three manual role assignments
 
-Subscription access is deliberately kept **outside** the application — there is no in-app subscription-onboarding flow, and the app can never grant itself access. For every subscription you want it to assess, a user with **Owner** on that subscription must add three role assignments, in **Azure portal → Subscriptions → target subscription → Access control (IAM) → Add role assignment**:
+Subscription access is deliberately kept **outside** the application — there is no in-app subscription-onboarding flow, and the app can never grant itself access. For every subscription you want it to assess, a user with **Owner** (or **User Access Administrator**) on that subscription must add three role assignments:
 
 | Managed identity | Role to assign | Why |
 | --- | --- | --- |
@@ -270,8 +270,24 @@ Subscription access is deliberately kept **outside** the application — there i
 | API identity | **Cost Management Contributor** | Lets the app create the native FOCUS export and save the schedule — a write action that Cost Management **Reader** cannot perform. |
 | Processor identity | **Cost Management Contributor** | Lets the separate scheduled worker actually execute each monthly export run. Without this, the schedule can look "active" while the six-month cycle silently fails to advance. |
 
+**Portal:** find both identities in **Azure portal → your resource group → id-api-\* / id-processor-\*** (their names start with those prefixes), then **Subscriptions → target subscription → Access control (IAM) → Add role assignment** for each role/identity pair above.
 
-Both identities' names/principal IDs are shown on the deployment's outputs (or in the Azure portal under the resource group's managed identities). Allow a few minutes for RBAC propagation, then use **Refresh schedules** in the app.
+**CLI:** the identity names/principal IDs aren't in `azd`'s top-level outputs (only the OBO identity's are) — list them from the resource group instead:
+
+```powershell
+$RG = azd env get-value AZURE_RESOURCE_GROUP
+az identity list -g $RG --query "[].{name:name, principalId:principalId}" -o table
+
+$apiPrincipalId = az identity list -g $RG --query "[?starts_with(name,'id-api-')].principalId | [0]" -o tsv
+$processorPrincipalId = az identity list -g $RG --query "[?starts_with(name,'id-processor-')].principalId | [0]" -o tsv
+$targetSubscriptionId = "<subscription-id-you-want-to-assess>"
+
+az role assignment create --assignee-object-id $apiPrincipalId --assignee-principal-type ServicePrincipal --role "Reader" --scope "/subscriptions/$targetSubscriptionId"
+az role assignment create --assignee-object-id $apiPrincipalId --assignee-principal-type ServicePrincipal --role "Cost Management Contributor" --scope "/subscriptions/$targetSubscriptionId"
+az role assignment create --assignee-object-id $processorPrincipalId --assignee-principal-type ServicePrincipal --role "Cost Management Contributor" --scope "/subscriptions/$targetSubscriptionId"
+```
+
+Allow a few minutes for RBAC propagation, then use **Refresh schedules** in the app.
 
 > Use **Cost Management Contributor**, not **Cost Management Reader**, on both identities — creating and running a native export are both write actions (`.../exports/write` and `.../exports/run/action`), which Reader's `*/read` permissions do not cover.
 
