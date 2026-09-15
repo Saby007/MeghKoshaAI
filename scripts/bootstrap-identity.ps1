@@ -12,6 +12,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSVersion -lt [version]'7.0') { throw 'PowerShell 7 or later is required. Run this script with `pwsh`, not Windows PowerShell 5.1.' }
 if ($TenantId -eq [guid]::Empty -or $SubscriptionId -eq [guid]::Empty) { throw 'Tenant and subscription IDs must be nonzero.' }
 if (-not $WebOrigin.IsAbsoluteUri -or $WebOrigin.Scheme -ne 'https' -or $WebOrigin.Port -ne 443 -or
     $WebOrigin.AbsolutePath -ne '/' -or $WebOrigin.Query -or $WebOrigin.Fragment -or $WebOrigin.UserInfo) {
