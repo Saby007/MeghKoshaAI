@@ -28,16 +28,3 @@ services:
       context: .
       platform: linux/amd64
       remoteBuild: true
-hooks:
-  preprovision:
-    shell: pwsh
-    run: ./scripts/validate-deployment-inputs.ps1 -Operation Provision
-  prepublish:
-    shell: pwsh
-    run: ./scripts/validate-deployment-inputs.ps1 -Operation Publish
-  predeploy:
-    shell: pwsh
-    run: ./scripts/validate-deployment-inputs.ps1 -Operation Deploy
-  predown:
-    shell: pwsh
-    run: ./scripts/validate-deployment-inputs.ps1 -Operation Down

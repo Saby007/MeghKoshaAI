@@ -136,7 +136,10 @@ azd env set APP_PROFILE data
 
 Re-running `azd up` (or `azd deploy` alone) later picks up any code changes and updates the deployment in place.
 
+> If `azd up`/`azd provision` crashes with a Go panic mentioning `HooksMiddleware`, that's a known `azd` bug ([azure-dev#10037](https://github.com/Azure/azure-dev/issues/10037)) unrelated to this repo — try upgrading `azd` (`azd version` to check, then reinstall the latest). If it persists, use Option B below instead.
+
 ### Option B — Azure portal button (no CLI tooling required)
+
 
 > **The Deploy to Azure button below only provisions infrastructure** — a resource group, network, Container Apps environment, container registry, and managed identities. It does **not** build or run the application by itself. You click the button **twice** in total (steps 1 and 3 — step 2 is just two terminal commands, no portal interaction): the second click reuses the **same environment name**, so it updates your existing deployment instead of creating a new one.
 
