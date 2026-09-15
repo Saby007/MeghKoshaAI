@@ -200,7 +200,43 @@ Both containers only start once **both** image parameters are non-empty. Wait fo
 
 #### 4. Configure sign-in
 
-Register two Entra ID app registrations in your tenant (a public-client SPA and a confidential-client API), following your organization's normal app-registration process. [scripts/bootstrap-identity.ps1](scripts/bootstrap-identity.ps1) will preview (and, with `-Apply`, create) the required redirect URIs, API scope, and federated credential for you. Populate the resulting client IDs into the deployment (`apiClientId`/`webClientId`, or `MEGHKOSHA_API_CLIENT_ID`/`MEGHKOSHA_WEB_CLIENT_ID` if using `azd`/`.env`).
+This step creates two Microsoft Entra ID app registrations: a **public-client SPA** (what users sign into in the browser) and a **confidential-client API** (what validates their token). `scripts/bootstrap-identity.ps1` creates both for you — redirect URI, API scope, and the federated credential the API's managed identity needs — instead of you clicking through the Entra portal by hand.
+
+**Gather the values the script needs.** If you deployed with `azd`:
+
+```powershell
+azd env get-values
+```
+
+Note `AZURE_TENANT_ID`, `APP_WEB_ORIGIN`, and `MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID` from the output, plus your subscription ID (`az account show --query id -o tsv`). If you deployed via the portal button instead, get the equivalent values from the deployment's **Outputs** tab and the resource group's `id-obo-*` managed identity resource ID.
+
+**Preview first — this is always safe and creates nothing:**
+
+```powershell
+./scripts/bootstrap-identity.ps1 `
+  -TenantId <AZURE_TENANT_ID> `
+  -SubscriptionId <subscription-id> `
+  -EnvironmentName my-environment `
+  -WebOrigin <APP_WEB_ORIGIN> `
+  -OboManagedIdentityResourceId <MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID>
+```
+
+This prints a JSON plan (the redirect URI, API scope, etc.) without creating anything. Review it, then apply it — this needs permission to create app registrations in your tenant (e.g. **Application Administrator**). The script requires its own explicit safety switch in addition to `-Apply`, so nothing is ever created by accident:
+
+```powershell
+$env:APP_ALLOW_AZURE_CHANGES = 'true'
+./scripts/bootstrap-identity.ps1 -TenantId <AZURE_TENANT_ID> -SubscriptionId <subscription-id> -EnvironmentName my-environment -WebOrigin <APP_WEB_ORIGIN> -OboManagedIdentityResourceId <MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID> -Apply
+```
+
+The output includes the two client IDs it just created. Feed them back into the deployment and redeploy:
+
+```powershell
+azd env set MEGHKOSHA_API_CLIENT_ID <api-app-client-id>
+azd env set MEGHKOSHA_WEB_CLIENT_ID <web-app-client-id>
+azd up
+```
+
+(Using the portal button instead? Redeploy with `apiClientId`/`webClientId` filled in with those same two values.) Reload the app afterward — it should show a real Microsoft sign-in screen instead of an identity-configuration error.
 
 #### 5. Grant access to the subscriptions you want to assess
 
