@@ -134,7 +134,7 @@ Re-running `azd up` (or `azd deploy` alone) later picks up any code changes and 
 
 ### Option B — Azure portal button (no CLI tooling required)
 
-> **The Deploy to Azure button below only provisions infrastructure** — a resource group, network, Container Apps environment, container registry, and managed identities. It does **not** build or run the application by itself. Follow all three steps below in order — steps 1 and 3 use the **same** environment name, so the second run updates your existing deployment instead of creating a new one.
+> **The Deploy to Azure button below only provisions infrastructure** — a resource group, network, Container Apps environment, container registry, and managed identities. It does **not** build or run the application by itself. You click the button **twice** in total (steps 1 and 3 — step 2 is just two terminal commands, no portal interaction): the second click reuses the **same environment name**, so it updates your existing deployment instead of creating a new one.
 
 #### 1. Deploy the foundation
 
