@@ -111,9 +111,32 @@ Two other top-level views round out the app:
 
 ## Deploying to Azure
 
-> **The Deploy to Azure button below only provisions infrastructure** — a resource group, network, Container Apps environment, container registry, and managed identities. It does **not** build or run the application. To get a working app, you also need to push the code as container images (step 2) and point the deployment at them (step 3). Follow all steps in order — steps 1 and 3 use the **same** environment name, so the second run updates your existing deployment instead of creating a new one.
+There are two ways to deploy: a true one-command path with the Azure Developer CLI, or a portal-button path that's inherently two steps (ARM/Bicep templates can only reference already-built container images — they can't build code from a repo by themselves).
 
-### 1. Deploy the foundation
+### Option A — one command, no Docker required
+
+```powershell
+azd auth login
+azd env new my-environment
+azd env set AZURE_LOCATION <region>
+azd up
+```
+
+`azd up` provisions the infrastructure, builds both container images **remotely in Azure Container Registry** (no local Docker or Podman needed — [azd's `remoteBuild` option](https://learn.microsoft.com/azure/developer/azure-developer-cli/azd-schema#docker) is enabled in this repo's [azure.yaml](azure.yaml)), pushes them, and deploys the running app — genuinely one command, start to finish.
+
+To provision the `data` profile (needed for the app to actually create/schedule cost exports) or `ai` profile (adds narration/Chat), set it before running `azd up`:
+
+```powershell
+azd env set APP_PROFILE data
+```
+
+Re-running `azd up` (or `azd deploy` alone) later picks up any code changes and updates the deployment in place.
+
+### Option B — Azure portal button (no CLI tooling required)
+
+> **The Deploy to Azure button below only provisions infrastructure** — a resource group, network, Container Apps environment, container registry, and managed identities. It does **not** build or run the application by itself. Follow all three steps below in order — steps 1 and 3 use the **same** environment name, so the second run updates your existing deployment instead of creating a new one.
+
+#### 1. Deploy the foundation
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FSaby007%2FMeghKoshaAI%2Fmain%2Finfra%2Fmain.json)
 
@@ -125,15 +148,7 @@ When it finishes, open the deployment's **Outputs** tab and note:
 - `AZURE_CONTAINER_REGISTRY_NAME`
 - `AZURE_CONTAINER_REGISTRY_ENDPOINT`
 
-Alternatively, with the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/):
-
-```powershell
-azd auth login
-azd env new my-environment
-azd provision
-```
-
-### 2. Push the code as container images
+#### 2. Push the code as container images
 
 Step 1 created an Azure Container Registry (ACR) but left it empty — this step builds [api/Dockerfile](api/Dockerfile) and [web/Dockerfile](web/Dockerfile) from this repo and pushes them into it.
 
@@ -154,9 +169,7 @@ docker push <AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/api:latest
 docker push <AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/web:latest
 ```
 
-If you provisioned with `azd` in step 1, `azd deploy` does all of this in one command (build, push, and update the running containers) — skip straight to step 4 afterward.
-
-### 3. Point the deployment at your images
+#### 3. Point the deployment at your images
 
 Re-run the **same** deployment — same `environmentName` (and `resourceGroupName`, if you set one) as step 1 — this time supplying the images you just pushed, so it updates the existing resources in place rather than creating new ones.
 
@@ -176,15 +189,17 @@ az deployment sub create --location <location> --template-file infra/main.json `
 
 Both containers only start once **both** image parameters are non-empty. Wait for the two Container Apps (`ca-api-*`, `ca-web-*`) to report **Running** before continuing.
 
-### 4. Configure sign-in
+### Then, either way
+
+#### 4. Configure sign-in
 
 Register two Entra ID app registrations in your tenant (a public-client SPA and a confidential-client API), following your organization's normal app-registration process. [scripts/bootstrap-identity.ps1](scripts/bootstrap-identity.ps1) will preview (and, with `-Apply`, create) the required redirect URIs, API scope, and federated credential for you. Populate the resulting client IDs into the deployment (`apiClientId`/`webClientId`, or `MEGHKOSHA_API_CLIENT_ID`/`MEGHKOSHA_WEB_CLIENT_ID` if using `azd`/`.env`).
 
-### 5. Grant access to the subscriptions you want to assess
+#### 5. Grant access to the subscriptions you want to assess
 
 See [the three manual role assignments](#the-three-manual-role-assignments) below — this is the only manual, per-subscription step in the whole flow.
 
-### 6. Open the app
+#### 6. Open the app
 
 Sign in, open **Schedules**, and use **Refresh schedules**. Once the roles above are visible, the app finishes export and schedule setup on its own. After the first six-month cycle completes, open **Report** and select **Run report**.
 
@@ -197,6 +212,7 @@ Subscription access is deliberately kept **outside** the application — there i
 | API identity | **Reader** | Lets the app discover the subscription and read its resources, tags, policy, and Advisor data for the dashboards. |
 | API identity | **Cost Management Contributor** | Lets the app create the native FOCUS export and save the schedule — a write action that Cost Management **Reader** cannot perform. |
 | Processor identity | **Cost Management Contributor** | Lets the separate scheduled worker actually execute each monthly export run. Without this, the schedule can look "active" while the six-month cycle silently fails to advance. |
+
 
 Both identities' names/principal IDs are shown on the deployment's outputs (or in the Azure portal under the resource group's managed identities). Allow a few minutes for RBAC propagation, then use **Refresh schedules** in the app.
 

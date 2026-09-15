@@ -17,7 +17,7 @@ services:
       path: Dockerfile
       context: .
       platform: linux/amd64
-      remoteBuild: false
+      remoteBuild: true
   web:
     project: ./web
     language: docker
@@ -27,7 +27,7 @@ services:
       path: Dockerfile
       context: .
       platform: linux/amd64
-      remoteBuild: false
+      remoteBuild: true
 hooks:
   preprovision:
     shell: pwsh
