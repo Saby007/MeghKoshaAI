@@ -202,30 +202,34 @@ Both containers only start once **both** image parameters are non-empty. Wait fo
 
 This step creates two Microsoft Entra ID app registrations: a **public-client SPA** (what users sign into in the browser) and a **confidential-client API** (what validates their token). `scripts/bootstrap-identity.ps1` creates both for you — redirect URI, API scope, and the federated credential the API's managed identity needs — instead of you clicking through the Entra portal by hand.
 
-**Gather the values the script needs.** If you deployed with `azd`:
+**Gather the values the script needs.** If you deployed with `azd`, load them straight into PowerShell variables with `azd env get-value` (the singular form — it prints one raw, unquoted value per call, so it's safe to assign directly; the plural `azd env get-values` only *prints* everything to the terminal, it does **not** create variables for you):
 
 ```powershell
-azd env get-values
+$AZURE_TENANT_ID = azd env get-value AZURE_TENANT_ID
+$AZURE_SUBSCRIPTION_ID = az account show --query id -o tsv
+$AZURE_ENV_NAME = azd env get-value AZURE_ENV_NAME
+$APP_WEB_ORIGIN = azd env get-value APP_WEB_ORIGIN
+$MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID = azd env get-value MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID
 ```
 
-Note `AZURE_TENANT_ID`, `APP_WEB_ORIGIN`, and `MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID` from the output, plus your subscription ID (`az account show --query id -o tsv`). If you deployed via the portal button instead, get the equivalent values from the deployment's **Outputs** tab and the resource group's `id-obo-*` managed identity resource ID.
+If you deployed via the portal button instead, get the equivalent values from the deployment's **Outputs** tab and the resource group's `id-obo-*` managed identity resource ID, and set the four PowerShell variables above manually.
 
 **Preview first — this is always safe and creates nothing:**
 
 ```powershell
 ./scripts/bootstrap-identity.ps1 `
-  -TenantId <AZURE_TENANT_ID> `
-  -SubscriptionId <subscription-id> `
-  -EnvironmentName my-environment `
-  -WebOrigin <APP_WEB_ORIGIN> `
-  -OboManagedIdentityResourceId <MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID>
+  -TenantId $AZURE_TENANT_ID `
+  -SubscriptionId $AZURE_SUBSCRIPTION_ID `
+  -EnvironmentName $AZURE_ENV_NAME `
+  -WebOrigin $APP_WEB_ORIGIN `
+  -OboManagedIdentityResourceId $MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID
 ```
 
 This prints a JSON plan (the redirect URI, API scope, etc.) without creating anything. Review it, then apply it — this needs permission to create app registrations in your tenant (e.g. **Application Administrator**). The script requires its own explicit safety switch in addition to `-Apply`, so nothing is ever created by accident:
 
 ```powershell
 $env:APP_ALLOW_AZURE_CHANGES = 'true'
-./scripts/bootstrap-identity.ps1 -TenantId <AZURE_TENANT_ID> -SubscriptionId <subscription-id> -EnvironmentName my-environment -WebOrigin <APP_WEB_ORIGIN> -OboManagedIdentityResourceId <MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID> -Apply
+./scripts/bootstrap-identity.ps1 -TenantId $AZURE_TENANT_ID -SubscriptionId $AZURE_SUBSCRIPTION_ID -EnvironmentName $AZURE_ENV_NAME -WebOrigin $APP_WEB_ORIGIN -OboManagedIdentityResourceId $MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID -Apply
 ```
 
 The output includes the two client IDs it just created. Feed them back into the deployment and redeploy:
