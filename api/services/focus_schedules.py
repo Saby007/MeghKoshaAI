@@ -312,6 +312,8 @@ def _export_setup_failure(error: Exception) -> HTTPException:
         response = error.response
         if response.status_code == 429:
             user_arm_client._check_response(response, _configuration()[0], operation="FOCUS export configuration")
+        if response.status_code == 401:
+            return HTTPException(status_code=503, detail="The runtime managed identity's recently granted role assignment may still be propagating through Azure AD. This retries automatically every few minutes; no action is needed unless it persists beyond about 15 minutes.")
         if response.status_code == 403:
             return HTTPException(status_code=403, detail="Azure denied the export setup operation. Verify the runtime managed identity's pre-granted subscription and destination permissions.")
         if response.status_code in (409, 412):
