@@ -6,7 +6,6 @@ import asyncio
 import calendar
 import os
 import re
-import time
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
@@ -297,11 +296,11 @@ async def _verify_export_setup(details: dict) -> None:
     storage = await _arm_request("GET", f"{storage_id}?api-version=2023-05-01")
     properties = storage["properties"]
     network = properties.get("networkAcls", {})
-    if (properties.get("isHnsEnabled") is not True or properties.get("allowSharedKeyAccess") is not False
+    if (properties.get("allowSharedKeyAccess") is not False
             or properties.get("allowBlobPublicAccess") is not False or properties.get("allowedCopyScope")
             or properties.get("publicNetworkAccess") not in {"Enabled", "Disabled"} or network.get("defaultAction") != "Deny"
             or "AzureServices" not in str(network.get("bypass", "")).split(",")):
-        raise HTTPException(status_code=409, detail="FOCUS export delivery requires ADLS with shared keys disabled and pre-approved trusted-services access on a restricted storage endpoint. Storage networking will not be changed by the application.")
+        raise HTTPException(status_code=409, detail="FOCUS export delivery requires shared keys disabled and pre-approved trusted-services access on a restricted storage endpoint. Storage networking will not be changed by the application.")
     destination = await _arm_request("GET", f"{details['destinationRoleScope']}?api-version=2023-05-01")
     if destination["properties"].get("publicAccess") != "None":
         raise HTTPException(status_code=409, detail="The destination container must already exist with public access disabled.")
@@ -396,21 +395,6 @@ def _unavailable_view(subscription: dict, availability: str, message: str):
     return view
 
 
-# Once read+cost access is verified, missing export/schedule setup is completed automatically
-# instead of requiring a manual Configure export/Save schedule click. Retries are cooled down so a
-# subscription that genuinely lacks the required write permission is not re-probed on every poll.
-_AUTO_PROVISION_COOLDOWN_SECONDS = 300
-_auto_provision_attempts: dict[str, float] = {}
-
-
-def _auto_provision_ready(subscription_id: str) -> bool:
-    last = _auto_provision_attempts.get(subscription_id)
-    if last is not None and time.monotonic() - last < _AUTO_PROVISION_COOLDOWN_SECONDS:
-        return False
-    _auto_provision_attempts[subscription_id] = time.monotonic()
-    return True
-
-
 async def load(subscription: dict):
     if subscription.get("readAccess") is not True or subscription.get("costAccess") is not True:
         return _unavailable_view(subscription, "access_unavailable", subscription.get("accessIssue") or
@@ -423,15 +407,9 @@ async def load(subscription: dict):
     try:
         await verify_export(subscription_id)
     except HTTPException as error:
-        if not _auto_provision_ready(subscription_id):
-            return _unavailable_view(subscription, "export_unavailable", error.detail)
-        try:
-            await configure_export(subscription, allow_destination_role_assignment=True)
-            await verify_export(subscription_id)
-        except HTTPException as retry_error:
-            return _unavailable_view(subscription, "export_unavailable", retry_error.detail)
-        except Exception:
-            return _unavailable_view(subscription, "export_unavailable", error.detail)
+        # Export setup is never attempted from a background poll; the schedule tab's
+        # explicit Export action is the only thing allowed to create or write it.
+        return _unavailable_view(subscription, "export_unavailable", error.detail)
     except (AzureError, ValueError):
         return _unavailable_view(subscription, "export_unavailable", "FOCUS schedule storage could not be safely read. Retry later.")
     try:
@@ -496,14 +474,16 @@ async def history(subscription_id: str):
         return [_cycle_view(subscription_id, cycle) for cycle in ([record.cycle] if record.cycle else []) + list(reversed(record.previous_runs))]
 
 
-async def advance(subscription_id: str, *, now: datetime | None = None, force: bool = False):
+async def advance(subscription_id: str, *, now: datetime | None = None, force: bool = False, allow_new_cycle: bool = True):
     now = now or datetime.now(timezone.utc)
     async with _locked(subscription_id) as (record, save):
         if record.state == "deleted":
             raise HTTPException(status_code=404, detail="Schedule not found.")
         cycle = record.cycle
         if cycle is None or cycle.status != "running":
-            if not force and (record.state != "active" or record.next_run_at > now):
+            # allow_new_cycle=False (the periodic worker tick) may only continue a cycle a manual
+            # Export/Run action already started; it can never start one on its own.
+            if not force and (not allow_new_cycle or record.state != "active" or record.next_run_at > now):
                 return {"subscriptionId": subscription_id, "status": "not_due"}
             await verify_export(subscription_id)
             if cycle:

@@ -77,11 +77,6 @@ def store(monkeypatch):
     return SimpleNamespace(documents=documents, leases=leases, requests=requests, native_runs=native_runs)
 
 
-@pytest.fixture(autouse=True)
-def _reset_auto_provision_cooldown(monkeypatch):
-    monkeypatch.setattr(focus_schedules, "_auto_provision_attempts", {})
-
-
 @pytest.mark.parametrize("now, first, last", [
     ("2026-09-13", "2026-03-01", "2026-08-31"),
     ("2026-01-01", "2025-07-01", "2025-12-31"),
@@ -248,7 +243,7 @@ def test_export_setup_requires_existing_unconditional_permissions(store, export_
     {"publicNetworkAccess": "SecuredByPerimeter"}, {"publicNetworkAccess": None}, {"publicNetworkAccess": "Unknown"},
     {"publicNetworkAccess": "Disabled", "networkAcls": {"defaultAction": "Deny", "bypass": "None"}},
     {"allowSharedKeyAccess": True}, {"allowBlobPublicAccess": True},
-    {"isHnsEnabled": False}, {"networkAcls": {"defaultAction": "Allow", "bypass": "AzureServices"}},
+    {"networkAcls": {"defaultAction": "Allow", "bypass": "AzureServices"}},
     {"networkAcls": {"defaultAction": "Deny", "bypass": "None"}}, {"allowedCopyScope": "AAD"},
 ])
 def test_export_setup_never_changes_storage_networking_or_security(store, export_setup, change):
@@ -293,26 +288,33 @@ def test_export_setup_handles_native_failures_without_replay(store, export_setup
     assert not store.documents and len([call for call in export_setup.calls if call[0] == "PUT"]) == 1
 
 
-def test_load_auto_provisions_export_and_schedule_when_access_is_verified(store, export_setup):
+def test_load_never_creates_or_writes_anything_when_export_is_missing(store, export_setup):
     result = asyncio.run(focus_schedules.load(SUB))
-    assert result["availability"] == "available"
-    assert result["state"] == "active" and result["nextRunAt"] is not None
-    assert export_setup.created is True
-    assert len([call for call in export_setup.calls if call[0] == "PUT"]) == 1
-    assert len(store.documents) == 1
+    assert result["availability"] == "export_unavailable"
+    assert export_setup.created is False
+    assert len([call for call in export_setup.calls if call[0] == "PUT"]) == 0
+    assert not store.documents
+    # A second poll must not attempt to fix it either; only an explicit Export action may.
+    second = asyncio.run(focus_schedules.load(SUB))
+    assert second["availability"] == "export_unavailable"
+    assert len([call for call in export_setup.calls if call[0] == "PUT"]) == 0
+    assert not store.documents
 
 
-def test_load_surfaces_missing_write_permission_and_cools_down_before_reprobing(store, export_setup):
+def test_load_surfaces_missing_write_permission_without_ever_retrying(store, export_setup):
     export_setup.permissions = {"value": [{"actions": ["*/read"], "notActions": []}]}
     first = asyncio.run(focus_schedules.load(SUB))
     assert first["availability"] == "export_unavailable"
-    assert "pre-granted FOCUS export write permission" in first["statusMessage"]
     assert export_setup.created is False and not store.documents
     calls_after_first = len(export_setup.calls)
     second = asyncio.run(focus_schedules.load(SUB))
     assert second["availability"] == "export_unavailable"
     assert len(export_setup.calls) == calls_after_first
     assert not store.documents
+    # The specific permission diagnostic is still available through the explicit Export action.
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(focus_schedules.export_configuration(SUB))
+    assert "pre-granted FOCUS export write permission" in error.value.detail
 
 
 @pytest.mark.parametrize("change", [{"schedule": {"status": "Active"}}, {"format": "Parquet"},
@@ -532,7 +534,7 @@ def test_scheduler_refreshes_report_for_active_schedules_after_a_completed_cycle
 
     calls = []
 
-    async def fake_advance(subscription_id):
+    async def fake_advance(subscription_id, **kwargs):
         return {"subscriptionId": subscription_id, "status": "succeeded"}
 
     async def fake_active_ids():
@@ -557,7 +559,7 @@ def test_scheduler_does_not_refresh_report_when_no_cycle_completes(store, monkey
 
     calls = []
 
-    async def fake_advance(subscription_id):
+    async def fake_advance(subscription_id, **kwargs):
         return {"subscriptionId": subscription_id, "status": "not_due"}
 
     async def fake_build_and_publish(subscription_ids, stale_days):
@@ -576,7 +578,7 @@ def test_scheduler_report_refresh_failure_does_not_affect_scheduler_failure_coun
     from jobs import scheduler
     import main
 
-    async def fake_advance(subscription_id):
+    async def fake_advance(subscription_id, **kwargs):
         return {"subscriptionId": subscription_id, "status": "succeeded"}
 
     async def fake_active_ids():

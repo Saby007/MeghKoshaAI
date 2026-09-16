@@ -1,4 +1,8 @@
-"""One bounded scheduler tick; invoked by the configured Container Apps Job."""
+"""One bounded scheduler tick; invoked by the configured Container Apps Job.
+
+Only continues six-month cycles a user already started from the Schedule tab's
+Export action; it never starts a new one on its own (allow_new_cycle=False).
+"""
 
 import asyncio
 import logging
@@ -18,7 +22,7 @@ async def run_once() -> int:
     any_cycle_completed = False
     for offset in range(0, len(subscription_ids), 4):
         batch = subscription_ids[offset:offset + 4]
-        results = await asyncio.gather(*(focus_schedules.advance(value) for value in batch), return_exceptions=True)
+        results = await asyncio.gather(*(focus_schedules.advance(value, allow_new_cycle=False) for value in batch), return_exceptions=True)
         for subscription_id, result in zip(batch, results):
             if isinstance(result, HTTPException) and result.status_code in (404, 409):
                 continue

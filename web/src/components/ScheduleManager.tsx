@@ -250,7 +250,7 @@ export function ScheduleManager() {
     setError(null);
     try {
       await runCostSchedule(schedule.subscriptionId);
-      setNotice(`${schedule.displayName}: six-month refresh requested.`);
+      setNotice(`${schedule.displayName}: export requested \u2014 pulling and overwriting the last six months.`);
       await refresh();
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : 'Export could not be started.');
@@ -399,6 +399,11 @@ export function ScheduleManager() {
                 const isBusy = loading || !!loadError || busyId === schedule.subscriptionId || schedule.state === 'unknown'
                   || schedule.readAccess !== true || schedule.costAccess !== true
                   || (!!schedule.availability && schedule.availability !== 'available');
+                // Export must remain clickable even when nothing has been configured yet or the
+                // last automatic check failed: it is the only action allowed to create/write the
+                // export, so it cannot depend on state that only exists once one already does.
+                const canExport = !loading && !loadError && busyId === null && schedule.readAccess === true && schedule.costAccess === true
+                  && (!schedule.availability || schedule.availability === 'available' || schedule.availability === 'export_unavailable');
                 const isExpanded = expandedId === schedule.subscriptionId;
                 return [
                   <tr key={schedule.subscriptionId}>
@@ -409,7 +414,7 @@ export function ScheduleManager() {
                     <td><div className="schedule-actions">
                       <button type="button" onClick={() => void openExportConfiguration(schedule)} disabled={loading || !!loadError || busyId !== null || exportRetryAfter > 0 || schedule.readAccess !== true || schedule.costAccess !== true} title="Configure FOCUS export" aria-label={`Configure export for ${schedule.displayName}`} aria-expanded={exportEditingId === schedule.subscriptionId}><Settings2 size={16} /></button>
                       <button type="button" onClick={() => void toggleHistory(schedule)} disabled={loading || !!loadError || schedule.readAccess !== true || schedule.costAccess !== true || schedule.state === 'not_scheduled' || schedule.state === 'unknown'} title="Execution history" aria-expanded={isExpanded} aria-label={`Execution history for ${schedule.displayName}`}><History size={16} />{isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>
-                      <button type="button" onClick={() => void runNow(schedule)} disabled={isBusy || schedule.state === 'not_scheduled'} title="Run now" aria-label={`Run ${schedule.displayName} now`}><Play size={16} /></button>
+                      <button type="button" onClick={() => void runNow(schedule)} disabled={!canExport} title="Export: create if needed, pull and overwrite the last six months" aria-label={`Export ${schedule.displayName} now`}><Play size={16} /></button>
                       <button type="button" onClick={() => editSchedule(schedule)} disabled={isBusy} title={schedule.state === 'not_scheduled' ? 'Schedule export' : 'Reschedule export'} aria-label={`${schedule.state === 'not_scheduled' ? 'Schedule' : 'Reschedule'} ${schedule.displayName}`}><CalendarClock size={16} /></button>
                       <button type="button" onClick={() => void changeState(schedule)} disabled={isBusy || schedule.state === 'not_scheduled'} title={schedule.state === 'active' ? 'Pause schedule' : 'Resume schedule'} aria-label={`${schedule.state === 'active' ? 'Pause' : 'Resume'} ${schedule.displayName}`}>{schedule.state === 'active' ? <Pause size={16} /> : <Play size={16} />}</button>
                       {deletingId === schedule.subscriptionId ? <><button className="cancel-delete" type="button" onClick={() => setDeletingId(null)} title="Cancel delete" aria-label="Cancel delete"><X size={16} /></button><button className="confirm-delete" type="button" onClick={() => void remove(schedule)} disabled={isBusy} title="Confirm delete" aria-label={`Confirm delete ${schedule.displayName}`}><Check size={16} /></button></> : <button type="button" onClick={() => setDeletingId(schedule.subscriptionId)} disabled={isBusy || schedule.state === 'not_scheduled'} title="Delete export" aria-label={`Delete ${schedule.displayName}`}><Trash2 size={16} /></button>}

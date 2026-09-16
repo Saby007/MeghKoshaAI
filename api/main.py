@@ -8,7 +8,7 @@ and disabled by default; this core does not depend on a Static Web Apps session.
 import asyncio
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -756,10 +756,24 @@ async def delete_schedule(request: Request, subscription_id: str):
     await focus_schedules.update(subscription, principal.entra_object_id, "deleted")
 
 
+async def _ensure_export_and_schedule(subscription: dict, actor: str) -> None:
+    # The Schedule tab's single Export action must be able to cold-start a subscription that has
+    # never been configured before: create the export if missing, then make sure a schedule
+    # record exists so advance(force=True) has something to lock and overwrite with a fresh cycle.
+    await focus_schedules.configure_export(subscription, allow_destination_role_assignment=True)
+    start = (datetime.now(timezone.utc) + timedelta(minutes=6)).isoformat().replace("+00:00", "Z")
+    try:
+        await focus_schedules.create(subscription, actor, start)
+    except HTTPException as error:
+        if error.status_code != 409:
+            raise
+
+
 @app.post("/api/schedules/{subscription_id}/run", status_code=202)
 async def run_schedule_now(request: Request, subscription_id: str):
     principal = _control_principal(request)
-    subscription = await _verified_schedule_subscription(principal, subscription_id)
+    subscription = await _verified_schedule_subscription(principal, subscription_id, operation="export_write")
+    await _ensure_export_and_schedule(subscription, principal.entra_object_id)
     return await focus_schedules.advance(subscription["subscriptionId"], force=True)
 
 
@@ -769,9 +783,12 @@ async def run_all_schedules(request: Request, body: RunAllExportsRequest):
     selected = await user_arm_client.discover_schedule_subscriptions(principal, body.subscription_ids)
     if {item["subscriptionId"] for item in selected} != set(body.subscription_ids):
         raise HTTPException(status_code=403, detail="The selection includes a subscription outside your verified scope.")
+    for item in selected:
+        await access_control.require_subscription_operation(principal.entra_object_id, item["subscriptionId"], "export_write")
     results = []
     for item in selected:
         try:
+            await _ensure_export_and_schedule(item, principal.entra_object_id)
             results.append(await focus_schedules.advance(item["subscriptionId"], force=True))
         except HTTPException as error:
             results.append({"subscriptionId": item["subscriptionId"], "status": "failed", "error": error.detail})

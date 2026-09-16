@@ -359,7 +359,7 @@ def test_compiled_data_ai_and_processor_do_not_add_queues_or_implicit_credential
     modules = resource_map(template)
     data = list(resource_map(modules["data"]["properties"]["template"]).values())
     storage = next(resource for resource in data if resource["type"] == "Microsoft.Storage/storageAccounts")
-    assert storage["properties"]["isHnsEnabled"] is True
+    assert storage["properties"]["isHnsEnabled"] is False
     assert storage["properties"]["allowSharedKeyAccess"] is False
     assert storage["properties"]["allowBlobPublicAccess"] is False
     assert storage["properties"]["networkAcls"]["defaultAction"] == "Deny"

@@ -18,7 +18,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   kind: 'StorageV2'
   sku: { name: storageSku }
   properties: {
-    isHnsEnabled: true
+    isHnsEnabled: false
     supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
@@ -142,7 +142,7 @@ resource processorWriters 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   }
 }]
 
-var storageServices = ['blob', 'dfs']
+var storageServices = ['blob']
 
 resource privateZones 'Microsoft.Network/privateDnsZones@2020-06-01' = [for service in storageServices: {
   name: 'privatelink.${service}.${environment().suffixes.storage}'

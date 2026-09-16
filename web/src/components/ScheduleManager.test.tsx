@@ -136,7 +136,9 @@ describe('Open Schedules', () => {
     expect(container.textContent).toContain('Export status unavailable');
     expect(container.textContent).toContain('Execution history unavailable');
     expect(container.textContent).not.toContain('Awaiting first export');
-    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Run Subscription One now"]')?.disabled).toBe(true);
+    // Export must stay clickable when the export itself is unavailable: it is the only action
+    // allowed to create it, so it cannot be gated behind an export already existing.
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Export Subscription One now"]')?.disabled).toBe(false);
   });
 
   it('keeps failed-readiness subscriptions visible with disabled controls and unknown totals', async () => {
