@@ -141,14 +141,6 @@ azd env set APP_EXPORT_TRUSTED_SERVICES true
 
 > The export storage account is plain Blob storage (`isHnsEnabled: false`), not ADLS Gen2 — this matches every prior environment (Dev, Phase1) that has reliably created FOCUS exports. An earlier revision of this repo briefly enabled the hierarchical namespace and fully disabled `publicNetworkAccess`; that combination is untested with Cost Management's export-creation call and is not required by Microsoft's own documented firewall setup (`networkAcls.defaultAction: Deny` + `bypass: AzureServices` is sufficient). Note that in tenants with central governance policies (for example `StorageAccount_PublicNetwork_Modify`), `publicNetworkAccess` may still end up `Disabled` regardless of `APP_EXPORT_TRUSTED_SERVICES` — that's expected and fine; the `AzureServices` bypass is what actually matters, not the `publicNetworkAccess` value itself.
 
-**If you're redeploying under an environment name that already existed before** (for example after `azd down` without `--purge`), also set this before the first `azd up`, or you'll hit `FlagMustBeSetForRestore` for the AI Foundry account:
-
-```powershell
-azd env set APP_RESTORE_AI_ACCOUNT true
-```
-
-> Leave this unset (the default, `false`) for a genuinely new environment name — setting it when there's nothing to restore fails deployment with `CanNotRestoreANonExistingResource` instead. Unset it again (`azd env set APP_RESTORE_AI_ACCOUNT false`) once the account is recovered; it isn't needed for routine redeploys of an already-live environment.
-
 To also enable the scheduled six-month FOCUS worker, point the processor at the **same image `azd` already built for the `api` service** — don't invent a separate image name, since nothing will have pushed one. Do this only **after** your first successful `azd up` run: `SERVICE_API_IMAGE_NAME` doesn't exist until `azd` has built and pushed it, so setting `SERVICE_PROCESSOR_IMAGE_NAME` from it any earlier fails with `invalid key=value format` (the `get-value` call has nothing to return yet):
 
 ```powershell
@@ -160,6 +152,23 @@ azd up
 Re-running `azd up` (or `azd deploy` alone) later picks up any code changes and updates the deployment in place.
 
 > If `azd up`/`azd provision` crashes with a Go panic mentioning `HooksMiddleware`, that's a known `azd` bug ([azure-dev#10037](https://github.com/Azure/azure-dev/issues/10037)) unrelated to this repo — try upgrading `azd` (`azd version` to check, then reinstall the latest). If it persists, use Option B below instead.
+
+### Troubleshooting: `azd up` fails on the AI Foundry account
+
+These two errors are opposites of each other — only act on whichever one you actually see, and only for the environment name that's currently failing:
+
+- **`FlagMustBeSetForRestore`** (`Microsoft.CognitiveServices/accounts` soft-deleted): a prior `azd down` on this *same* environment name left the AI Foundry account soft-deleted instead of purged. Fix it and retry:
+  ```powershell
+  azd env set APP_RESTORE_AI_ACCOUNT true
+  azd up
+  ```
+- **`CanNotRestoreANonExistingResource`**: `APP_RESTORE_AI_ACCOUNT` is set to `true` on an environment that has nothing to restore — almost always because it was left set from a previous environment, or copied from another `.env`. Fix it and retry:
+  ```powershell
+  azd env set APP_RESTORE_AI_ACCOUNT false
+  azd up
+  ```
+
+`APP_RESTORE_AI_ACCOUNT` defaults to `false` and is **not** part of the normal setup sequence above — it only matters when one of these two specific errors shows up, and it's scoped per environment (`azd env new` does not carry it over), so re-check it explicitly rather than assuming its value from a prior environment.
 
 ### Option B — Azure portal button (no CLI tooling required)
 
