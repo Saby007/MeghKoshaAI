@@ -262,7 +262,8 @@ export function ScheduleManager() {
   async function runAll() {
     const subscriptionIds = schedules
       .filter((schedule) => schedule.readAccess === true && schedule.costAccess === true
-        && (schedule.state === 'active' || schedule.state === 'paused') && (!schedule.availability || schedule.availability === 'available'))
+        && (schedule.state === 'active' || schedule.state === 'paused' || schedule.state === 'not_scheduled'
+          || (schedule.state === 'unknown' && schedule.availability === 'export_unavailable')))
       .map((schedule) => schedule.subscriptionId);
     if (!subscriptionIds.length) return;
     setRunningAll(true);
@@ -357,7 +358,8 @@ export function ScheduleManager() {
   const countsUnavailable = !!loadError || schedules.some((schedule) => schedule.state === 'unknown');
   const unavailableCount = schedules.filter((schedule) => schedule.availability && schedule.availability !== 'available').length;
   const runAllCount = schedules.filter((schedule) => schedule.readAccess === true && schedule.costAccess === true
-    && (schedule.state === 'active' || schedule.state === 'paused') && (!schedule.availability || schedule.availability === 'available')).length;
+    && (schedule.state === 'active' || schedule.state === 'paused' || schedule.state === 'not_scheduled'
+      || (schedule.state === 'unknown' && schedule.availability === 'export_unavailable'))).length;
   const loadStatus = loadError instanceof ApiRequestError && loadError.status === 401 ? 'Sign-in required'
     : loadError instanceof ApiRequestError && loadError.status === 403 ? 'Access not verified'
     : 'Subscription status unavailable';

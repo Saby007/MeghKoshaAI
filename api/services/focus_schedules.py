@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import calendar
+import logging
 import os
 import re
 from contextlib import asynccontextmanager, contextmanager
@@ -23,6 +24,8 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from services import focus_export_control, user_arm_client
 from services.entra_tokens import configured_uuid
+
+logger = logging.getLogger(__name__)
 
 MAX_RECORD_BYTES = 128 * 1024
 MAX_SCHEDULES = 5000
@@ -312,6 +315,7 @@ def _export_setup_failure(error: Exception) -> HTTPException:
         if response.status_code == 429:
             user_arm_client._check_response(response, _configuration()[0], operation="FOCUS export configuration")
         if response.status_code == 401:
+            logger.warning("FOCUS export setup got 401 from %s: %s", response.request.url, response.text[:2000])
             return HTTPException(status_code=503, detail="The runtime managed identity's recently granted role assignment may still be propagating through Azure AD. This retries automatically every few minutes; no action is needed unless it persists beyond about 15 minutes.")
         if response.status_code == 403:
             return HTTPException(status_code=403, detail="Azure denied the export setup operation. Verify the runtime managed identity's pre-granted subscription and destination permissions.")

@@ -141,6 +141,14 @@ describe('Open Schedules', () => {
     expect(container.querySelector<HTMLButtonElement>('button[aria-label="Export Subscription One now"]')?.disabled).toBe(false);
   });
 
+  it('enables Run all to bootstrap a never-scheduled or missing-export subscription', async () => {
+    vi.mocked(listCostSchedules).mockResolvedValue([
+      { ...schedule, state: 'unknown', availability: 'export_unavailable', statusMessage: 'Export lookup failed.' },
+    ]);
+    await act(async () => root.render(<ScheduleManager />));
+    expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Run all'))?.disabled).toBe(false);
+  });
+
   it('keeps failed-readiness subscriptions visible with disabled controls and unknown totals', async () => {
     vi.mocked(listCostSchedules).mockResolvedValue([
       { ...schedule, state: 'unknown', readAccess: false, costAccess: false,
