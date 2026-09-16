@@ -22,6 +22,8 @@ param apiPrincipalId string
 param projectName string = 'cost-agent-project'
 @description('Empty until specific models, versions, deployment SKUs and quota are approved.')
 param modelDeployments ModelDeployment[] = []
+@description('Only set true when redeploying the same environment name after azd down without --purge left a soft-deleted account behind; a genuinely new environment has nothing to restore.')
+param restoreAiAccount bool = false
 
 resource account 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
   name: 'ai-${resourceToken}'
@@ -36,9 +38,9 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
     disableLocalAuth: true
     publicNetworkAccess: 'Disabled'
     networkAcls: { defaultAction: 'Deny' }
-    // Reclaims a soft-deleted account of the same name (e.g. after `azd down` without --purge)
-    // instead of failing with FlagMustBeSetForRestore on the next `azd up`.
-    restore: true
+    // Only reclaims a soft-deleted account when explicitly requested; ARM rejects restore:true
+    // with CanNotRestoreANonExistingResource when there is nothing to restore.
+    restore: restoreAiAccount
   }
 }
 

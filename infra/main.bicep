@@ -30,6 +30,8 @@ param storageSku string = 'Standard_LRS'
 param allowNativeExportTrustedServices bool = false
 @description('Keep false until the scheduled processor implementation is validated end to end.')
 param enableProcessor bool = false
+@description('Only set true when redeploying the same environment name after azd down without --purge left a soft-deleted AI Foundry account behind.')
+param restoreAiAccount bool = false
 param processorImage string = ''
 param processorSchedule string = '*/15 * * * *'
 @minLength(2)
@@ -101,6 +103,7 @@ module ai './modules/ai.bicep' = if (aiEnabled) {
     apiPrincipalId: core.outputs.apiIdentity.principalId
     projectName: foundryProjectName
     modelDeployments: modelDeployments
+    restoreAiAccount: restoreAiAccount
   }
 }
 
