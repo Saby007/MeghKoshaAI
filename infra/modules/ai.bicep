@@ -36,6 +36,9 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
     disableLocalAuth: true
     publicNetworkAccess: 'Disabled'
     networkAcls: { defaultAction: 'Deny' }
+    // Reclaims a soft-deleted account of the same name (e.g. after `azd down` without --purge)
+    // instead of failing with FlagMustBeSetForRestore on the next `azd up`.
+    restore: true
   }
 }
 
