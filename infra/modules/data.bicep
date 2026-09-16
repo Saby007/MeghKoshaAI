@@ -132,6 +132,20 @@ resource apiStorageSetupAccess 'Microsoft.Authorization/roleAssignments@2022-04-
   }
 }
 
+// Cost Management's export creation validates the destination storage account's management-plane
+// configuration (network rules, blob service properties) as part of the same request that creates
+// the role assignment above - the narrow custom role alone is not sufficient for that validation.
+// Matches Phase1's proven working grant (services/arm_client.py + infra/modules/costcontrolrbac.bicep).
+resource apiStorageAccountContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storage.id, apiPrincipalId, 'storage-account-contributor')
+  scope: storage
+  properties: {
+    principalId: apiPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '17d1049b-9a84-46fb-8f53-869881c3d3ab')
+  }
+}
+
 resource processorWriters 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for containerIndex in range(0, 3): {
   name: guid(containers[containerIndex].id, processorIdentity.id, 'processor-writer')
   scope: containers[containerIndex]
