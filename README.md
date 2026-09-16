@@ -126,15 +126,17 @@ azd env set AZURE_LOCATION <region>
 azd up
 ```
 
-`azd up` provisions the infrastructure, builds both container images **remotely in Azure Container Registry** (no local Docker or Podman needed — [azd's `remoteBuild` option](https://learn.microsoft.com/azure/developer/azure-developer-cli/azd-schema#docker) is enabled in this repo's [azure.yaml](azure.yaml)), pushes them, and deploys the running app — genuinely one command, start to finish.
+`azd up` provisions the infrastructure, builds both container images **remotely in Azure Container Registry** (no local Docker or Podman needed — [azd's `remoteBuild` option](https://learn.microsoft.com/azure/developer/azure-developer-cli/azd-schema#docker) is enabled in this repo's [azure.yaml](azure.yaml)), pushes them, and deploys the running app.
 
-To provision the `data` profile (needed for the app to actually create/schedule cost exports) or `ai` profile (adds narration/Chat), set it before running `azd up`:
+> **On a brand-new environment, run `azd up` twice.** [main.bicep](infra/main.bicep) only creates the `ca-api-*`/`ca-web-*` Container Apps once real image names exist. On the very first pass nothing has been built yet, so `azd up` provisions the foundation only (network, storage, ACR, Container Apps environment, Foundry, private endpoints), then builds and pushes the images — but the `deploy-api`/`deploy-web` steps still fail with `resource not found: unable to find a resource with name 'ca-api-...'`, because those Container Apps don't exist yet. That's expected, not a bug: just run `azd up` again. The second pass sees the images that were just pushed and creates + deploys the actual containers.
+
+To provision the `data` profile (needed for the app to actually create/schedule cost exports) or `ai` profile (adds narration/Chat), set it before the **first** `azd up`:
 
 ```powershell
 azd env set APP_PROFILE data
 ```
 
-To also enable the scheduled six-month FOCUS worker, set `APP_ENABLE_PROCESSOR=true` and point the processor at the **same image `azd` already built for the `api` service** — don't invent a separate image name, since nothing will have pushed one:
+To also enable the scheduled six-month FOCUS worker, point the processor at the **same image `azd` already built for the `api` service** — don't invent a separate image name, since nothing will have pushed one. Do this only **after** your first successful `azd up` run: `SERVICE_API_IMAGE_NAME` doesn't exist until `azd` has built and pushed it, so setting `SERVICE_PROCESSOR_IMAGE_NAME` from it any earlier fails with `invalid key=value format` (the `get-value` call has nothing to return yet):
 
 ```powershell
 azd env set APP_ENABLE_PROCESSOR true
