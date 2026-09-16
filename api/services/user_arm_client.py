@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from fnmatch import fnmatchcase
 from urllib.parse import urlsplit, urlunsplit
@@ -25,6 +26,14 @@ MAX_SUBSCRIPTIONS = 5000
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 DISCOVERY_TIMEOUT_SECONDS = 30
 ACCESS_CHECK_TIMEOUT_SECONDS = 20
+
+# The live cost-access probe (probe_cost=True) hits Cost Management's query API, which
+# throttles far more aggressively than plain ARM reads. Export setup/configure/retry actions
+# each re-run this probe for the same subscription in quick succession; cache a verified-True
+# result briefly so those repeated manual actions don't re-trigger the throttle. Failures are
+# never cached, so a just-fixed permission/config problem is reflected on the very next check.
+_LIVE_ACCESS_CACHE_TTL_SECONDS = 300.0
+_live_access_cache: dict[tuple[str, str, str], float] = {}
 
 
 def _unavailable() -> HTTPException:
@@ -245,10 +254,18 @@ async def discover_schedule_subscriptions(principal: ClientPrincipal, subscripti
             item for item in subscriptions if item["state"] == "Enabled"
         ]
         async def check(item):
+            cache_key = (principal.tenant_id, principal.entra_object_id, item["subscriptionId"])
+            if subscription_ids is not None:
+                cached_at = _live_access_cache.get(cache_key)
+                if cached_at is not None and time.monotonic() - cached_at < _LIVE_ACCESS_CACHE_TTL_SECONDS:
+                    return True
             async with asyncio.timeout(ACCESS_CHECK_TIMEOUT_SECONDS):
-                return await _has_read_and_cost_access(
+                result = await _has_read_and_cost_access(
                     client, token, principal.tenant_id, item["subscriptionId"], probe_cost=subscription_ids is not None,
                 )
+            if result and subscription_ids is not None:
+                _live_access_cache[cache_key] = time.monotonic()
+            return result
 
         verified = []
         for offset in range(0, len(candidates), 4):

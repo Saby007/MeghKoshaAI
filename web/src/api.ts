@@ -107,7 +107,7 @@ export type ChatAnswer = {
 export type ChatTurn = { role: 'user' | 'assistant'; content: string };
 
 export class ApiRequestError extends Error {
-  constructor(message: string, readonly status: number, readonly code?: string) {
+  constructor(message: string, readonly status: number, readonly code?: string, readonly retryAfterSeconds?: number) {
     super(message);
     this.name = 'ApiRequestError';
   }
@@ -125,7 +125,8 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     const detail = payload?.detail;
     const message = typeof detail === 'string' ? detail : detail?.message;
     const code = typeof detail?.code === 'string' ? detail.code : undefined;
-    throw new ApiRequestError(message || `Request failed: ${res.status}`, res.status, code);
+    const retryAfter = Number(res.headers.get('Retry-After'));
+    throw new ApiRequestError(message || `Request failed: ${res.status}`, res.status, code, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined);
   }
   return res.status === 204 ? (undefined as T) : res.json();
 }

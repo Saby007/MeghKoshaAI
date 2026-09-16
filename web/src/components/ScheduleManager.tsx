@@ -80,6 +80,7 @@ export function ScheduleManager() {
   const [exportConfiguration, setExportConfiguration] = useState<FocusExportConfiguration | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportRetryAfter, setExportRetryAfter] = useState(0);
   const [allowDestinationRole, setAllowDestinationRole] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -153,6 +154,12 @@ export function ScheduleManager() {
     return () => window.clearInterval(interval);
   }, [busyId, runningAll, deletingId]);
 
+  useEffect(() => {
+    if (exportRetryAfter <= 0) return;
+    const interval = window.setInterval(() => setExportRetryAfter(seconds => Math.max(0, seconds - 1)), 1000);
+    return () => window.clearInterval(interval);
+  }, [exportRetryAfter > 0]);
+
   function closeExportConfiguration() {
     pendingExport.current?.abort();
     pendingExport.current = null;
@@ -160,11 +167,12 @@ export function ScheduleManager() {
     setExportConfiguration(null);
     setExportLoading(false);
     setExportError(null);
+    setExportRetryAfter(0);
     setAllowDestinationRole(false);
   }
 
   async function openExportConfiguration(schedule: CostSchedule) {
-    if (loading || loadError || busyId || schedule.readAccess !== true || schedule.costAccess !== true) return;
+    if (loading || loadError || busyId || exportRetryAfter > 0 || schedule.readAccess !== true || schedule.costAccess !== true) return;
     pendingExport.current?.abort();
     const controller = new AbortController();
     pendingExport.current = controller;
@@ -182,6 +190,7 @@ export function ScheduleManager() {
     } catch (setupError) {
       if (pendingExport.current !== controller || controller.signal.aborted) return;
       setExportError(setupError instanceof Error ? setupError.message : 'Export configuration is unavailable.');
+      setExportRetryAfter(setupError instanceof ApiRequestError ? setupError.retryAfterSeconds || 0 : 0);
     } finally {
       if (pendingExport.current === controller) {
         pendingExport.current = null;
@@ -191,7 +200,7 @@ export function ScheduleManager() {
   }
 
   async function configureExport(schedule: CostSchedule) {
-    if (loading || loadError || busyId || !allowDestinationRole || exportEditingId !== schedule.subscriptionId
+    if (loading || loadError || busyId || exportRetryAfter > 0 || !allowDestinationRole || exportEditingId !== schedule.subscriptionId
       || exportConfiguration?.subscriptionId !== schedule.subscriptionId || !exportConfiguration.canConfigure
       || schedule.readAccess !== true || schedule.costAccess !== true) return;
     const controller = new AbortController();
@@ -213,6 +222,7 @@ export function ScheduleManager() {
       setExportConfiguration(null);
       setAllowDestinationRole(false);
       setExportError(setupError instanceof Error ? setupError.message : 'Export configuration could not be confirmed. Refresh its status.');
+      setExportRetryAfter(setupError instanceof ApiRequestError ? setupError.retryAfterSeconds || 0 : 0);
     } finally {
       if (pendingExport.current === controller) pendingExport.current = null;
       setBusyId(null);
@@ -397,7 +407,7 @@ export function ScheduleManager() {
                     <td>{schedule.state === 'unknown' ? 'Unavailable' : schedule.nextRunAt ? formatDate(schedule.nextRunAt) : schedule.state === 'paused' ? 'Paused' : schedule.state === 'active' ? 'Unavailable' : 'Not scheduled'}</td>
                     <td>{schedule.availability && schedule.availability !== 'available' ? <><span>{schedule.availability === 'access_unavailable' ? 'Access unavailable' : schedule.availability === 'configuration_unavailable' ? 'Scheduler setup incomplete' : schedule.availability === 'history_unavailable' ? 'Execution history unavailable' : 'Export status unavailable'}</span><small>{schedule.statusMessage}</small></> : <><span className={`run-state ${schedule.latestRun?.status ?? 'pending'}`}>{schedule.state === 'not_scheduled' ? 'Export configured' : runLabel(schedule.latestRun)}</span><small>{schedule.latestRun ? `${formatDate(schedule.latestRun.completedAt || schedule.latestRun.startedAt)} · ${formatDuration(schedule.latestRun.durationSeconds)}` : schedule.state === 'not_scheduled' ? '' : 'No native execution record'}</small></>}</td>
                     <td><div className="schedule-actions">
-                      <button type="button" onClick={() => void openExportConfiguration(schedule)} disabled={loading || !!loadError || busyId !== null || schedule.readAccess !== true || schedule.costAccess !== true} title="Configure FOCUS export" aria-label={`Configure export for ${schedule.displayName}`} aria-expanded={exportEditingId === schedule.subscriptionId}><Settings2 size={16} /></button>
+                      <button type="button" onClick={() => void openExportConfiguration(schedule)} disabled={loading || !!loadError || busyId !== null || exportRetryAfter > 0 || schedule.readAccess !== true || schedule.costAccess !== true} title="Configure FOCUS export" aria-label={`Configure export for ${schedule.displayName}`} aria-expanded={exportEditingId === schedule.subscriptionId}><Settings2 size={16} /></button>
                       <button type="button" onClick={() => void toggleHistory(schedule)} disabled={loading || !!loadError || schedule.readAccess !== true || schedule.costAccess !== true || schedule.state === 'not_scheduled' || schedule.state === 'unknown'} title="Execution history" aria-expanded={isExpanded} aria-label={`Execution history for ${schedule.displayName}`}><History size={16} />{isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>
                       <button type="button" onClick={() => void runNow(schedule)} disabled={isBusy || schedule.state === 'not_scheduled'} title="Run now" aria-label={`Run ${schedule.displayName} now`}><Play size={16} /></button>
                       <button type="button" onClick={() => editSchedule(schedule)} disabled={isBusy} title={schedule.state === 'not_scheduled' ? 'Schedule export' : 'Reschedule export'} aria-label={`${schedule.state === 'not_scheduled' ? 'Schedule' : 'Reschedule'} ${schedule.displayName}`}><CalendarClock size={16} /></button>
@@ -408,7 +418,7 @@ export function ScheduleManager() {
                   exportEditingId === schedule.subscriptionId ? <tr className="history-row schedule-editor-row" key={`${schedule.subscriptionId}-export`}><td colSpan={5}><div className="schedule-editor export-config-editor" role="region" aria-label={`Export configuration for ${schedule.displayName}`}>
                     <strong>FOCUS export configuration</strong>
                     {exportLoading && <span role="status">Checking export configuration...</span>}
-                    {exportError && <div className="operations-error" role="alert">{exportError}</div>}
+                    {exportError && <div className="operations-error" role="alert">{exportError}{exportRetryAfter > 0 && ` (retry available in ${exportRetryAfter}s)`}</div>}
                     {exportConfiguration && <>
                       <dl className="export-configuration-details">
                         <div><dt>Export</dt><dd>{exportConfiguration.exportName}</dd></div>
@@ -421,9 +431,9 @@ export function ScheduleManager() {
                       {exportConfiguration.canConfigure && <label className="export-role-confirmation"><input type="checkbox" checked={allowDestinationRole} onChange={event => setAllowDestinationRole(event.target.checked)} disabled={busyId !== null} /><span>Allow Storage Blob Data Contributor for the export identity on this container</span></label>}
                     </>}
                     <div className="export-config-actions">
-                      {exportConfiguration?.canConfigure && <button className="primary-command" type="button" onClick={() => void configureExport(schedule)} disabled={busyId !== null || !allowDestinationRole || loading || !!loadError}>{busyId === schedule.subscriptionId ? <RefreshCw className="spin" size={15} /> : <Settings2 size={15} />} Configure export</button>}
+                      {exportConfiguration?.canConfigure && <button className="primary-command" type="button" onClick={() => void configureExport(schedule)} disabled={busyId !== null || !allowDestinationRole || loading || !!loadError || exportRetryAfter > 0}>{busyId === schedule.subscriptionId ? <RefreshCw className="spin" size={15} /> : <Settings2 size={15} />} Configure export</button>}
                       {exportConfiguration?.state === 'configured' && <button className="primary-command" type="button" onClick={() => editSchedule(schedule)} disabled={isBusy}><CalendarClock size={15} /> {schedule.state === 'not_scheduled' ? 'Schedule export' : 'Edit schedule'}</button>}
-                      <button className="outline-command" type="button" onClick={() => void openExportConfiguration(schedule)} disabled={busyId !== null || exportLoading || loading}><RefreshCw size={15} /> Refresh status</button>
+                      <button className="outline-command" type="button" onClick={() => void openExportConfiguration(schedule)} disabled={busyId !== null || exportLoading || loading || exportRetryAfter > 0}>{exportRetryAfter > 0 ? `Retry in ${exportRetryAfter}s` : <><RefreshCw size={15} /> Refresh status</>}</button>
                       <button className="outline-command" type="button" onClick={closeExportConfiguration} disabled={busyId !== null}><X size={15} /> Close</button>
                     </div>
                   </div></td></tr> : null,

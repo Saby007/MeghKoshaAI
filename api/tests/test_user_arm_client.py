@@ -35,6 +35,7 @@ def configuration(monkeypatch):
     monkeypatch.setenv("MEGHKOSHA_WEB_CLIENT_ID", WEB_CLIENT_ID)
     monkeypatch.setenv("AZURE_CLIENT_ID", IDENTITY_CLIENT_ID)
     user_arm_client.access_control._access_cache.clear()
+    user_arm_client._live_access_cache.clear()
 
     async def assignments(subscription_id, principal_object_id):
         return [{"properties": {
