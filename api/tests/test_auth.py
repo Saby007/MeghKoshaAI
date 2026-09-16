@@ -396,7 +396,7 @@ def test_http_export_configuration_requires_fresh_write_authorization_and_explic
         if not allowed or selected_id != subscription_id:
             raise HTTPException(status_code=403, detail="Export write access is not available")
 
-    async def eligible(principal, subscription_ids=None):
+    async def eligible(principal, subscription_ids=None, probe_cost=True):
         assert principal.entra_object_id == OBJECT_ID
         assert subscription_ids == [subscription_id]
         return [subscription]
@@ -470,7 +470,7 @@ def test_http_schedule_selection_is_bound_to_verified_user_and_rechecked_before_
                     "tenantId": TENANT_ID, "state": "Enabled", "readAccess": True, "costAccess": True}
     lookups, writes = [], []
 
-    async def eligible(principal, subscription_ids=None):
+    async def eligible(principal, subscription_ids=None, probe_cost=True):
         assert principal.user_assertion == token and principal.entra_object_id == OBJECT_ID
         lookups.append(subscription_ids)
         if subscription_ids is not None and subscription_ids != [subscription["subscriptionId"]]:

@@ -283,7 +283,13 @@ async def _has_read_and_cost_access(
     return True
 
 
-async def discover_schedule_subscriptions(principal: ClientPrincipal, subscription_ids: list[str] | None = None) -> list[dict]:
+async def discover_schedule_subscriptions(
+    principal: ClientPrincipal, subscription_ids: list[str] | None = None, *, probe_cost: bool = True,
+) -> list[dict]:
+    # Export create/run only ever calls Microsoft.CostManagement/exports (a separate quota from
+    # .../query), so those callers pass probe_cost=False to avoid tripping on the query throttle
+    # for an access level they don't actually need; a cheap RBAC-permissions check still applies.
+    live_probe = subscription_ids is not None and probe_cost
     async with _managed_identity_client(principal, 90) as (client, token):
         subscriptions = await _list_subscriptions(client, token, principal.tenant_id)
         subscriptions = await _authorized_subscriptions(principal, subscriptions)
@@ -292,15 +298,15 @@ async def discover_schedule_subscriptions(principal: ClientPrincipal, subscripti
         ]
         async def check(item):
             cache_key = (principal.tenant_id, principal.entra_object_id, item["subscriptionId"])
-            if subscription_ids is not None:
+            if live_probe:
                 cached_at = _live_access_cache.get(cache_key)
                 if cached_at is not None and time.monotonic() - cached_at < _LIVE_ACCESS_CACHE_TTL_SECONDS:
                     return True
             async with asyncio.timeout(ACCESS_CHECK_TIMEOUT_SECONDS):
                 result = await _has_read_and_cost_access(
-                    client, token, principal.tenant_id, item["subscriptionId"], probe_cost=subscription_ids is not None,
+                    client, token, principal.tenant_id, item["subscriptionId"], probe_cost=live_probe,
                 )
-            if result and subscription_ids is not None:
+            if result and live_probe:
                 _live_access_cache[cache_key] = time.monotonic()
             return result
 
@@ -322,7 +328,7 @@ async def discover_schedule_subscriptions(principal: ClientPrincipal, subscripti
                     continue
                 if result:
                     verified.append({**item, "readAccess": True, "costAccess": True,
-                                     "accessCheckMode": "live" if subscription_ids is not None else "permissions"})
+                                     "accessCheckMode": "live" if live_probe else "permissions"})
                 elif subscription_ids is None:
                     verified.append({**item, "readAccess": False, "costAccess": False,
                                      "accessCheckMode": "permissions",

@@ -212,7 +212,7 @@ def test_schedule_history_read_failure_is_explicit(monkeypatch):
     async def history(subscription_id):
         raise ValueError("Malformed timestamp")
 
-    async def verified(principal, subscription_ids):
+    async def verified(principal, subscription_ids, probe_cost=True):
         return [{"subscriptionId": _SUBSCRIPTION_ID, "displayName": "Verified"}]
 
     monkeypatch.setattr(main.user_arm_client, "discover_schedule_subscriptions", verified)
@@ -260,7 +260,7 @@ def test_bulk_run_checks_entire_scope_before_starting_any_export(monkeypatch):
     denied_subscription = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
     checked = []
 
-    async def verify(principal, subscription_ids):
+    async def verify(principal, subscription_ids, probe_cost=True):
         checked.extend(subscription_ids)
         raise HTTPException(status_code=403, detail="A selected subscription is not eligible")
 
@@ -288,7 +288,7 @@ def test_bulk_run_checks_entire_scope_before_starting_any_export(monkeypatch):
     ("get_schedule_runs", {"subscription_id": _SUBSCRIPTION_ID}),
 ])
 def test_every_schedule_action_rechecks_eligibility_before_any_work(monkeypatch, status, endpoint, kwargs):
-    async def denied(principal, subscription_ids):
+    async def denied(principal, subscription_ids, probe_cost=True):
         assert subscription_ids == [_SUBSCRIPTION_ID]
         raise HTTPException(status_code=status, detail="Eligibility denied or unavailable")
 
@@ -304,7 +304,7 @@ def test_every_schedule_action_rechecks_eligibility_before_any_work(monkeypatch,
 
 
 def test_create_uses_server_verified_subscription_not_client_metadata(monkeypatch):
-    async def verified(principal, subscription_ids):
+    async def verified(principal, subscription_ids, probe_cost=True):
         assert subscription_ids == [_SUBSCRIPTION_ID]
         return [{"subscriptionId": _SUBSCRIPTION_ID, "displayName": "Verified name"}]
 

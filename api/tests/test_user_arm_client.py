@@ -255,6 +255,26 @@ def test_schedule_actions_require_live_managed_identity_read_and_cost_access(tra
     assert all(request.method == "GET" or request.url.path.endswith("/query") for request in requests)
 
 
+def test_schedule_export_actions_can_opt_out_of_the_live_cost_query(transport):
+    # export create/run only ever calls Microsoft.CostManagement/exports, a separate quota from
+    # .../query, so callers that pass probe_cost=False must never submit a query at all.
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        if request.url.path == "/subscriptions":
+            return httpx.Response(200, json={"value": [subscription()]})
+        if request.url.path.endswith("/permissions"):
+            return httpx.Response(200, json={"value": [{"actions": ["*/read"], "notActions": []}]})
+        assert request.url.path.endswith("/resourcegroups")
+        return httpx.Response(200, json={"value": []})
+
+    transport(respond)
+    rows = asyncio.run(user_arm_client.discover_schedule_subscriptions(principal(), [SUBSCRIPTION_ID], probe_cost=False))
+    assert rows == [{**subscription(), "readAccess": True, "costAccess": True, "accessCheckMode": "permissions"}]
+    assert all(request.method == "GET" for request in requests)
+
+
 @pytest.mark.parametrize("excluded", [["Microsoft.Resources/subscriptions/resourceGroups/read"], ["*/read"], ["Microsoft.CostManagement/query/read"]])
 def test_schedule_candidates_do_not_treat_excluded_read_actions_as_access(transport, excluded):
     def respond(request):

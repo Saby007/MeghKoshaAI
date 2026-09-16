@@ -690,14 +690,17 @@ async def get_schedules(request: Request):
     return await asyncio.gather(*(load(item) for item in subscriptions))
 
 
-async def _verified_schedule_subscription(principal: ClientPrincipal, subscription_id: str, *, operation: access_control.SubscriptionOperation | None = None) -> dict:
+async def _verified_schedule_subscription(
+    principal: ClientPrincipal, subscription_id: str, *,
+    operation: access_control.SubscriptionOperation | None = None, probe_cost: bool = True,
+) -> dict:
     try:
         subscription_id = configured_uuid(subscription_id)
     except (ValueError, TypeError):
         raise HTTPException(status_code=422, detail="A valid Azure subscription ID is required.") from None
     if operation is not None:
         await access_control.require_subscription_operation(principal.entra_object_id, subscription_id, operation)
-    selected = await user_arm_client.discover_schedule_subscriptions(principal, [subscription_id])
+    selected = await user_arm_client.discover_schedule_subscriptions(principal, [subscription_id], probe_cost=probe_cost)
     if len(selected) != 1 or selected[0]["subscriptionId"] != subscription_id:
         raise HTTPException(status_code=403, detail="The subscription is unavailable to this account or the backend managed identity.")
     return selected[0]
@@ -708,7 +711,7 @@ async def get_export_configuration(request: Request, subscription_id: str):
     principal = _control_principal(request)
     try:
         async with asyncio.timeout(90):
-            subscription = await _verified_schedule_subscription(principal, subscription_id, operation="export_write")
+            subscription = await _verified_schedule_subscription(principal, subscription_id, operation="export_write", probe_cost=False)
             return await focus_schedules.export_configuration(subscription)
     except TimeoutError:
         raise HTTPException(status_code=503, detail="FOCUS export setup checks timed out. No export was created.") from None
@@ -719,7 +722,7 @@ async def configure_schedule_export(request: Request, subscription_id: str, body
     principal = _control_principal(request)
     try:
         async with asyncio.timeout(90):
-            subscription = await _verified_schedule_subscription(principal, subscription_id, operation="export_write")
+            subscription = await _verified_schedule_subscription(principal, subscription_id, operation="export_write", probe_cost=False)
             result = await focus_schedules.configure_export(subscription, allow_destination_role_assignment=body.allow_destination_role_assignment)
             logger.info("FOCUS export setup for subscription %s by %s; created=%s", subscription["subscriptionId"], principal.entra_object_id, result["created"])
             return result
@@ -772,7 +775,7 @@ async def _ensure_export_and_schedule(subscription: dict, actor: str) -> None:
 @app.post("/api/schedules/{subscription_id}/run", status_code=202)
 async def run_schedule_now(request: Request, subscription_id: str):
     principal = _control_principal(request)
-    subscription = await _verified_schedule_subscription(principal, subscription_id, operation="export_write")
+    subscription = await _verified_schedule_subscription(principal, subscription_id, operation="export_write", probe_cost=False)
     await _ensure_export_and_schedule(subscription, principal.entra_object_id)
     return await focus_schedules.advance(subscription["subscriptionId"], force=True)
 
@@ -780,7 +783,7 @@ async def run_schedule_now(request: Request, subscription_id: str):
 @app.post("/api/schedules/run-all", status_code=202)
 async def run_all_schedules(request: Request, body: RunAllExportsRequest):
     principal = _control_principal(request)
-    selected = await user_arm_client.discover_schedule_subscriptions(principal, body.subscription_ids)
+    selected = await user_arm_client.discover_schedule_subscriptions(principal, body.subscription_ids, probe_cost=False)
     if {item["subscriptionId"] for item in selected} != set(body.subscription_ids):
         raise HTTPException(status_code=403, detail="The selection includes a subscription outside your verified scope.")
     for item in selected:
