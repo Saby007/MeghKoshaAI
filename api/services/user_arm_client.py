@@ -25,7 +25,7 @@ MAX_PAGES = 100
 MAX_SUBSCRIPTIONS = 5000
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 DISCOVERY_TIMEOUT_SECONDS = 30
-ACCESS_CHECK_TIMEOUT_SECONDS = 20
+ACCESS_CHECK_TIMEOUT_SECONDS = 60
 
 # The live cost-access probe (probe_cost=True) hits Cost Management's query API, which
 # throttles far more aggressively than plain ARM reads. Export setup/configure/retry actions
@@ -34,6 +34,17 @@ ACCESS_CHECK_TIMEOUT_SECONDS = 20
 # never cached, so a just-fixed permission/config problem is reflected on the very next check.
 _LIVE_ACCESS_CACHE_TTL_SECONDS = 300.0
 _live_access_cache: dict[tuple[str, str, str], float] = {}
+
+# Cost Management applies its rate limit across all callers, not just one request at a
+# time (Phase1's services/arm_client.py hit the identical behavior). A global minimum
+# interval between calls, serialized by a lock, avoids most 429s outright instead of
+# relying only on reacting to them after the fact. A short bounded retry absorbs a
+# transient miss; a long throttle window still fails immediately rather than holding a
+# live button-click request open indefinitely.
+_cost_query_lock = asyncio.Lock()
+_COST_MIN_REQUEST_INTERVAL_SECONDS = 15.0
+_COST_QUERY_RETRY_THRESHOLD_SECONDS = 15
+_last_cost_request_at = 0.0
 
 
 def _unavailable() -> HTTPException:
@@ -183,6 +194,35 @@ async def _probe_json(client, token: str, tenant_id: str, path: str, *, body: di
     return payload
 
 
+async def _wait_for_cost_query_slot() -> None:
+    global _last_cost_request_at
+    delay = _COST_MIN_REQUEST_INTERVAL_SECONDS - (time.monotonic() - _last_cost_request_at)
+    if delay > 0:
+        await asyncio.sleep(delay)
+    _last_cost_request_at = time.monotonic()
+
+
+async def _probe_cost_access(client, token: str, tenant_id: str, scope: str):
+    path = f"{scope}/providers/Microsoft.CostManagement/query?api-version=2025-03-01"
+    body = {
+        "type": "ActualCost", "timeframe": "TheLastMonth",
+        "dataset": {"granularity": "None", "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}},
+    }
+    async with _cost_query_lock:
+        for attempt in range(2):
+            await _wait_for_cost_query_slot()
+            try:
+                return await _probe_json(client, token, tenant_id, path, body=body)
+            except HTTPException as error:
+                retry_after = (error.headers or {}).get("Retry-After")
+                if (attempt == 0 and error.status_code == 503 and retry_after and retry_after.isdigit()
+                        and int(retry_after) <= _COST_QUERY_RETRY_THRESHOLD_SECONDS):
+                    await asyncio.sleep(int(retry_after))
+                    continue
+                raise
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
 async def _has_read_and_cost_access(
     client, token: str, tenant_id: str, subscription_id: str, *, probe_cost: bool = True,
 ) -> bool:
@@ -234,10 +274,7 @@ async def _has_read_and_cost_access(
         raise ValueError("Invalid resource read response")
     if not probe_cost:
         return True
-    cost = await _probe_json(client, token, tenant_id, f"{scope}/providers/Microsoft.CostManagement/query?api-version=2025-03-01", body={
-        "type": "ActualCost", "timeframe": "TheLastMonth",
-        "dataset": {"granularity": "None", "aggregation": {"totalCost": {"name": "PreTaxCost", "function": "Sum"}}},
-    })
+    cost = await _probe_cost_access(client, token, tenant_id, scope)
     if cost is None:
         return False
     properties = cost.get("properties")

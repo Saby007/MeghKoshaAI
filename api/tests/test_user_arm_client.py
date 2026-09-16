@@ -36,6 +36,8 @@ def configuration(monkeypatch):
     monkeypatch.setenv("AZURE_CLIENT_ID", IDENTITY_CLIENT_ID)
     user_arm_client.access_control._access_cache.clear()
     user_arm_client._live_access_cache.clear()
+    monkeypatch.setattr(user_arm_client, "_COST_MIN_REQUEST_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(user_arm_client, "_COST_MIN_REQUEST_INTERVAL_SECONDS", 0.0)
 
     async def assignments(subscription_id, principal_object_id):
         return [{"properties": {
@@ -352,6 +354,49 @@ def test_cost_probe_throttling_names_cost_management_and_keeps_longest_retry(tra
     assert failure.value.status_code == 503
     assert failure.value.detail == "Cost Management access check was throttled. Retry after 120 seconds."
     assert failure.value.headers == {"Retry-After": "120"}
+
+
+def test_cost_probe_retries_once_after_a_short_throttle_then_succeeds(transport):
+    attempts = []
+
+    def respond(request):
+        if request.url.path == "/subscriptions":
+            return httpx.Response(200, json={"value": [subscription()]})
+        if request.url.path.endswith("/permissions"):
+            return httpx.Response(200, json={"value": [{"actions": ["*/read"], "notActions": []}]})
+        if request.url.path.endswith("/resourcegroups"):
+            return httpx.Response(200, json={"value": []})
+        assert request.url.path.endswith("/query")
+        attempts.append(request)
+        if len(attempts) == 1:
+            return httpx.Response(429, headers={"Retry-After": "0"})
+        return httpx.Response(200, json={"properties": {"columns": [], "rows": []}})
+
+    transport(respond)
+    rows = asyncio.run(user_arm_client.discover_schedule_subscriptions(principal(), [SUBSCRIPTION_ID]))
+    assert len(attempts) == 2
+    assert rows[0]["costAccess"] is True
+
+
+def test_cost_probe_does_not_retry_a_long_throttle_twice(transport):
+    attempts = []
+
+    def respond(request):
+        if request.url.path == "/subscriptions":
+            return httpx.Response(200, json={"value": [subscription()]})
+        if request.url.path.endswith("/permissions"):
+            return httpx.Response(200, json={"value": [{"actions": ["*/read"], "notActions": []}]})
+        if request.url.path.endswith("/resourcegroups"):
+            return httpx.Response(200, json={"value": []})
+        assert request.url.path.endswith("/query")
+        attempts.append(request)
+        return httpx.Response(429, headers={"Retry-After": "30"})
+
+    transport(respond)
+    with pytest.raises(HTTPException) as failure:
+        asyncio.run(user_arm_client.discover_schedule_subscriptions(principal(), [SUBSCRIPTION_ID]))
+    assert len(attempts) == 1
+    assert failure.value.status_code == 503
 
 
 @pytest.mark.parametrize("next_link", [
