@@ -130,11 +130,14 @@ azd up
 
 > **On a brand-new environment, run `azd up` twice.** [main.bicep](infra/main.bicep) only creates the `ca-api-*`/`ca-web-*` Container Apps once real image names exist. On the very first pass nothing has been built yet, so `azd up` provisions the foundation only (network, storage, ACR, Container Apps environment, Foundry, private endpoints), then builds and pushes the images — but the `deploy-api`/`deploy-web` steps still fail with `resource not found: unable to find a resource with name 'ca-api-...'`, because those Container Apps don't exist yet. That's expected, not a bug: just run `azd up` again. The second pass sees the images that were just pushed and creates + deploys the actual containers.
 
-To provision the `data` profile (needed for the app to actually create/schedule cost exports) or `ai` profile (adds narration/Chat), set it before the **first** `azd up`:
+To provision the `data` profile (needed for the app to actually create/schedule cost exports) or `ai` profile (adds narration/Chat), set it before the **first** `azd up`. **Also set `APP_EXPORT_TRUSTED_SERVICES=true` at the same time** — [modules/data.bicep](infra/modules/data.bicep) otherwise leaves the storage account's `networkAcls.bypass` at `'None'`, which permanently blocks Cost Management's export-creation call (it always shows **Export status unavailable**, regardless of subscription type or RBAC grants, until this is set):
 
 ```powershell
 azd env set APP_PROFILE data
+azd env set APP_EXPORT_TRUSTED_SERVICES true
 ```
+
+> This grants Azure's own "trusted Microsoft services" exception (`Microsoft.CostManagementExports`) on the storage account's firewall — it's scoped to first-party Azure services, not a public network opening, and is required for native FOCUS exports to reach a firewalled/private-endpoint-only storage account at all. If your environment already exists without this set, apply it directly: `az storage account update -n <storage-account> -g <resource-group> --bypass AzureServices --default-action Deny`, then reload the Schedules tab.
 
 To also enable the scheduled six-month FOCUS worker, point the processor at the **same image `azd` already built for the `api` service** — don't invent a separate image name, since nothing will have pushed one. Do this only **after** your first successful `azd up` run: `SERVICE_API_IMAGE_NAME` doesn't exist until `azd` has built and pushed it, so setting `SERVICE_PROCESSOR_IMAGE_NAME` from it any earlier fails with `invalid key=value format` (the `get-value` call has nothing to return yet):
 
@@ -157,7 +160,7 @@ Re-running `azd up` (or `azd deploy` alone) later picks up any code changes and 
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FSaby007%2FMeghKoshaAI%2Fmain%2Finfra%2Fmain.json)
 
-Clicking the button opens the Azure portal's subscription-scope custom deployment experience against this repo's [ARM template](infra/main.json) (compiled from [main.bicep](infra/main.bicep)). Pick the target subscription, choose an **environment name** (write it down — you'll reuse it in step 3) and a **profile** (`core`, `data`, or `ai`), leave `apiImage`/`webImage` blank, and provision.
+Clicking the button opens the Azure portal's subscription-scope custom deployment experience against this repo's [ARM template](infra/main.json) (compiled from [main.bicep](infra/main.bicep)). Pick the target subscription, choose an **environment name** (write it down — you'll reuse it in step 3) and a **profile** (`core`, `data`, or `ai`), leave `apiImage`/`webImage` blank, and provision. If you picked `data` or `ai`, also set **`allowNativeExportTrustedServices`** to `true` — otherwise the storage account's firewall never grants Cost Management's export-creation call an exception, and the Schedules tab will permanently show **Export status unavailable** no matter what subscription or RBAC grants you have.
 
 When it finishes, open the deployment's **Outputs** tab and note:
 
