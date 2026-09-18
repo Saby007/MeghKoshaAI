@@ -10,8 +10,7 @@ test('rejects unsigned API requests and reaches the real tenant sign-in page', a
   const configuration = await config.json();
   expect(configuration.scope).toBe(`api://${configuration.apiClientId}/access_as_user`);
   await page.goto('/');
-  await page.getByLabel('Email address').fill('identity-check@example.test');
-  const connect = page.getByRole('button', { name: 'Continue', exact: true });
+  const connect = page.getByRole('button', { name: 'Sign in with Microsoft', exact: true });
   await expect(connect).toBeEnabled();
   await connect.click();
   await page.waitForURL((url) => url.hostname === 'login.microsoftonline.com', { timeout: 30000 });

@@ -11111,3 +11111,328 @@ body {
 :root .center-screen:not(.signin-screen) .ghost-button:active {
     transform: translateY(1px);
 }
+/* ==========================================================================
+   14. Sign-in — matched to the supplied design
+   Three zones instead of two: the case for the product, a vector stage, and
+   the card. The middle zone is what closes the gap against the reference; it
+   also removes the dead space the two-column version left in the centre.
+
+   The reference was supplied as a 1652x952 bitmap. Rebuilding it as vector
+   keeps it sharp at any density and any viewport, which a screenshot cannot
+   do, and drops ~2MB.
+
+   Everything here is capped and centred so the layout tightens on wide
+   screens rather than drifting apart to the far edges.
+   ========================================================================== */
+
+/* The type scale is rem-based, so it resolves against the ROOT font size.
+   Layer 12 set --ui-zoom on the sign-in element itself and claimed the page
+   was exempt from the 80% interface zoom, but a custom property on a
+   descendant cannot change html's font-size - so every rem on this page was
+   still rendering a fifth too small against the design.
+
+   Setting the knob at the root while the sign-in screen is mounted is what
+   actually exempts it. The sign-in screen replaces the whole app, so nothing
+   else is affected, and browsers without :has() simply keep the old 80%. */
+:root:has(.signin-production) {
+    --ui-zoom: 1;
+}
+
+:root .signin-screen.signin-production {
+    grid-template-columns: minmax(0, .95fr) minmax(0, 1fr) minmax(23rem, .92fr);
+    align-content: center;
+    gap: clamp(var(--space-5), 3vw, var(--space-8));
+    /* Capped with padding rather than max-width: max-width would shrink the
+       element itself, and since the background and the orb are painted on it,
+       that left a visible seam down both sides on wide screens. Padding keeps
+       the element full-bleed and caps only the content. */
+    padding-block: clamp(var(--space-5), 3.5vw, var(--space-10));
+    padding-inline: max(clamp(var(--space-5), 4vw, var(--space-12)), calc((100% - 96rem) / 2));
+}
+
+/* --- Centre: the vector stage ---------------------------------- */
+
+:root .signin-production .signin-stage {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+}
+
+:root .signin-production .signin-stage-art {
+    width: 100%;
+    /* viewBox is cropped tight to the drawing in the markup, so the art fills
+       this box instead of floating inside its own padding. */
+    max-width: 26rem;
+    height: auto;
+}
+
+/* The design's ground carries one large, soft blue-violet bloom in the
+   bottom-right corner. The generic accent orb is too faint to read on the
+   pale light ground, so this restates it at the drawn strength. */
+:root .signin-screen.signin-production::after {
+    content: '';
+    position: absolute;
+    right: -26vw;
+    bottom: -52vh;
+    width: 76vw;
+    height: 76vw;
+    background:
+        radial-gradient(closest-side circle at 50% 50%, rgb(120 132 226 / .30), transparent 100%),
+        radial-gradient(closest-side circle at 38% 38%, rgb(86 150 240 / .26), transparent 100%);
+    opacity: .7;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* --- Card: wider, to the design's proportions ------------------ */
+
+:root .signin-production .signin-card-v2 {
+    max-width: 27.5rem;
+    gap: var(--space-4);
+    padding: var(--space-8) var(--space-6);
+}
+
+/* Entra is now the only way in, so this button carries the whole screen.
+
+   It keeps a plain light/dark surface rather than becoming a blue gradient:
+   "Sign in with Microsoft" is a branded credential control, and Microsoft's
+   guidance is a white or dark button bearing the logo. The weight it needs
+   comes from size, elevation and motion instead of from colour. */
+:root .signin-production .signin-microsoft {
+    min-height: 3.25rem;
+    margin-top: var(--space-2);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    font-size: var(--font-size-md);
+    font-weight: var(--weight-semi);
+    transition: border-color var(--motion-duration), box-shadow var(--motion-duration), transform var(--motion-duration);
+}
+
+:root .signin-production .signin-microsoft:hover:not(:disabled) {
+    border-color: var(--color-focus);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+}
+
+:root .signin-production .signin-microsoft:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: var(--shadow-sm);
+}
+
+/* The arrow sits beside the label as one centred group, and eases outward on
+   hover to signal that this leaves the page. Pushing it to the trailing edge
+   split the control into two unrelated halves. */
+:root .signin-production .signin-microsoft-arrow {
+    color: var(--color-graphite-mid);
+    transition: transform var(--motion-duration);
+}
+
+:root .signin-production .signin-microsoft:hover:not(:disabled) .signin-microsoft-arrow {
+    transform: translateX(3px);
+}
+
+/* Reassurance directly under the only control, where it answers the question
+   the button raises: what happens to my credentials. Left-aligned with the
+   rest of the card copy, as drawn. */
+:root .signin-production .signin-secure {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-2);
+    margin: 0;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+}
+
+:root .signin-production .signin-secure svg {
+    flex: none;
+    color: var(--color-focus);
+}
+
+/* --- Feature tiles: the design's are notably larger ------------ */
+
+:root .signin-production .signin-feature-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: var(--radius-md);
+    background: var(--color-accent-subtle);
+    color: var(--color-focus);
+}
+
+
+/* --- Stage: the supplied artwork ------------------------------- */
+/* --- Stage: the supplied artwork ------------------------------- */
+
+/* Sized by aspect-ratio rather than by an intrinsic image: as a background
+   there is no natural height to lay out from. Both variants are exported at
+   the same 900x1389, so switching theme never reflows the column.
+
+   The art is an opaque rectangle, so its own ground would otherwise read as a
+   pasted block. A mask feathers all four edges into the page instead. */
+:root .signin-production .signin-stage-art {
+    width: 100%;
+    max-width: 30rem;
+    aspect-ratio: 900 / 1389;
+    background-image: url('/signin-stage.jpg');
+    background-position: center;
+    background-size: contain;
+    background-repeat: no-repeat;
+    -webkit-mask-image: radial-gradient(ellipse 80% 78% at 50% 50%, #000 34%, transparent 88%);
+    mask-image: radial-gradient(ellipse 80% 78% at 50% 50%, #000 34%, transparent 88%);
+}
+
+/* A true dark render, not the light art dimmed. Dimming the light version
+   left it grey and washed, because its glass panels are lit from a white
+   ground that does not exist on this theme. */
+:root[data-theme='dark'] .signin-production .signin-stage-art {
+    background-image: url('/signin-stage-dark.jpg');
+}
+
+
+/* --- Brand: sized to lead the page ----------------------------- */
+
+:root .signin-production .brand-lockup .brand-divider {
+    display: none;
+}
+
+:root .signin-production .signin-showcase .brand-lockup {
+    gap: var(--space-4);
+}
+
+/* Sizes are in px, not rem: rem here still resolves against the root font
+   size, which the 80% interface zoom has already reduced, so rem values
+   came out a fifth smaller than the design calls for. */
+:root .signin-production .signin-showcase .brand-mark {
+    width: 54px;
+    height: 47px;
+}
+
+:root .signin-production .signin-showcase .brand-product {
+    font-size: 30px;
+    letter-spacing: -.01em;
+}
+
+/* The design sets the headline on exactly two lines, breaking before
+   "Azure spend." Making the accent span a block guarantees that break at
+   every width instead of leaving it to the column measure, which stranded
+   "your" on its own line. The full stop moved inside the span so it cannot
+   wrap onto a third line by itself. */
+:root .signin-production .signin-headline {
+    max-width: none;
+}
+
+:root .signin-production .signin-headline span {
+    display: block;
+}
+
+/* --- Card: field affordance and a gradient primary ------------- */
+
+
+
+
+
+
+
+/* --- Trust line: the design pairs it with a progress cue -------- */
+
+:root .signin-production .signin-trust {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+:root .signin-production .signin-trust-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+:root .signin-production .signin-trust-bar {
+    width: 3.5rem;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--color-focus);
+}
+
+:root .signin-production .signin-trust-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--color-focus);
+    opacity: .38;
+}
+
+/* --- Strapline: two lines, as drawn ---------------------------- */
+
+:root .signin-production .signin-strapline {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+/* --- Responsive: the stage is decorative, so it goes first ----- */
+
+@media (max-width: 1280px) {
+    :root .signin-screen.signin-production {
+        grid-template-columns: minmax(0, 1.05fr) minmax(21rem, .95fr);
+    }
+    :root .signin-production .signin-stage {
+        display: none;
+    }
+}
+
+/* ==========================================================================
+   15. Sign-in ground
+   The corrected design does not sit on a flat wash: the dark theme has a
+   bright cool glow off the top-left corner over a deep navy, and the light
+   theme has a blue bloom low on the right. Colours below are sampled from the
+   supplied comps rather than guessed - dark reads #6186BA at the top-left
+   corner falling to #060E1B mid-canvas, and light reads #C3DAFC in the
+   bottom-right bloom over a #F5F8FD ground.
+
+   Built from layered gradients on the element rather than shipped as a
+   background image: it then costs nothing to download and covers any
+   viewport, where a baked 1652x952 comp would tile or crop.
+   ========================================================================== */
+
+:root .signin-screen.signin-production {
+    background-color: #F4F8FD;
+    background-image:
+        radial-gradient(ellipse 60% 48% at 82% 92%, rgb(195 218 252 / .85), transparent 100%),
+        radial-gradient(ellipse 52% 40% at 6% 104%, rgb(222 234 250 / .9), transparent 100%),
+        radial-gradient(ellipse 90% 60% at 50% -12%, rgb(255 255 255 / .95), transparent 100%);
+}
+
+:root[data-theme='dark'] .signin-screen.signin-production {
+    background-color: #060E1B;
+    background-image:
+        radial-gradient(ellipse 34% 40% at -2% -6%, rgb(97 134 186 / .55), transparent 100%),
+        radial-gradient(ellipse 70% 42% at 46% -14%, rgb(4 36 85 / .85), transparent 100%),
+        radial-gradient(ellipse 46% 52% at 104% 96%, rgb(3 20 47 / .95), transparent 100%);
+}
+
+/* Layer 12 painted a generic accent orb and layer 14 a blue-violet bloom.
+   Both now fight the sampled ground above, so the decorative pseudo-elements
+   are retired rather than left to muddy it. */
+:root .signin-screen.signin-production::before,
+:root .signin-screen.signin-production::after {
+    content: none;
+}
+
+/* The card is the only lit surface on the dark ground, so it carries a faint
+   blue rim and a cool cast, as drawn. */
+:root[data-theme='dark'] .signin-production .signin-card-v2 {
+    border-color: rgb(79 168 245 / .38);
+    box-shadow:
+        0 0 0 1px rgb(79 168 245 / .10),
+        0 18px 48px rgb(0 0 0 / .55),
+        0 0 36px rgb(38 110 200 / .16);
+}

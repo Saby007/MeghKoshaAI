@@ -1,6 +1,6 @@
 import { Component, Suspense, lazy, useEffect, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
-import { ArrowRight, BarChart3, CalendarClock, Check, LoaderCircle, Maximize2, MessageSquareText, Moon, RefreshCw, Rows3, ShieldCheck, Sun } from 'lucide-react';
+import { ArrowRight, BarChart3, CalendarClock, Check, LoaderCircle, Lock, Maximize2, MessageSquareText, Moon, RefreshCw, Rows3, Settings2, ShieldCheck, Sun } from 'lucide-react';
 import { SubscriptionPicker, type Subscription } from './components/SubscriptionPicker';
 import { CostRangeControls } from './components/CostRangeControls';
 import { presetCostWindow, type CostWindow } from './report/costDetails';
@@ -130,44 +130,42 @@ function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }
   );
 }
 
-type SignInStep = 'email' | 'redirecting';
+type SignInStep = 'idle' | 'redirecting';
 
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+/* The centre column of the sign-in design, supplied as finished artwork.
+
+   Rendered as a background-image on a div rather than an <img>: the art has a
+   separate light and dark version, and a CSS background swaps with the theme
+   attribute while fetching only the variant actually shown. Two <img> tags
+   toggled with CSS would pull both files down. The element is decorative and
+   aria-hidden, so it carries no semantic loss.
+
+   Each file is ~135KB as JPEG at 2x its layout width; the sources are opaque
+   photographic glass renders, where PNG cost 1.9MB for no visible gain. */
+function SignInStage() {
+  return (
+    <div className="signin-stage" aria-hidden="true">
+      <div className="signin-stage-art" />
+    </div>
+  );
 }
 
 function SignInScreen({ theme, onToggleTheme, notice }: { theme: Theme; onToggleTheme: () => void; notice?: string | null }) {
-  const [step, setStep] = useState<SignInStep>('email');
-  const [email, setEmail] = useState('');
+  const [step, setStep] = useState<SignInStep>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  async function handleContinue(event: React.FormEvent) {
-    event.preventDefault();
-    if (!isValidEmail(email)) {
-      setError('Enter a valid email address to continue.');
-      return;
-    }
-    setError(null);
-    setStep('redirecting');
-    try {
-      await redirectApiIdentity(email.trim());
-    } catch (failure) {
-      setStep('email');
-      setError(failure instanceof Error ? failure.message : 'Microsoft sign-in could not start. Retry the connection.');
-    }
-  }
-
-  /* Going straight to Entra without a hint is a supported path - the client
-     omits loginHint when it is empty and prompts for account selection - so
-     this is the same redirect, minus the step of typing an address the user
-     is about to choose anyway. */
+  /* Entra is the only credential path. Passing an empty login hint is a
+     supported input - the client omits loginHint when it is blank and lets
+     Entra prompt for account selection - so nothing is lost by dropping the
+     email field: the user picks the same account one screen later, from the
+     account list they already trust, instead of typing it here first. */
   async function handleMicrosoftSignIn() {
     setError(null);
     setStep('redirecting');
     try {
       await redirectApiIdentity('');
     } catch (failure) {
-      setStep('email');
+      setStep('idle');
       setError(failure instanceof Error ? failure.message : 'Microsoft sign-in could not start. Retry the connection.');
     }
   }
@@ -178,56 +176,49 @@ function SignInScreen({ theme, onToggleTheme, notice }: { theme: Theme; onToggle
       <section className="signin-showcase">
         <BrandLockup />
         <p className="signin-tagline">See. Assess. Save.</p>
-        <p className="signin-headline">Total clarity for your <span>Azure spend</span>.</p>
+        <p className="signin-headline">Total clarity for your <span>Azure spend.</span></p>
         <p className="signin-subhead">Turn your cloud data into insights, savings and smarter decisions.</p>
         <ul className="signin-feature-list">
           <li><span className="signin-feature-icon"><BarChart3 size={18} aria-hidden="true" /></span><div><strong>Azure cost assessment</strong><small>Costs, anomalies, and evidence-backed opportunities.</small></div></li>
-          <li><span className="signin-feature-icon"><ShieldCheck size={18} aria-hidden="true" /></span><div><strong>Access scoped to you</strong><small>Subscriptions in your organization's tenant, verified against your Azure roles.</small></div></li>
-          <li><span className="signin-feature-icon"><CalendarClock size={18} aria-hidden="true" /></span><div><strong>Explicit control changes</strong><small>Resource assessment is read-only. Budget and export changes require authorized operators.</small></div></li>
+          <li><span className="signin-feature-icon"><ShieldCheck size={18} aria-hidden="true" /></span><div><strong>Access scoped to you</strong><small>Secure, tenant-aware access via Microsoft Entra ID.</small></div></li>
+          <li><span className="signin-feature-icon"><Settings2 size={18} aria-hidden="true" /></span><div><strong>Explicit control changes</strong><small>Read-only assessment. Budget and export changes require authorized operators.</small></div></li>
         </ul>
-        <p className="signin-trust">Trusted by teams building a smarter cloud.</p>
+        <p className="signin-trust">
+          Trusted by teams building a smarter cloud.
+          <span className="signin-trust-progress" aria-hidden="true">
+            <i className="signin-trust-bar" />
+            <i className="signin-trust-dot" />
+            <i className="signin-trust-dot" />
+            <i className="signin-trust-dot" />
+          </span>
+        </p>
       </section>
+      <SignInStage />
       <section className="signin-panel">
         <div className="signin-card-v2">
           <h1 id="signin-heading">Sign in to {BRAND_NAME}</h1>
           <p className="signin-card-lede">Use your organization account to continue.</p>
           {notice && <p role="alert" className="signin-error">{notice}</p>}
-          {step === 'email' && (
+          {error && <p id="signin-error" className="signin-error" role="alert">{error}</p>}
+          {step === 'idle' && (
             <>
-              <form onSubmit={handleContinue} noValidate>
-                <label className="signin-field">
-                  <span>Email address</span>
-                  <input
-                    type="email"
-                    autoComplete="username"
-                    autoFocus
-                    required
-                    value={email}
-                    onChange={(event) => {
-                      setEmail(event.target.value);
-                      if (error) setError(null);
-                    }}
-                    placeholder="you@company.com"
-                    aria-invalid={error ? true : undefined}
-                    aria-describedby={error ? 'signin-error' : undefined}
-                  />
-                </label>
-                {error && <p id="signin-error" className="signin-error" role="alert">{error}</p>}
-                <button type="submit" className="dark-button signin-continue">Continue <ArrowRight size={16} aria-hidden="true" /></button>
-              </form>
-              <p className="signin-or"><span>or</span></p>
               <button type="button" className="signin-microsoft" onClick={() => void handleMicrosoftSignIn()}>
-                <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" focusable="false">
+                <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false">
                   <rect x="1" y="1" width="8" height="8" fill="#F25022" />
                   <rect x="11" y="1" width="8" height="8" fill="#7FBA00" />
                   <rect x="1" y="11" width="8" height="8" fill="#00A4EF" />
                   <rect x="11" y="11" width="8" height="8" fill="#FFB900" />
                 </svg>
                 Sign in with Microsoft
+                <ArrowRight className="signin-microsoft-arrow" size={16} aria-hidden="true" />
               </button>
+              <p className="signin-secure">
+                <Lock size={13} aria-hidden="true" />
+                Single sign-on · No password stored by {BRAND_NAME}
+              </p>
             </>
           )}
-          {step !== 'email' && (
+          {step === 'redirecting' && (
             <div className="signin-detecting" role="status" aria-live="polite">
               <LoaderCircle className="spin" size={20} aria-hidden="true" />
               <p>Redirecting to Microsoft Entra ID...</p>
@@ -235,7 +226,7 @@ function SignInScreen({ theme, onToggleTheme, notice }: { theme: Theme; onToggle
           )}
           <p className="signin-card-footnote">Microsoft Entra ID · Your organization's access policy</p>
         </div>
-        <p className="signin-strapline">Insights today. A smarter tomorrow.</p>
+        <p className="signin-strapline"><span>Insights today.</span><span>A smarter tomorrow.</span></p>
       </section>
     </main>
   );

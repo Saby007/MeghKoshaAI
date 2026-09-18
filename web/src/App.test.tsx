@@ -178,13 +178,11 @@ it('requires explicit MSAL sign-in when no verified account is available', async
   await act(async () => root.render(<App />));
   expect(getLatestReport).not.toHaveBeenCalled();
   expect(container.textContent).not.toContain('Scope picker');
-  const input = container.querySelector<HTMLInputElement>('input[type="email"]')!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'user@example.test');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  expect(redirectApiIdentity).toHaveBeenCalledWith('user@example.test');
+  /* Entra is the only credential path, so there is no address to collect
+     first: an empty login hint lets Entra prompt for account selection. */
+  expect(container.querySelector('input[type="email"]')).toBeNull();
+  await act(async () => button('Sign in with Microsoft').click());
+  expect(redirectApiIdentity).toHaveBeenCalledWith('');
   expect(getLatestReport).not.toHaveBeenCalled();
   expect(fetch).not.toHaveBeenCalled();
 });
