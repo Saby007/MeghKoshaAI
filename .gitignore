@@ -13,6 +13,14 @@ web/node_modules/
 web/dist/
 web/test-results/
 web/playwright-report/
+web/test-ado/
+web/test-ui-shots/
+# Local browser-testing harness: stubs MSAL so the app runs without an Entra
+# tenant. Deliberately not versioned — it hardcodes an authenticated user and
+# has no place in a deployable tree.
+web/demo/
+web/vite.demo.config.ts
+*.bak
 **/.vite/
 **/coverage/
 *.tsbuildinfo

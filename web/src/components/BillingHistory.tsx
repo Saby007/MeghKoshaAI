@@ -1,8 +1,11 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { ArrowLeftRight, CalendarDays, Clock3 } from 'lucide-react';
 import { billingDates, billingTags, billingWindow, compareBillingDates, DEFAULT_BUSINESS_CALENDAR, validBusinessCalendar, type BusinessCalendar, type BillingDayFilter, type BillingTimeFilter, type BillingSource } from '../report/billingHistory';
-import { CostExportButton, CostFilters, CostRangeControls, ResourceCostTable } from './CostExplorer';
-import { matchesCostFilter, type CostFilter, type CostWindow } from '../report/costDetails';
+import { CostExportButton, CostFilters, ResourceCostTable } from './CostExplorer';
+import { GroupedCostBreakdown } from './CostBreakdown';
+import { DailyTrendChart, useTopGroupSeries } from './TrendChart';
+import { matchesCostFilter, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import type { CostDetailSummary } from '../report/models';
 import { BudgetContext, type BudgetState } from './BudgetContext';
 
 type Formatter = (value: number) => string;
@@ -22,11 +25,17 @@ function TagFilter({ report, value, onChange }: { report: BillingSource; value: 
   );
 }
 
-export function BillingHistoryTab({ report, formatMoney }: { report: BillingSource; formatMoney: Formatter }) {
+export function BillingHistoryTab({ report, formatMoney, details, costWindow, costFilters, onCostFiltersChange, displayCurrency = '' }: {
+  report: BillingSource; formatMoney: Formatter;
+  details?: CostDetailSummary; costWindow?: CostWindow;
+  costFilters?: CostFilter; onCostFiltersChange?: (value: CostFilter) => void;
+  displayCurrency?: string;
+}) {
   const dates = useMemo(() => billingDates(report), [report]);
   const [baselineDate, setBaselineDate] = useState(() => dates.at(-2) ?? dates.at(-1) ?? '');
   const [comparisonDate, setComparisonDate] = useState(() => dates.at(-1) ?? '');
   const [tagId, setTagId] = useState('');
+  const [breakdown, setBreakdown] = useState<CostDimension>('service');
   useEffect(() => {
     const nextDates = billingDates(report);
     setBaselineDate(nextDates.at(-2) ?? nextDates.at(-1) ?? '');
@@ -38,6 +47,9 @@ export function BillingHistoryTab({ report, formatMoney }: { report: BillingSour
     ...tag, ...compareBillingDates(report, baselineDate, comparisonDate, tag.id),
   })), [report, baselineDate, comparisonDate, tagId]);
   const change = (value: number | null) => value === null ? 'Unavailable' : `${value > 0 ? '+' : ''}${formatMoney(value)}`;
+  const filters = costFilters ?? {};
+  const trend = useTopGroupSeries({ details, window: costWindow ?? { startDate: '', endDate: '' }, filters, dimension: breakdown });
+  const showDetail = Boolean(details && costWindow);
   return (
     <section className="billing-history" aria-label="Billing history comparison">
       <header className="billing-heading">
@@ -67,18 +79,47 @@ export function BillingHistoryTab({ report, formatMoney }: { report: BillingSour
         </div>
       )}
       {!rows.length && <p className="billing-provenance">Tag history is unavailable for this snapshot.</p>}
+
+      {showDetail && (
+        <section className="billing-detail" aria-label="Historical cost by dimension">
+          <header className="billing-heading">
+            <div><h3>Historical cost detail</h3></div>
+            <span>{costWindow!.startDate} – {costWindow!.endDate}</span>
+          </header>
+          <p className="billing-provenance">Daily billed cost across the report range. The chart tracks the five largest groups and both views follow the filters below.</p>
+          {onCostFiltersChange && <CostFilters details={details} value={filters} onChange={onCostFiltersChange} />}
+          <DailyTrendChart
+            dates={trend.dates}
+            series={trend.series}
+            formatMoney={formatMoney}
+            ariaLabel="Historical daily cost by group"
+            emptyMessage="No daily cost evidence matches the selected range and filters."
+          />
+          <GroupedCostBreakdown
+            details={details}
+            window={costWindow!}
+            filters={filters}
+            formatMoney={formatMoney}
+            displayCurrency={displayCurrency}
+            dimension={breakdown}
+            onDimensionChange={setBreakdown}
+            label="Historical cost breakdown"
+          />
+        </section>
+      )}
     </section>
   );
 }
 
-export function HourlyCostPanel({ report, formatMoney, formatHourlyMoney, rangeDays, embedded = false, snapshotId, budgetState, costWindow, onWindowChange, costFilters, onFiltersChange }: {
+export function HourlyCostPanel({ report, formatMoney, formatHourlyMoney, rangeDays, embedded = false, snapshotId, budgetState, costWindow, onWindowChange, costFilters, onFiltersChange, displayCurrency = '' }: {
   report: BillingSource; formatMoney: Formatter; formatHourlyMoney: Formatter; rangeDays?: number; embedded?: boolean;
   snapshotId?: string | null; budgetState?: BudgetState; costWindow?: CostWindow; onWindowChange?: (value: CostWindow) => void;
-  costFilters?: CostFilter; onFiltersChange?: (value: CostFilter) => void;
+  costFilters?: CostFilter; onFiltersChange?: (value: CostFilter) => void; displayCurrency?: string;
 }) {
   const [selectedRange, setSelectedRange] = useState(30);
   const [dayFilter, setDayFilter] = useState<BillingDayFilter>('all');
   const [timeFilter, setTimeFilter] = useState<BillingTimeFilter>('all');
+  const [breakdown, setBreakdown] = useState<CostDimension>('resource');
   const [businessCalendar, setBusinessCalendar] = useState<BusinessCalendar>(() => {
     try { const saved = JSON.parse(localStorage.getItem('mkai-business-calendar') ?? 'null'); return validBusinessCalendar(saved) ? saved : DEFAULT_BUSINESS_CALENDAR; } catch { return DEFAULT_BUSINESS_CALENDAR; }
   });
@@ -104,7 +145,6 @@ export function HourlyCostPanel({ report, formatMoney, formatHourlyMoney, rangeD
         <div><Clock3 size={18} aria-hidden="true" /><h2>Cost by Hour</h2></div>
         <span>{result.estimated ? 'Estimated intraday allocation' : 'Derived daily average · billed cost / 24'}</span>
       </header>
-      {costWindow && onWindowChange && <CostRangeControls dates={dates} value={costWindow} onChange={onWindowChange} />}
       <div className="billing-filters">
         {rangeDays === undefined && !costWindow && <label className="billing-filter billing-window-filter"><span>Window</span><select aria-label="Hourly cost window" value={selectedRange} onChange={(event) => setSelectedRange(Number(event.target.value))}>{[7, 30, 60, 90].map((days) => <option key={days} value={days}>Last {days} export-calendar days</option>)}</select></label>}
         <label className="billing-filter"><span>Days (UTC)</span><select aria-label="Billing day filter" value={dayFilter} onChange={(event) => setDayFilter(event.target.value as BillingDayFilter)}><option value="all">All days</option><option value="weekdays">Weekdays only</option><option value="weekends">Weekends only</option></select></label>
@@ -127,7 +167,27 @@ export function HourlyCostPanel({ report, formatMoney, formatHourlyMoney, rangeD
       {result.incomplete && <p className="billing-coverage" role="status">Incomplete coverage. Unavailable dates are excluded from both cost and hours.</p>}
       {report.reportMetadata && firstDate && lastDate && <CostExportButton report={{ costDetails: report.costDetails, reportMetadata: report.reportMetadata }} snapshotId={snapshotId} window={{ startDate: firstDate, endDate: lastDate }} filters={filters} selectedDates={result.days.filter((day) => day.totalCost !== null).map((day) => day.date)} label="Download selected full-day costs" />}
       {result.days.length === 0 ? <p className="billing-coverage" role="status">No billing dates match these filters.</p> : (
-        <details className="billing-day-details" open={!embedded}>
+        <>
+          {/* The source is daily, so there is no measured intraday curve to
+              draw. What genuinely varies - and what every filter above moves -
+              is the hourly run-rate from day to day, so that is what this
+              charts. Drawing a flat 24-hour profile would imply a precision
+              the evidence does not have. */}
+          <section className="hourly-rate-chart" aria-label="Hourly cost rate over time">
+            <h3>{result.estimated ? 'Estimated hourly rate' : 'Average hourly rate'}</h3>
+            <DailyTrendChart
+              dates={result.days.map((day) => day.date)}
+              series={[{
+                id: 'hourly-rate',
+                name: result.estimated ? 'Estimated cost per hour' : 'Billed cost per hour',
+                points: result.days.map((day) => day.averageHourlyCost),
+              }]}
+              formatMoney={formatHourlyMoney}
+              ariaLabel="Hourly cost rate by day"
+              emptyMessage="No hourly rate can be derived for the selected days."
+            />
+          </section>
+          <details className="billing-day-details" open={!embedded}>
           <summary>{result.estimated ? 'Daily cost allocations' : 'Daily charges'}</summary>
           <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Daily average hourly charges">
             <table className="data-table billing-table">
@@ -138,6 +198,24 @@ export function HourlyCostPanel({ report, formatMoney, formatHourlyMoney, rangeD
             </table>
           </div>
         </details>
+        </>
+      )}
+      {!embedded && report.costDetails?.status === 'complete' && firstDate && lastDate && (
+        <section className="hourly-resource-breakdown" aria-label="Resource cost breakdown for the selected days">
+          <h3>Cost by resource</h3>
+          <p className="billing-provenance">Across the days selected above, following the same filters.</p>
+          <GroupedCostBreakdown
+            details={report.costDetails}
+            window={{ startDate: firstDate, endDate: lastDate }}
+            filters={filters}
+            formatMoney={formatMoney}
+            displayCurrency={displayCurrency}
+            dimension={breakdown}
+            onDimensionChange={setBreakdown}
+            initialLimit={10}
+            label="Hourly panel cost breakdown"
+          />
+        </section>
       )}
       {!embedded && report.costDetails?.status === 'complete' && <section className="hourly-resource-comparison" aria-label="Hourly resource date comparison">
         <h3>Full-day resource comparison</h3>

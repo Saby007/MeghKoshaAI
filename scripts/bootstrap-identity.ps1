@@ -54,7 +54,13 @@ if (-not $PSCmdlet.ShouldProcess("$EnvironmentName in tenant $TenantId", 'Config
 
 function Invoke-AzureJson([string[]] $Arguments) {
     $output = & az @Arguments --only-show-errors --output json
-    if ($LASTEXITCODE -ne 0) { throw 'Azure CLI prerequisite lookup failed. No fallback credentials will be created.' }
+    if ($LASTEXITCODE -ne 0) {
+        if ($Arguments.Count -ge 2 -and $Arguments[0] -eq 'account' -and $Arguments[1] -eq 'get-access-token') {
+            $loginCommand = "az login --tenant `"$TenantId`" --scope `"https://graph.microsoft.com/.default`""
+            throw "Microsoft Graph authentication failed. If Azure CLI reported AADSTS530004, the tenant's Conditional Access or cross-tenant access policy must allow compliant-device claims for external users; this script cannot bypass that policy. Ask an Entra administrator to configure AcceptCompliantDevice/trust settings, or use an authorized tenant-member account on a compliant device. Then run ``az logout``, ``$loginCommand``, and rerun this script. No identity changes were made and no fallback credentials were created."
+        }
+        throw 'Azure CLI prerequisite lookup failed. Verify `az account show` and managed identity access, then rerun. No fallback credentials were created.'
+    }
     return ($output -join "`n" | ConvertFrom-Json -AsHashtable)
 }
 

@@ -7,22 +7,40 @@ import './cost-explorer.css';
 import { BudgetContext, type BudgetState } from './BudgetContext';
 
 type Formatter = (value: number) => string;
+export type SelectedDay = { date: string; previousDate: string; subscriptionId: string };
 const money = (value: number | null, format: Formatter) => value === null ? 'Unavailable' : format(value);
 const changeLabel = (value: number | null) => value === null ? 'N/A' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 const tone = (value: number | null) => value === null || value === 0 ? '' : value > 0 ? 'cost-increase' : 'cost-decrease';
 const COLORS = ['var(--color-category-compute)', 'var(--color-metric-green)', 'var(--color-category-databases)', 'var(--color-category-ai)', 'var(--color-category-networking)'];
 
-export function CostRangeControls({ dates, value, onChange }: { dates: string[]; value: CostWindow; onChange: (value: CostWindow) => void }) {
-  const latest = dates.at(-1) ?? '';
-  const count = costWindowDates(value).length;
-  return <div className="cost-range-controls" aria-label="Report cost window">
-    <div className="time-range-selector" role="group" aria-label="Cost comparison range">
-      {[7, 30, 60, 90].map((days) => <button type="button" key={days} aria-pressed={count === days && value.endDate === latest} className={count === days && value.endDate === latest ? 'active' : ''} disabled={!dates.length} onClick={() => onChange(presetCostWindow(dates, days))}>{days}d</button>)}
-    </div>
-    <label className="billing-filter"><span>From (UTC)</span><input type="date" aria-label="Cost window start" value={value.startDate} max={value.endDate || latest} disabled={!dates.length} onChange={(event) => onChange({ ...value, startDate: event.target.value })} /></label>
-    <label className="billing-filter"><span>To (UTC)</span><input type="date" aria-label="Cost window end" value={value.endDate} min={value.startDate} max={latest} disabled={!dates.length} onChange={(event) => onChange({ ...value, endDate: event.target.value })} /></label>
-    {dates.length > 0 && !count && <p role="alert">Select a valid date range of at most 366 days.</p>}
-  </div>;
+/* The chart is authored in user units and then stretched to whatever width the
+   container happens to be. Because an SVG viewBox scales uniformly, that stretch
+   magnifies the text inside it too: an 880-unit chart in a 1380px column renders
+   at 1.57x, so its 13px labels arrive on screen at 20px - larger than body text
+   and the same size as a section heading, which is why the chart read as huge.
+   Tracking the container width in the viewBox keeps the scale at exactly 1, so
+   chart type matches the rest of the interface. Falls back to the authored width
+   where ResizeObserver is unavailable (jsdom), and never drops below the scroll
+   container's min-width so narrow viewports still pan instead of cramming. */
+const CHART_WIDTH_FALLBACK = 880;
+const CHART_WIDTH_MIN = 720;
+const CHART_HEIGHT = 300;
+
+function useChartWidth(ref: { current: HTMLElement | null }) {
+  const [width, setWidth] = useState(CHART_WIDTH_FALLBACK);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const measure = () => {
+      const measured = Math.round(node.clientWidth);
+      if (measured > 0) setWidth(Math.max(CHART_WIDTH_MIN, measured));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [ref]);
+  return width;
 }
 
 export function CostFilters({ details, value, onChange }: { details?: CostDetailSummary; value: CostFilter; onChange: (value: CostFilter) => void }) {
@@ -102,14 +120,24 @@ export function ResourceCostTable({ details, window, previous, filters = {}, for
   </>;
 }
 
-export function CostComparisonChart({ details, window, filters = {}, formatMoney, onSelectDay }: { details?: CostDetailSummary; window: CostWindow; filters?: CostFilter; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void }) {
+/* The daily figures behind the chart. Extracted so the page can place
+   them where it wants - they are reference data, not part of reading
+   the chart - while still driving the same day drilldown. */
+export function DailySubscriptionValues({ details, window, filters = {}, formatMoney, onSelectDay }: { details?: CostDetailSummary; window: CostWindow; filters?: CostFilter; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void }) {
+  const series = dailySubscriptionCosts(details, window, filters);
+  if (!series.length) return null;
+  return <details className="cost-daily-values"><summary>Daily subscription amounts</summary><div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Daily subscription comparison table"><table className="data-table billing-table"><thead><tr><th>Subscription</th><th>Date</th><th>Selected cost</th><th>Previous date</th><th>Previous cost</th></tr></thead><tbody>{series.flatMap((item) => item.days.map((day) => <tr key={`${item.subscriptionId}:${day.date}`}><th>{item.subscriptionName}</th><td>{onSelectDay ? <button type="button" className="finding-link" onClick={() => onSelectDay(day.date, day.previousDate, item.subscriptionId)}>{day.date}</button> : day.date}</td><td>{money(day.current, formatMoney)}</td><td>{day.previousDate}</td><td>{money(day.previous, formatMoney)}</td></tr>))}</tbody></table></div></details>;
+}
+
+export function CostComparisonChart({ details, window, filters = {}, formatMoney, onSelectDay, showDailyValues = true }: { details?: CostDetailSummary; window: CostWindow; filters?: CostFilter; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void; showDailyValues?: boolean }) {
   const series = dailySubscriptionCosts(details, window, filters);
   const dates = costWindowDates(window);
   const values = series.flatMap((item) => item.days.flatMap((day) => [day.current, day.previous].filter((amount): amount is number => amount !== null)));
   const maximum = values.reduce((result, value) => Math.max(result, value), 1);
   const minimum = values.reduce((result, value) => Math.min(result, value), 0);
-  const width = 880;
-  const height = 300;
+  const chartRef = useRef<HTMLDivElement>(null);
+  const width = useChartWidth(chartRef);
+  const height = CHART_HEIGHT;
   const xFor = (index: number) => 82 + index * (width - 106) / Math.max(1, dates.length - 1);
   const yFor = (value: number) => 254 - (value - minimum) / (maximum - minimum) * 224;
   function pathFor(points: { current: number | null; previous: number | null }[], field: 'current' | 'previous') {
@@ -124,7 +152,7 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
   if (!series.length || !dates.length) return <p role="status">{details?.statusMessage ?? 'Daily subscription cost detail is unavailable in this snapshot.'}</p>;
   return <>
     <div className="cost-chart-legend">{series.map((item, index) => <span key={item.subscriptionId}><i style={{ background: COLORS[index % COLORS.length] }} />{item.subscriptionName}</span>)}<span>Solid: selected period</span><span>Dotted: preceding period</span></div>
-    <div className="cost-chart-scroll" tabIndex={0} role="region" aria-label="Subscription cost comparison chart">
+    <div className="cost-chart-scroll" ref={chartRef} tabIndex={0} role="region" aria-label="Subscription cost comparison chart">
       <svg viewBox={`0 0 ${width} ${height}`} className="cost-comparison-chart" role="group" aria-label="Current and previous subscription cost">
         {[0, 1, 2, 3, 4].map((tick) => { const value = minimum + (maximum - minimum) * tick / 4; return <g key={tick}><line x1={82} x2={width - 24} y1={yFor(value)} y2={yFor(value)} className="cost-chart-grid" /><text x={72} y={yFor(value)} textAnchor="end" dominantBaseline="middle">{formatMoney(value)}</text></g>; })}
         {series.map((item, index) => <g key={item.subscriptionId} style={{ color: COLORS[index % COLORS.length] }}>
@@ -134,12 +162,18 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
         {dates.filter((_, index) => index === 0 || index === dates.length - 1 || index % Math.max(1, Math.ceil(dates.length / 6)) === 0).map((day) => <text key={day} x={xFor(dates.indexOf(day))} y={284} textAnchor="middle">{day.slice(5)}</text>)}
       </svg>
     </div>
-    <details className="cost-daily-values"><summary>Daily subscription amounts</summary><div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Daily subscription comparison table"><table className="data-table billing-table"><thead><tr><th>Subscription</th><th>Date</th><th>Selected cost</th><th>Previous date</th><th>Previous cost</th></tr></thead><tbody>{series.flatMap((item) => item.days.map((day) => <tr key={`${item.subscriptionId}:${day.date}`}><th>{item.subscriptionName}</th><td>{onSelectDay ? <button type="button" className="finding-link" onClick={() => onSelectDay(day.date, day.previousDate, item.subscriptionId)}>{day.date}</button> : day.date}</td><td>{money(day.current, formatMoney)}</td><td>{day.previousDate}</td><td>{money(day.previous, formatMoney)}</td></tr>))}</tbody></table></div></details>
+    {showDailyValues && <DailySubscriptionValues details={details} window={window} filters={filters} formatMoney={formatMoney} onSelectDay={onSelectDay} />}
   </>;
 }
 
-export function CostWindowOverview({ report, snapshotId, window, onChange, formatMoney, onOpenAnomalies, budgetState, filters, onFiltersChange }: { report: FullReport; snapshotId: string | null; window: CostWindow; onChange: (value: CostWindow) => void; formatMoney: Formatter; onOpenAnomalies: () => void; budgetState?: BudgetState; filters: CostFilter; onFiltersChange: (value: CostFilter) => void }) {
-  const [selectedDay, setSelectedDay] = useState<{ date: string; previousDate: string; subscriptionId: string } | null>(null);
+export function CostWindowOverview({ report, snapshotId, window, onChange, formatMoney, onOpenAnomalies, budgetState, filters, onFiltersChange, showBudget = true, showDailyValues = true, showHeading = true, selectedDay: controlledDay, onSelectDay }: { report: FullReport; snapshotId: string | null; window: CostWindow; onChange: (value: CostWindow) => void; formatMoney: Formatter; onOpenAnomalies: () => void; budgetState?: BudgetState; filters: CostFilter; onFiltersChange: (value: CostFilter) => void; showBudget?: boolean; showDailyValues?: boolean; showHeading?: boolean; selectedDay?: SelectedDay | null; onSelectDay?: (value: SelectedDay | null) => void }) {
+  /* The day drilldown is normally this component's own state. When the page
+     places the daily figures elsewhere - they belong at the end of the report,
+     not in the middle of the chart - that table still has to be able to open
+     the same drilldown, so the selection can be lifted by the caller. */
+  const [internalDay, setInternalDay] = useState<SelectedDay | null>(null);
+  const selectedDay = controlledDay !== undefined ? controlledDay : internalDay;
+  const setSelectedDay = onSelectDay ?? setInternalDay;
   useEffect(() => setSelectedDay(null), [window.startDate, window.endDate, JSON.stringify(filters)]);
   const coverage = costCoverage(report.costDetails, window);
   const previous = previousCostWindow(window);
@@ -149,16 +183,17 @@ export function CostWindowOverview({ report, snapshotId, window, onChange, forma
   const before = previousCoverage.complete ? groups.reduce((sum, row) => sum + (row.previous ?? 0), 0) : null;
   const spikes = groups.filter((row) => row.previous !== null && row.previous > 0 && row.percentage !== null && row.percentage > 30);
   return <section className="cost-window-overview" aria-label="Selected period cost overview">
-    <CostRangeControls dates={report.costDetails?.dates ?? report.dailyCostTrend.days.map((day) => day.date)} value={window} onChange={onChange} />
-    <div className="cost-section-heading"><h2>Subscription cost comparison</h2><CostExportButton report={report} snapshotId={snapshotId} window={window} filters={filters} /></div>
+    {showHeading
+      ? <div className="cost-section-heading"><h2>Subscription cost comparison</h2><CostExportButton report={report} snapshotId={snapshotId} window={window} filters={filters} /></div>
+      : null}
     <div className="billing-metrics cost-window-metrics">
       <div><span>Selected period</span><output>{money(total, formatMoney)}</output><small>{window.startDate} - {window.endDate} / {coverage.coveredDays} of {coverage.dates.length} days</small></div>
       <div><span>Previous period</span><output>{money(before, formatMoney)}</output><small>{previous.startDate} - {previous.endDate} / {previousCoverage.coveredDays} of {previousCoverage.dates.length} days</small></div>
       <button type="button" className="period-anomaly-link" onClick={onOpenAnomalies}><span><TriangleAlert size={16} aria-hidden="true" /> Period anomalies</span><strong>{coverage.complete && previousCoverage.complete ? spikes.length : 'Unavailable'}</strong><small>Resource cost spikes above 30% <ArrowRight size={14} aria-hidden="true" /></small></button>
     </div>
     <CostFilters details={report.costDetails} value={filters} onChange={onFiltersChange} />
-    <CostComparisonChart details={report.costDetails} window={window} filters={filters} formatMoney={formatMoney} onSelectDay={(date, previousDate, subscriptionId) => setSelectedDay({ date, previousDate, subscriptionId })} />
-      {budgetState && <BudgetContext state={budgetState} details={report.costDetails} filters={filters} />}
+    <CostComparisonChart details={report.costDetails} window={window} filters={filters} formatMoney={formatMoney} showDailyValues={showDailyValues} onSelectDay={(date, previousDate, subscriptionId) => setSelectedDay({ date, previousDate, subscriptionId })} />
+      {showBudget && budgetState && <BudgetContext state={budgetState} details={report.costDetails} filters={filters} />}
     {selectedDay && <section className="cost-day-drilldown" aria-label="Selected day resource detail"><div className="cost-section-heading"><h3>{selectedDay.date} vs {selectedDay.previousDate}</h3><CostExportButton report={report} snapshotId={snapshotId} window={{ startDate: selectedDay.date, endDate: selectedDay.date }} previous={{ startDate: selectedDay.previousDate, endDate: selectedDay.previousDate }} filters={{ ...filters, subscriptionId: selectedDay.subscriptionId }} label="Download day detail" /><button type="button" className="ghost-button" aria-label="Close day detail" title="Close day detail" onClick={() => setSelectedDay(null)}><X size={16} /></button></div><ResourceCostTable details={report.costDetails} window={{ startDate: selectedDay.date, endDate: selectedDay.date }} previous={{ startDate: selectedDay.previousDate, endDate: selectedDay.previousDate }} filters={{ ...filters, subscriptionId: selectedDay.subscriptionId }} formatMoney={formatMoney} snapshotId={snapshotId} /></section>}
   </section>;
 }
@@ -176,7 +211,6 @@ export function PeriodCostAnomalies({ report, window, onChange, formatMoney, fil
   const chartDetails = selectedGroup && report.costDetails ? { ...report.costDetails, rows: selectedGroup.sources } : report.costDetails;
   useEffect(() => { setSelectedGroupId(null); setLimit(50); }, [window.startDate, window.endDate, JSON.stringify(filters), dimension]);
   return <section className="period-cost-anomalies" aria-label="Selected period anomalies">
-    <CostRangeControls dates={report.costDetails?.dates ?? []} value={window} onChange={onChange} />
     <CostFilters details={report.costDetails} value={filters} onChange={onFiltersChange} />
     <div className="cost-section-heading"><label className="billing-filter"><span>Analyze by</span><select aria-label="Period anomaly dimension" value={dimension} onChange={(event) => setDimension(event.target.value as CostDimension)}><option value="resource">Resource</option><option value="resourceGroup">Resource group</option><option value="tag" disabled={!filters.tagKey}>Tag value</option><option value="service">Service</option></select></label><CostExportButton report={report} snapshotId={snapshotId} window={window} filters={filters} /></div>
     <h2>Period cost spikes <span className="cost-count">{available ? spikes.length : 'Unavailable'}</span></h2>
@@ -200,7 +234,6 @@ export function SubscriptionCostBreakdown({ report, snapshotId, window, onChange
   useEffect(() => setLimit(50), [dimension, JSON.stringify(filters), window.startDate, window.endDate]);
   return <section className="subscription-cost-breakdown" aria-label="Subscription cost breakdown">
     <div className="cost-section-heading"><h2>Cost by subscription</h2><CostExportButton report={report} snapshotId={snapshotId} window={window} filters={filters} /></div>
-    <CostRangeControls dates={report.costDetails?.dates ?? []} value={window} onChange={onChange} />
     <CostFilters details={report.costDetails} value={filters} onChange={onFiltersChange} />
     <label className="billing-filter"><span>Group by</span><select aria-label="Cost grouping" value={dimension} onChange={(event) => setDimension(event.target.value as CostDimension)}><option value="resource">Resource</option><option value="service">Service</option><option value="resourceType">Resource type</option><option value="region">Region</option><option value="resourceGroup">Resource group</option><option value="tag" disabled={!filters.tagKey}>Tag value</option></select></label>
     {dimension === 'resource' ? <ResourceCostTable details={report.costDetails} window={window} filters={filters} formatMoney={formatMoney} snapshotId={snapshotId} /> : report.costDetails?.status !== 'complete' ? <p role="status">Resource cost details are unavailable in this snapshot. Run a new report.</p> : <>

@@ -22,7 +22,7 @@ vi.mock('./components/SubscriptionPicker', () => ({
     <div>Scope picker<button type="button" onClick={onRun}>Run Report</button>{error && <p role="alert">{error}</p>}</div>
   ),
 }));
-vi.mock('./components/ReportView', () => ({ ReportView: ({ snapshotId }: { snapshotId: string | null }) => <div data-testid="loaded-report" data-snapshot={snapshotId}>Loaded report</div> }));
+vi.mock('./components/ReportView', () => ({ ReportView: ({ snapshotId, costWindow }: { snapshotId: string | null; costWindow?: { startDate: string; endDate: string } }) => <div data-testid="loaded-report" data-snapshot={snapshotId} data-window={costWindow ? `${costWindow.startDate}..${costWindow.endDate}` : ''}>Loaded report</div> }));
 
 const snapshot = {
   snapshotId: 'report-1', subscriptionIds: ['subscription-1'], staleDays: 90,
@@ -64,6 +64,32 @@ it('restores an authorized saved report on sign-in without starting an assessmen
   expect(container.querySelector('.report-awaiting')).toBeNull();
   expect(runCostAssessment).not.toHaveBeenCalled();
   expect(narrate).not.toHaveBeenCalled();
+});
+
+it('presents one report-wide cost window beside the saved-report controls and hands it to the report', async () => {
+  const dates = Array.from({ length: 10 }, (_, index) => `2026-09-${String(index + 1).padStart(2, '0')}`);
+  vi.mocked(getLatestReport).mockResolvedValue({ ...snapshot, report: { ...snapshot.report, costDetails: { dates } } } as ReportSnapshot);
+  await act(async () => root.render(<App />));
+
+  const strip = container.querySelector('.saved-report-controls')!;
+  const picker = strip.querySelector('[aria-label="Report cost window"]');
+  expect(picker).not.toBeNull();
+  // It is presented once, not repeated per tab.
+  expect(container.querySelectorAll('[aria-label="Report cost window"]')).toHaveLength(1);
+
+  expect(container.querySelector('[data-testid="loaded-report"]')?.getAttribute('data-window')).toBe('2026-08-12..2026-09-10');
+
+  await act(async () => button('7d').click());
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Cost window start"]')?.value).toBe('2026-09-04');
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Cost window end"]')?.value).toBe('2026-09-10');
+  expect(container.querySelector('[data-testid="loaded-report"]')?.getAttribute('data-window')).toBe('2026-09-04..2026-09-10');
+});
+
+it('shows no cost window until a report is loaded', async () => {
+  vi.mocked(getLatestReport).mockResolvedValue(null);
+  await act(async () => root.render(<App />));
+  expect(container.querySelector('.saved-report-controls')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Report cost window"]')).toBeNull();
 });
 
 it('waits for Run Report before collection when no saved report exists', async () => {

@@ -17,15 +17,24 @@
     --font-size-md: 1rem;
     --font-size-lg: 1.25rem;
     --font-size-xl: 1.75rem;
-    --radius-sm: 4px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
-    --shadow-sm: 0 1px 3px rgb(18 27 32 / .06);
-    --shadow-md: 0 6px 20px rgb(18 27 32 / .10);
-    --shadow-lg: 0 16px 48px rgb(18 27 32 / .20);
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+
+    /* Elevation is layered rather than single-blur: a tight contact shadow that anchors the
+       edge, plus a wide ambient one that gives the surface its height. A single soft blur
+       reads as a smudge; two reads as a card sitting above the page. */
+    --shadow-sm: 0 1px 1px rgb(0 0 0 / .18), 0 1px 3px rgb(0 0 0 / .12);
+    --shadow-md: 0 1px 2px rgb(0 0 0 / .22), 0 8px 24px rgb(0 0 0 / .18);
+    --shadow-lg: 0 2px 4px rgb(0 0 0 / .26), 0 24px 56px rgb(0 0 0 / .34);
+    --elevation-ambient: 0 0 0 1px var(--glass-border);
+    --elevation-hover: 0 1px 2px rgb(0 0 0 / .24), 0 14px 34px rgb(0 0 0 / .26);
+    --elevation-inset: inset 0 1px 0 var(--glass-highlight);
     --border-width: 1px;
     --focus-width: 2px;
-    --motion-duration: 200ms;
+    --focus-ring: 0 0 0 1px var(--color-obsidian-canvas), 0 0 0 3px var(--color-accent-line);
+    --motion-duration: 180ms;
+    --motion-duration-slow: 320ms;
     --control-height: var(--space-8);
     --touch-height: 44px;
     --anomaly-content-height: calc(8rem + var(--space-1));
@@ -40,51 +49,87 @@
     --font-editorial: var(--font-geist);
     --text-heading: var(--font-size-lg);
     --text-heading-lg: var(--font-size-xl);
-    --tracking-heading: 0;
-    --tracking-heading-lg: 0;
+
+    /* Tracking is paired with size: display figures close up, small caps open out.
+       Uniform tracking is what makes an otherwise careful interface read as generic. */
+    --tracking-heading: -.014em;
+    --tracking-heading-lg: -.026em;
+    --tracking-overline: .07em;
+    --weight-medium: 500;
+    --weight-semi: 600;
+    --nums: tabular-nums lining-nums;
     --radius-nav: var(--radius-sm);
     --radius-buttons: var(--radius-sm);
-    --radius-cards: var(--radius-md);
+    --radius-cards: var(--radius-lg);
     --radius-glass: var(--radius-md);
     --radius-glass-sm: var(--radius-sm);
-    --ease-mechanical: cubic-bezier(.4, 0, .2, 1);
+
+    /* One decelerate family everywhere. A symmetric ease-in-out hesitates before it answers;
+       a decelerate is already most of the way there by the time the eye arrives. */
+    --ease-mechanical: cubic-bezier(.16, 1, .3, 1);
     --ease-glass: var(--ease-mechanical);
+    --ease-exit: cubic-bezier(.4, 0, 1, 1);
     color-scheme: dark;
-    --color-obsidian-canvas: #151818;
-    --color-carbon-lift: #242928;
-    --color-ash-stroke: #3c4542;
-    --color-graphite-mid: #a6b1ad;
-    --color-warm-granite: #aebcb6;
-    --color-pale-stone: #c1ccc7;
-    --color-bone: #f0f5f2;
-    --color-chalk: #fafafa;
-    --color-on-action: #102a21;
-    --color-cost-increase: #ffb19b;
-    --color-signal-orange: #78d6b5;
-    --color-metric-green: #8ed5ae;
-    --color-error: #ffb4ab;
-    --color-warning: #dbbd77;
-    --color-electric-violet: #78beff;
-    --color-periwinkle-glow: #78beff;
-    --color-violet-glow: #356b95;
-    --color-category-compute: #78beff;
-    --color-category-storage: #a0ca92;
-    --color-category-networking: #6fa5b8;
-    --color-category-databases: #dbbd77;
-    --color-category-ai: #c58fbc;
-    --color-category-other: #77716e;
-    --color-bright-surface: #eeeeee;
-    --color-surface: #1c2120;
-    --color-surface-hover: #2a3230;
-    --color-accent-subtle: #253b32;
-    --color-focus: #78d6b5;
-    --color-disabled-text: #a6b1ad;
-    --color-skeleton: #343e39;
-    --glass-bg: rgb(255 255 255 / .045);
-    --glass-bg-strong: rgb(255 255 255 / .08);
-    --glass-border: rgb(255 255 255 / .1);
-    --glass-highlight: rgb(255 255 255 / .16);
-    --glass-blur: blur(24px);
+
+    /* A near-hueless, very slightly cool neutral ramp. Steps sit close together because depth
+       here comes from many small separations rather than a few large ones — which is what lets
+       the single accent be the only thing on screen that reads as colour. */
+    --color-obsidian-canvas: #0F1214;
+    --color-carbon-lift: #191D21;
+    --color-ash-stroke: #434B56;
+    /* Structural strokes read at about 2:1 against their surface, which is
+       enough to divide areas without turning every hairline into a rule.
+       Interactive boundaries - inputs, selects, buttons - carry their own
+       heavier stroke at 3:1, the floor WCAG sets for non-text UI components
+       (1.4.11). Both were previously near 1.2:1 and effectively invisible. */
+    --color-control-stroke: #5F6975;
+    --color-graphite-mid: #98A3AF;
+    --color-warm-granite: #A9B4C0;
+    --color-pale-stone: #C6CFD8;
+    --color-bone: #F3F6F9;
+    --color-chalk: #FFFFFF;
+    --color-on-action: #04223E;
+    --color-cost-increase: #FF8FA0;
+
+    /* The accent, split the way Fluent splits it: a saturated fill that carries its own
+       foreground, and a lighter tint for when the same blue has to work as ink on the page. */
+    --color-signal-orange: #4FA8F5;
+    --color-metric-green: #6BCB57;
+    --color-error: #FF9BA5;
+    --color-warning: #F0C25A;
+    --color-electric-violet: #4FA8F5;
+    --color-periwinkle-glow: #83C3FF;
+    --color-violet-glow: #1F5C8F;
+    --color-accent-line: rgb(79 168 245 / .42);
+    --color-accent-glow: rgb(79 168 245 / .22);
+    --color-glow-rgb: 79 168 245;
+    --color-category-compute: #4FA8F5;
+    --color-category-storage: #6BCB57;
+    --color-category-networking: #2ED2E0;
+    --color-category-databases: #F0C25A;
+    --color-category-ai: #B98AE0;
+    --color-category-other: #8A94A0;
+    --color-bright-surface: #F5F7FA;
+    --color-surface: #16191D;
+    --color-surface-hover: #212730;
+    --color-accent-subtle: #10293F;
+    --color-focus: #4FA8F5;
+    --color-disabled-text: #8A94A0;
+    --color-skeleton: #262C33;
+
+    /* Page atmosphere. Two very wide, very low-opacity washes so the canvas is not a flat
+       slab - visible as depth, never as a gradient anyone would name. */
+    --canvas-wash:
+        radial-gradient(1200px 620px at 12% -10%, rgb(79 168 245 / .10), transparent 62%),
+        radial-gradient(980px 560px at 92% 4%, rgb(46 210 224 / .06), transparent 60%);
+    --glass-bg: rgb(255 255 255 / .038);
+    --glass-bg-strong: rgb(255 255 255 / .072);
+    --glass-border: rgb(255 255 255 / .16);
+    --glass-highlight: rgb(255 255 255 / .14);
+    --glass-blur: blur(20px) saturate(140%);
+    --hairline: linear-gradient(90deg, transparent, var(--glass-highlight) 18%, var(--glass-highlight) 82%, transparent);
+    --scrollbar-thumb: rgb(255 255 255 / .16);
+    --scrollbar-thumb-hover: rgb(255 255 255 / .28);
 }
 
 :root[data-density='compact'] {
@@ -93,38 +138,49 @@
 
 :root[data-theme='light'] {
     color-scheme: light;
-    --color-obsidian-canvas: #f3f5f5;
-    --color-carbon-lift: #f0f3f2;
-    --color-ash-stroke: #d8dfdc;
-    --color-graphite-mid: #52635c;
-    --color-warm-granite: #52635c;
-    --color-pale-stone: #465a50;
-    --color-bone: #202d27;
-    --color-chalk: #202d27;
+    --color-obsidian-canvas: #F3F6FA;
+    --color-carbon-lift: #FFFFFF;
+    --color-ash-stroke: #AEB9C7;
+    --color-control-stroke: #8A96A6;
+    --color-graphite-mid: #5A6675;
+    --color-warm-granite: #5A6675;
+    --color-pale-stone: #47525F;
+    --color-bone: #15181C;
+    --color-chalk: #15181C;
     --color-on-action: #ffffff;
-    --color-cost-increase: #a4262c;
-    --color-error: #a4262c;
-    --color-signal-orange: #0b6b50;
-    --color-metric-green: #107c41;
-    --color-warning: #715817;
-    --color-electric-violet: #0067b8;
-    --color-periwinkle-glow: #1d68a7;
-    --color-violet-glow: #005a9e;
-    --color-category-compute: #0078d4;
-    --color-category-storage: #107c41;
-    --color-category-networking: #2b88d8;
-    --color-category-databases: #b58500;
-    --color-category-ai: #8764b8;
-    --color-category-other: #64778a;
+    --color-cost-increase: #C4314B;
+    --color-error: #C4314B;
+    --color-signal-orange: #0F6CBD;
+    --color-metric-green: #0E700E;
+    --color-warning: #825B00;
+    --color-electric-violet: #0F6CBD;
+    --color-periwinkle-glow: #0F6CBD;
+    --color-violet-glow: #0A4F8C;
+    --color-accent-line: rgb(15 108 189 / .38);
+    --color-accent-glow: rgb(15 108 189 / .16);
+    --color-glow-rgb: 15 108 189;
+    --color-category-compute: #0F6CBD;
+    --color-category-storage: #0E700E;
+    --color-category-networking: #00809B;
+    --color-category-databases: #825B00;
+    --color-category-ai: #8764B8;
+    --color-category-other: #5A6675;
     --color-bright-surface: #ffffff;
     --color-surface: #ffffff;
-    --color-surface-hover: #f0f5f2;
-    --color-accent-subtle: #e7f3ed;
-    --color-focus: #0b6b50;
-    --color-disabled-text: #52635c;
-    --color-skeleton: #d5dfd9;
-    --glass-bg: rgb(0 90 158 / .035);
-    --glass-bg-strong: rgb(0 90 158 / .06);
-    --glass-border: rgb(0 90 158 / .16);
-    --glass-highlight: rgb(255 255 255 / .75);
+    --color-surface-hover: #EEF3F9;
+    --color-accent-subtle: #E4F0FB;
+    --color-focus: #0F6CBD;
+    --color-disabled-text: #6B7684;
+    --color-skeleton: #E2E8EF;
+    --elevation-hover: 0 1px 2px rgb(16 24 40 / .07), 0 16px 36px rgb(16 24 40 / .13);
+    --canvas-wash:
+        radial-gradient(1200px 620px at 12% -10%, rgb(15 108 189 / .09), transparent 62%),
+        radial-gradient(980px 560px at 92% 4%, rgb(0 128 155 / .05), transparent 60%);
+    --glass-bg: rgb(255 255 255 / .70);
+    --glass-bg-strong: rgb(255 255 255 / .88);
+    --glass-border: rgb(16 40 70 / .22);
+    --glass-highlight: rgb(255 255 255 / .9);
+    --hairline: linear-gradient(90deg, transparent, rgb(16 40 70 / .10) 18%, rgb(16 40 70 / .10) 82%, transparent);
+    --scrollbar-thumb: rgb(16 40 70 / .20);
+    --scrollbar-thumb-hover: rgb(16 40 70 / .34);
 }

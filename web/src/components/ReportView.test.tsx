@@ -59,9 +59,12 @@ it('keeps budget matching, forecast variance and status thresholds explicit', as
 });
 
 it('drills from a selected period into day resources, preserves the range for anomalies, and replaces savings breakdown', async () => {
-  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" />));
-  await act(async () => button('7d').click());
-  expect(container.querySelector<HTMLInputElement>('[aria-label="Cost window start"]')?.value).toBe('2026-09-01');
+  // The cost window is now owned by App and presented once in the saved-report
+  // strip, so the range arrives as a prop rather than being set from a control
+  // inside the report. The behaviour under test is unchanged: the same window
+  // drives the period drilldown and the anomalies tab.
+  const costWindow = { startDate: '2026-09-01', endDate: '2026-09-07' };
+  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" costWindow={costWindow} onCostWindowChange={() => {}} />));
   expect(container.querySelector('.cost-chart-previous')?.getAttribute('d')).toContain('M');
   await act(async () => container.querySelector<SVGElement>('[data-cost-date="2026-09-07"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   const drilldown = container.querySelector('[aria-label="Selected day resource detail"]')!;
@@ -75,7 +78,8 @@ it('drills from a selected period into day resources, preserves the range for an
   expect(drilldown.textContent).toContain('720/1440 minutes');
   await act(async () => container.querySelector<HTMLButtonElement>('.period-anomaly-link')!.click());
   expect(container.querySelector('[aria-label="Selected period anomalies"]')?.textContent).toContain('finance-vm');
-  expect(container.querySelector<HTMLInputElement>('[aria-label="Cost window start"]')?.value).toBe('2026-09-01');
+  // The 7-day window supplied above is what the anomalies tab compares against.
+  expect(container.querySelector('[aria-label="Selected period anomalies"]')?.textContent).toContain('preceding 7-day window');
   await act(async () => button('Subscription Breakdown').click());
   expect(container.textContent).not.toContain('Savings by Subscription');
   const grouping = container.querySelector<HTMLSelectElement>('[aria-label="Cost grouping"]')!;

@@ -1,0 +1,75 @@
+/* Breakdown and trend surfaces. Presentation only — every value comes from the
+   shared token scale so these views match the rest of the report. */
+
+.cost-breakdown {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.cost-breakdown-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+}
+
+.cost-breakdown-total {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: var(--nums);
+}
+
+/* A segmented control, matching the range picker so the two read as the same
+   kind of choice rather than as two different widgets. */
+
+.segmented {
+    display: inline-flex;
+    border: var(--border-width) solid var(--color-control-stroke);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.segmented button {
+    min-height: var(--control-md);
+    padding-inline: var(--space-3);
+    border: 0;
+    border-radius: 0;
+    background: var(--color-surface);
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-medium);
+    cursor: pointer;
+}
+
+.segmented button+button {
+    border-inline-start: var(--border-width) solid var(--color-ash-stroke);
+}
+
+.segmented button:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+    color: var(--color-bone);
+}
+
+.segmented button.active {
+    background: var(--color-accent-subtle);
+    color: var(--color-signal-orange);
+    font-weight: var(--weight-semi);
+}
+
+/* The resource row carries its subscription underneath, so the name stays the
+   thing you read first. */
+
+.app-cost-table th[scope='row'] small {
+    display: block;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-weight: 400;
+}
+
+.trend-chart {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}

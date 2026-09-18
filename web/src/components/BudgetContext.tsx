@@ -54,7 +54,7 @@ export function useBudgetSummary(report: Pick<FullReport, 'subscriptionBreakdown
   return { budgets, loading, error, refresh: () => setVersion((value) => value + 1) };
 }
 
-export function BudgetContext({ state, details, filters = {} }: { state: BudgetState; details?: CostDetailSummary; filters?: CostFilter }) {
+export function BudgetContext({ state, details, filters = {}, showHeading = true }: { state: BudgetState; details?: CostDetailSummary; filters?: CostFilter; showHeading?: boolean }) {
   const rows = details?.rows.filter((row) => matchesCostFilter(row, filters)) ?? [];
   const budgets = state.budgets.filter((budget) => !filters.subscriptionId || budget.subscriptionId.toLowerCase() === filters.subscriptionId.toLowerCase()).map((budget) => {
     const conditions = rows.filter((row) => row.subscriptionId.toLowerCase() === budget.subscriptionId.toLowerCase()).map((row) => budgetFilterMatches(budget.filter, row));
@@ -62,7 +62,7 @@ export function BudgetContext({ state, details, filters = {} }: { state: BudgetS
     return { budget, relation: unfiltered ? 'Subscription-wide budget' : conditions.includes(true) ? 'Matching budget filter' : !conditions.length || conditions.includes(null) ? 'Filter applicability unverified' : 'unrelated' };
   }).filter((item) => item.relation !== 'unrelated');
   return <section className="cost-budget-context" aria-label="Applicable Azure budgets" aria-busy={state.loading}>
-    <header className="cost-section-heading"><h3>Azure budget context</h3><button type="button" className="ghost-button" disabled={state.loading} onClick={state.refresh} aria-label="Refresh budget context" title="Refresh budget context"><RefreshCw size={16} /></button></header>
+    {showHeading && <header className="cost-section-heading"><h3>Azure budget context</h3><button type="button" className="ghost-button" disabled={state.loading} onClick={state.refresh} aria-label="Refresh budget context" title="Refresh budget context"><RefreshCw size={16} /></button></header>}
     {state.loading ? <p role="status">Checking subscription budgets...</p> : state.error ? <p role="alert">{state.error}</p> : !budgets.length ? <p role="status">No matching subscription-scope budgets were returned.</p> : <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Azure budget status"><table className="data-table billing-table"><thead><tr><th>Budget / scope</th><th>Budget amount</th><th>Current spend</th><th>Budget remaining</th><th>Azure forecast</th><th>Status</th></tr></thead><tbody>{budgets.map(({ budget, relation }) => {
       const status = budgetThreshold(budget);
       const native = (value: number | null) => value === null ? 'Unavailable' : `${budget.currency} ${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;

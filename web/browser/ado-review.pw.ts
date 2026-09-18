@@ -3,7 +3,7 @@ import { anomalyFixture, detailReportFixture, pricingReportFixture, rateOptimiza
 
 async function runReport(page: Page) {
   await page.getByRole('button', { name: /^(Run report|Update report)$/ }).click({ timeout: 15000 });
-  await expect(page.getByRole('heading', { name: 'Assessment Headlines' })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole('heading', { name: 'Cost Overview' })).toBeVisible({ timeout: 15000 });
   await expect(page.getByRole('button', { name: 'Update report', exact: true })).toBeEnabled();
 }
 
@@ -216,7 +216,7 @@ test('only Run Report starts an assessment, including after reload, and navigati
   await page.getByRole('button', { name: 'Chat', exact: true }).click();
   await expect(page.getByRole('navigation', { name: 'Report navigation' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Report', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Assessment Headlines' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Cost Overview' })).toBeVisible();
   expect(assessmentRequests).toEqual(['/api/report/latest', '/api/report/latest', '/api/report', '/api/report/latest', '/api/narrate']);
   expect(revisitRequests).toEqual([]);
   await test.info().attach('workspace-revisit-metrics.json', {
@@ -412,7 +412,14 @@ test('EA commitment evidence and Rate Optimization text remain readable across t
       await expect(page.getByText('Synthetic recommendation available', { exact: false })).toBeVisible();
       expect(await page.locator('.commitment-table tbody tr').allTextContents()).toEqual(rowTexts);
       const samples = await page.locator('.rate-optimization-panel').evaluate((panel) => {
-        const parseColor = (value: string) => value.match(/[\d.]+/g)!.map(Number);
+        const parseColor = (value: string) => {
+          const channels = value.match(/[\d.]+/g)!.map(Number);
+          // color-mix() serialises as CSS Color Level 4 `color(srgb r g b / a)`, whose
+          // r/g/b channels are 0-1 rather than the 0-255 used by rgb()/rgba(). Without
+          // this, a white 40% glass surface reads as near-black and inverts the result.
+          if (!value.startsWith('color(')) return channels;
+          return [channels[0] * 255, channels[1] * 255, channels[2] * 255, channels[3] ?? 1];
+        };
         const luminance = (channels: number[]) => channels.slice(0, 3).map((channel) => {
           const normalized = channel / 255;
           return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;

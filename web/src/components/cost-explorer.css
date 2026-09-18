@@ -140,9 +140,14 @@
     color: var(--color-bone);
 }
 
+/* Now that the chart renders at 1:1 these are real pixels, so they come from the
+   shared scale rather than a magic number: axis labels are captions and take the
+   same size as every other caption in the interface. */
 .cost-comparison-chart text {
     fill: var(--color-bone);
-    font: 13px var(--font-geist);
+    font-family: var(--font-geist);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: var(--nums);
 }
 
 .cost-chart-grid {

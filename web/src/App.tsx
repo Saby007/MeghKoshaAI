@@ -2,6 +2,8 @@ import { Component, Suspense, lazy, useEffect, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { ArrowRight, BarChart3, CalendarClock, Check, LoaderCircle, Maximize2, MessageSquareText, Moon, RefreshCw, Rows3, ShieldCheck, Sun } from 'lucide-react';
 import { SubscriptionPicker, type Subscription } from './components/SubscriptionPicker';
+import { CostRangeControls } from './components/CostRangeControls';
+import { presetCostWindow, type CostWindow } from './report/costDetails';
 import { runCostAssessment, type StaleDays } from './collectors/costAssessment';
 import { getLatestReport, narrate, type CostAgentOutput } from './api';
 import { apiFetch, ApiIdentityRequiredError, initializeApiIdentity, redirectApiIdentity, signOutApiIdentity, IDENTITY_REQUIRED_EVENT, type VerifiedIdentity } from './apiIdentity';
@@ -246,6 +248,15 @@ export default function App() {
   const workGeneration = useRef(0);
   const [view, setView] = useState<WorkspaceView>('report');
   const [visitedViews, setVisitedViews] = useState<Set<WorkspaceView>>(() => new Set(['report']));
+  /* The cost window is presented once, beside "Open saved report", and applies
+     to every tab that reads it, so it is owned here and handed to ReportView
+     rather than being re-declared inside each tab. */
+  const [costWindow, setCostWindow] = useState<CostWindow>({ startDate: '', endDate: '' });
+  const costWindowDatesAvailable = report ? report.costDetails?.dates ?? report.dailyCostTrend?.days?.map((day) => day.date) ?? [] : [];
+  useEffect(() => {
+    if (!report) return;
+    setCostWindow(presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend?.days?.map((day) => day.date) ?? [], 30));
+  }, [report]);
 
   useEffect(() => {
     const currentAsset = Array.from(document.scripts)
@@ -597,6 +608,7 @@ export default function App() {
               if (!enabled && loadingSnapshot) { pendingStartup.current?.abort(); setLoadingSnapshot(false); }
             }} /> Open saved report automatically</label>
             <button type="button" className="ghost-button" disabled={loadingSubscriptions || loadingSnapshot || running || !!identityError} onClick={() => setStartupVersion((value) => value + 1)}><RefreshCw size={15} aria-hidden="true" /> Open saved report</button>
+            {report && <CostRangeControls dates={costWindowDatesAvailable} value={costWindow} onChange={setCostWindow} />}
           </div>
           {loadingSnapshot && <section className="saved-report-status"><span role="status"><LoaderCircle className="spin" size={18} aria-hidden="true" /> Opening saved report...</span><button type="button" className="ghost-button" onClick={() => { pendingStartup.current?.abort(); setLoadingSnapshot(false); }}>Skip saved report</button></section>}
           {(snapshotError || (error && !report)) && <section className="saved-report-status">
@@ -629,7 +641,7 @@ export default function App() {
           {report && (
             <ReportErrorBoundary>
               <Suspense fallback={<WorkspaceLoading label="report" />}>
-                <ReportView report={report} narration={narration} snapshotId={loadedSnapshot?.snapshotId ?? null} snapshotCreatedAt={loadedSnapshot?.createdAt} />
+                <ReportView report={report} narration={narration} snapshotId={loadedSnapshot?.snapshotId ?? null} snapshotCreatedAt={loadedSnapshot?.createdAt} costWindow={costWindow} onCostWindowChange={setCostWindow} />
               </Suspense>
             </ReportErrorBoundary>
           )}

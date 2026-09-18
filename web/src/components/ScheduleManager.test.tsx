@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiRequestError, configureCostExport, createCostSchedule, getCostExportConfiguration, listCostSchedules, listScheduleRuns, setCostScheduleState, type CostSchedule, type FocusExportConfiguration, type ScheduleRun } from '../api';
+import { ApiRequestError, configureCostExport, createCostSchedule, getCostExportConfiguration, listCostSchedules, listScheduleRuns, runAllCostSchedules, setCostScheduleState, type CostSchedule, type FocusExportConfiguration, type ScheduleRun } from '../api';
 import { ScheduleManager } from './ScheduleManager';
 
 vi.mock('../api', async (importOriginal) => ({
@@ -170,6 +170,26 @@ describe('Open Schedules', () => {
     expect(container.querySelector<HTMLButtonElement>('button[aria-label="Configure export for Other subscription"]')?.disabled).toBe(false);
     expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Run all'))?.disabled).toBe(true);
     expect(container.textContent).not.toContain('Onboard subscription');
+  });
+
+  it('keeps Run all disabled when a ready subscription sits alongside unavailable ones', async () => {
+    vi.mocked(listCostSchedules).mockResolvedValue([
+      { ...schedule, state: 'not_scheduled', availability: 'available', statusMessage: null,
+        latestRun: null, nextRunAt: null, scheduleStartAt: null },
+      { ...schedule, subscriptionId: 'throttled', displayName: 'Throttled subscription', state: 'unknown',
+        readAccess: false, costAccess: false, availability: 'access_unavailable',
+        statusMessage: 'Azure subscription access check was throttled. Retry after 120 seconds.',
+        latestRun: null, nextRunAt: null, scheduleStartAt: null },
+      { ...schedule, subscriptionId: 'pending', displayName: 'Pending processor setup', state: 'unknown',
+        availability: 'configuration_unavailable', statusMessage: 'The six-month FOCUS worker is not enabled.',
+        latestRun: null, nextRunAt: null, scheduleStartAt: null },
+    ]);
+    await act(async () => root.render(<ScheduleManager />));
+    // The ready subscription stays individually actionable, but the bulk action must not be
+    // offered while other rows cannot be run: it would act on a subset of the listed estate.
+    expect(container.querySelector<HTMLButtonElement>('button[aria-label="Schedule Subscription One"]')?.disabled).toBe(false);
+    expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Run all'))?.disabled).toBe(true);
+    expect(runAllCostSchedules).not.toHaveBeenCalled();
   });
 
   it('never labels an unknown execution as exported and tolerates invalid timestamps', async () => {

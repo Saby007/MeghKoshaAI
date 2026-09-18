@@ -266,6 +266,13 @@ $env:APP_ALLOW_AZURE_CHANGES = 'true'
 ./scripts/bootstrap-identity.ps1 -TenantId $AZURE_TENANT_ID -SubscriptionId $AZURE_SUBSCRIPTION_ID -EnvironmentName $AZURE_ENV_NAME -WebOrigin $APP_WEB_ORIGIN -OboManagedIdentityResourceId $MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID -Apply
 ```
 
+If Azure CLI reports `AADSTS530004` for an external/guest administrator, the resource tenant is requiring a compliant device without accepting the user's home-tenant compliance claim. A resource-tenant Entra administrator must enable the appropriate inbound cross-tenant **Trust compliant devices** setting (External Identities > Cross-tenant access settings) or adjust the applicable Conditional Access policy. Alternatively, run the bootstrap as an authorized member of the resource tenant from a compliant device. After the policy/account issue is resolved, refresh the Graph login and rerun:
+
+```powershell
+az logout
+az login --tenant $AZURE_TENANT_ID --scope 'https://graph.microsoft.com/.default'
+```
+
 The output includes the two client IDs it just created. Feed them back into the deployment and redeploy:
 
 ```powershell

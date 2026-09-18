@@ -93,12 +93,12 @@ body {
     left: -56px;
     width: 420px;
     height: 280px;
-    background: radial-gradient(circle farthest-side at 20% 30%, rgba(124, 77, 255, 0.32), transparent 75%);
+    background: radial-gradient(circle farthest-side at 20% 30%, rgb(var(--color-glow-rgb) / 0.32), transparent 75%);
     pointer-events: none;
 }
 
 :root[data-theme='light'] .app-header::before {
-    background: radial-gradient(circle farthest-side at 20% 30%, rgba(0, 120, 212, 0.16), transparent 75%);
+    background: radial-gradient(circle farthest-side at 20% 30%, var(--color-accent-glow), transparent 75%);
 }
 
 .brand-lockup {
@@ -267,7 +267,7 @@ body {
 }
 
 .workspace-nav button.active {
-    background: linear-gradient(180deg, rgba(124, 77, 255, 0.38), rgba(124, 77, 255, 0.2));
+    background: linear-gradient(180deg, rgb(var(--color-glow-rgb) / 0.38), rgb(var(--color-glow-rgb) / 0.2));
     color: var(--color-chalk);
     box-shadow: var(--shadow-sm);
 }
@@ -345,7 +345,7 @@ body {
     position: absolute;
     z-index: 0;
     inset: 0;
-    background: radial-gradient(circle 640px at 50% 8%, rgba(124, 77, 255, 0.30), transparent 72%);
+    background: radial-gradient(circle 640px at 50% 8%, rgb(var(--color-glow-rgb) / 0.30), transparent 72%);
     pointer-events: none;
 }
 
@@ -376,7 +376,7 @@ body {
     position: absolute;
     z-index: 0;
     inset: 0;
-    background: radial-gradient(circle 640px at 15% 20%, rgba(124, 77, 255, 0.22), transparent 70%), linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background: radial-gradient(circle 640px at 15% 20%, rgb(var(--color-glow-rgb) / 0.22), transparent 70%), linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
     background-size: auto, 48px 48px, 48px 48px;
     pointer-events: none;
 }
@@ -2486,7 +2486,7 @@ body {
     left: 0;
     height: calc(100% - 8px);
     border-radius: 9px;
-    background: linear-gradient(135deg, rgba(124, 77, 255, 0.4), rgba(124, 77, 255, 0.18));
+    background: linear-gradient(135deg, rgb(var(--color-glow-rgb) / 0.4), rgb(var(--color-glow-rgb) / 0.18));
     box-shadow: var(--shadow-sm);
     transition: transform 0.32s var(--ease-glass), width 0.32s var(--ease-glass);
     pointer-events: none;
@@ -2579,7 +2579,7 @@ body {
 }
 
 .primary-nav-menu button.active {
-    background: linear-gradient(135deg, rgba(124, 77, 255, 0.32), rgba(124, 77, 255, 0.12));
+    background: linear-gradient(135deg, rgb(var(--color-glow-rgb) / 0.32), rgb(var(--color-glow-rgb) / 0.12));
     color: var(--color-chalk);
 }
 
@@ -2715,8 +2715,8 @@ body {
 }
 
 .category-pill.active {
-    border-color: rgba(124, 77, 255, 0.5);
-    background: linear-gradient(135deg, rgba(124, 77, 255, 0.32), rgba(124, 77, 255, 0.12));
+    border-color: rgb(var(--color-glow-rgb) / 0.5);
+    background: linear-gradient(135deg, rgb(var(--color-glow-rgb) / 0.32), rgb(var(--color-glow-rgb) / 0.12));
     box-shadow: var(--shadow-sm);
 }
 
@@ -5341,13 +5341,16 @@ body {
     margin-top: 4px;
 }
 
+/* Each label owns a single ~34px day column, but a date at caption size
+   needs about 38px. Now that only every Nth day is labelled, the columns
+   on either side are empty, so the label is allowed to use that space
+   instead of being ellipsised inside its own cell. */
 .daily-line-chart-labels span {
-    overflow: hidden;
+    overflow: visible;
     color: var(--color-warm-granite);
     font-family: var(--font-geist-mono);
-    font-size: 9px;
+    font-size: var(--font-size-xs);
     text-align: center;
-    text-overflow: ellipsis;
     white-space: nowrap;
 }
 
@@ -7318,3 +7321,3407 @@ body {
         margin: 0 14px 12px;
     }
 }
+
+/* =====================================================================
+   PREMIUM PRESENTATION LAYER
+   ---------------------------------------------------------------------
+   Presentation only: no markup, no class names and no behaviour depend on
+   anything below. It loads last so it refines what the base sheet already
+   establishes rather than replacing it - elevation, hairlines, segmented
+   controls, table chrome, focus and motion. Every value is expressed in the
+   shared tokens, so a theme change still reaches all of it.
+   ===================================================================== */
+
+:root html {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+:root body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-synthesis-weight: none;
+    background-image: var(--canvas-wash);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+}
+
+::selection {
+    background: var(--color-accent-glow);
+    color: var(--color-bone);
+}
+
+
+/* Scrollbars: present when needed, silent otherwise. A default chrome scrollbar
+   is the single loudest piece of furniture in an otherwise quiet console. */
+
+*::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+
+/* Focus: one ring everywhere, drawn outside the control so it never shifts layout
+   and never disappears against a same-coloured surface. */
+
+:root :focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: var(--focus-width);
+    border-radius: var(--radius-sm);
+}
+
+
+/* ---- Header ------------------------------------------------------- */
+
+:root .app-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    min-height: 58px;
+    padding-inline: 2px;
+    border-bottom: 1px solid var(--glass-border);
+    background: color-mix(in srgb, var(--color-obsidian-canvas) 78%, transparent);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    margin-bottom: var(--space-4);
+}
+
+:root .app-header::before {
+    top: -96px;
+    left: -80px;
+    width: 520px;
+    height: 320px;
+    background: radial-gradient(circle farthest-side at 22% 32%, var(--color-accent-glow), transparent 72%);
+}
+
+:root .app-header::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: var(--hairline);
+    pointer-events: none;
+}
+
+@media (max-width: 560px) {
+    :root .app-header {
+        height: auto;
+        min-height: 64px;
+    }
+}
+
+:root .brand-product {
+    letter-spacing: var(--tracking-heading);
+    font-weight: var(--weight-semi);
+}
+
+
+/* ---- Segmented controls (top nav, workspace nav) ------------------- */
+
+:root .primary-nav-rail,
+:root .workspace-nav {
+    border-radius: 999px;
+    padding: 4px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-sm), var(--elevation-inset);
+}
+
+:root .primary-nav-rail button,
+:root .workspace-nav button {
+    border-radius: 999px;
+    letter-spacing: var(--tracking-overline);
+    font-weight: var(--weight-semi);
+    transition:
+        color var(--motion-duration) var(--ease-glass),
+        background-color var(--motion-duration) var(--ease-glass);
+}
+
+:root .primary-nav-rail button:hover,
+:root .workspace-nav button:hover {
+    color: var(--color-bone);
+    background: var(--glass-bg-strong);
+}
+
+:root .primary-nav-rail button[aria-selected='true'],
+:root .primary-nav-rail button.is-active,
+:root .workspace-nav button[aria-pressed='true'],
+:root .workspace-nav button.is-active {
+    color: var(--color-bone);
+}
+
+:root .primary-nav-indicator {
+    border-radius: 999px;
+    background: var(--glass-bg-strong);
+    box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--glass-border), var(--elevation-inset);
+    transition: transform var(--motion-duration-slow) var(--ease-glass), width var(--motion-duration-slow) var(--ease-glass);
+}
+
+
+/* ---- Surfaces: the working card ----------------------------------- */
+
+:root .dashboard-frame {
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-cards);
+    background: color-mix(in srgb, var(--color-carbon-lift) 62%, transparent);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+}
+
+:root .dashboard-titlebar {
+    position: relative;
+    background: var(--glass-bg-strong);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    padding: var(--space-3) var(--space-4);
+}
+
+:root .dashboard-titlebar::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: var(--hairline);
+}
+
+:root .dashboard-title {
+    letter-spacing: var(--tracking-heading);
+    font-weight: var(--weight-semi);
+}
+
+:root .dashboard-body {
+    padding: var(--space-4);
+}
+
+:root .card {
+    border-radius: var(--radius-cards);
+    box-shadow: var(--shadow-lg);
+}
+
+:root .scope-ribbon {
+    border-radius: var(--radius-cards);
+    border-color: var(--glass-border);
+    background: color-mix(in srgb, var(--color-carbon-lift) 84%, transparent);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: var(--shadow-md);
+}
+
+
+/* ---- Metrics ------------------------------------------------------- */
+
+:root .kpi-grid {
+    gap: var(--space-2);
+}
+
+:root .kpi-card {
+    position: relative;
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    background: var(--glass-bg);
+    box-shadow: var(--elevation-inset);
+    overflow: hidden;
+}
+
+:root .kpi-card::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 1px;
+    background: var(--hairline);
+    opacity: .7;
+}
+
+:root .kpi-card::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--color-signal-orange);
+    opacity: 0;
+    transform: scaleY(.4);
+    transform-origin: 50% 50%;
+    transition: opacity var(--motion-duration) var(--ease-glass), transform var(--motion-duration) var(--ease-glass);
+}
+
+:root .kpi-card:hover {
+    background: var(--glass-bg-strong);
+    transform: translateY(-2px);
+    box-shadow: var(--elevation-hover), var(--elevation-inset);
+}
+
+:root .kpi-card:hover::after {
+    opacity: .9;
+    transform: scaleY(1);
+}
+
+:root .kpi-label,
+:root .summary-tile-label,
+:root .eyebrow,
+:root .pill,
+:root .kicker,
+:root .executive-kicker,
+:root .operations-kicker {
+    letter-spacing: var(--tracking-overline);
+    font-weight: var(--weight-semi);
+    font-size: var(--font-size-xs);
+}
+
+:root .kpi-value,
+:root .summary-tile-value,
+:root .report-table td,
+:root .resource-table td,
+:root .anomaly-table td,
+:root .pricing-table td,
+:root .rate-table td,
+:root .schedule-table td,
+:root .executive-findings-table td,
+:root .action-plan-table td {
+    font-variant-numeric: var(--nums);
+}
+
+:root .kpi-value,
+:root .summary-tile-value {
+    letter-spacing: var(--tracking-heading-lg);
+    font-weight: var(--weight-semi);
+}
+
+:root .summary-strip {
+    background: var(--glass-bg);
+}
+
+:root .summary-tile:hover {
+    background: var(--glass-bg-strong);
+}
+
+
+/* ---- Section headings ---------------------------------------------- */
+
+:root .section-title,
+:root .operations-heading h1,
+:root .chat-welcome h1 {
+    letter-spacing: var(--tracking-heading);
+    font-weight: var(--weight-semi);
+}
+
+:root .section-subtitle {
+    color: var(--color-graphite-mid);
+}
+
+
+/* ---- Tables -------------------------------------------------------- */
+
+:root .report-table,
+:root .resource-table,
+:root .anomaly-table,
+:root .pricing-table,
+:root .rate-table,
+:root .schedule-table,
+:root .storage-tier-table,
+:root .ai-usage-table,
+:root .finops-action-table,
+:root .roadmap-table,
+:root .stale-resource-table,
+:root .advisor-recommendations-table,
+:root .action-plan-table,
+:root .executive-findings-table {
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+:root .report-table thead th,
+:root .resource-table thead th,
+:root .anomaly-table thead th,
+:root .pricing-table thead th,
+:root .rate-table thead th,
+:root .schedule-table thead th,
+:root .storage-tier-table thead th,
+:root .ai-usage-table thead th,
+:root .finops-action-table thead th,
+:root .roadmap-table thead th,
+:root .stale-resource-table thead th,
+:root .advisor-recommendations-table thead th,
+:root .action-plan-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--color-carbon-lift);
+    letter-spacing: var(--tracking-overline);
+    font-weight: var(--weight-semi);
+    white-space: nowrap;
+}
+
+:root .report-table tbody tr,
+:root .resource-table tbody tr,
+:root .anomaly-table tbody tr,
+:root .pricing-table tbody tr,
+:root .rate-table tbody tr,
+:root .schedule-table tbody tr,
+:root .finops-action-table tbody tr,
+:root .stale-resource-table tbody tr,
+:root .advisor-recommendations-table tbody tr,
+:root .action-plan-table tbody tr {
+    transition: background-color var(--motion-duration) var(--ease-glass);
+}
+
+:root .report-table tbody tr:hover,
+:root .resource-table tbody tr:hover,
+:root .anomaly-table tbody tr:hover,
+:root .pricing-table tbody tr:hover,
+:root .rate-table tbody tr:hover,
+:root .schedule-table tbody tr:hover,
+:root .finops-action-table tbody tr:hover,
+:root .stale-resource-table tbody tr:hover,
+:root .advisor-recommendations-table tbody tr:hover,
+:root .action-plan-table tbody tr:hover {
+    background: var(--glass-bg);
+}
+
+:root .table-scroll,
+:root .report-table-scroll,
+:root .resource-table-scroll,
+:root .anomaly-table-scroll,
+:root .pricing-table-scroll,
+:root .rate-table-scroll,
+:root .domain-table-scroll,
+:root .storage-table-scroll,
+:root .stale-table-scroll,
+:root .roadmap-table-scroll,
+:root .ai-usage-table-scroll,
+:root .action-plan-scroll,
+:root .executive-table-scroll,
+:root .schedule-table-wrap {
+    border-radius: var(--radius-md);
+    border: 1px solid var(--glass-border);
+    background: color-mix(in srgb, var(--color-carbon-lift) 40%, transparent);
+    overscroll-behavior: contain;
+}
+
+
+/* ---- Controls ------------------------------------------------------ */
+
+:root .primary-command,
+:root .scope-run-button {
+    border-radius: var(--radius-buttons);
+    border-color: transparent;
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--color-signal-orange) 92%, white) 0%, var(--color-signal-orange) 100%);
+    color: var(--color-on-action);
+    font-weight: var(--weight-semi);
+    letter-spacing: 0;
+    box-shadow: var(--shadow-sm), inset 0 1px 0 rgb(255 255 255 / .22);
+    transition:
+        filter var(--motion-duration) var(--ease-glass),
+        box-shadow var(--motion-duration) var(--ease-glass),
+        transform var(--motion-duration) var(--ease-glass);
+}
+
+:root .primary-command:hover:not(:disabled),
+:root .scope-run-button:hover:not(:disabled) {
+    filter: brightness(1.08);
+    box-shadow: var(--shadow-md), inset 0 1px 0 rgb(255 255 255 / .28);
+    transform: translateY(-1px);
+}
+
+:root .primary-command:active:not(:disabled),
+:root .scope-run-button:active:not(:disabled) {
+    transform: translateY(0);
+    filter: brightness(.96);
+    box-shadow: var(--shadow-sm);
+}
+
+:root .primary-command:disabled,
+:root .scope-run-button:disabled {
+    filter: grayscale(.5) brightness(.8);
+    box-shadow: none;
+}
+
+:root .outline-command,
+:root .ghost-link,
+:root .theme-toggle,
+:root .icon-command {
+    border-radius: var(--radius-buttons);
+    border-color: var(--glass-border);
+    background: var(--glass-bg);
+    transition:
+        background-color var(--motion-duration) var(--ease-glass),
+        border-color var(--motion-duration) var(--ease-glass),
+        color var(--motion-duration) var(--ease-glass),
+        transform var(--motion-duration) var(--ease-glass);
+}
+
+:root .outline-command:hover,
+:root .ghost-link:hover,
+:root .theme-toggle:hover,
+:root .icon-command:hover {
+    background: var(--glass-bg-strong);
+    border-color: var(--color-accent-line);
+    color: var(--color-bone);
+    transform: translateY(-1px);
+}
+
+:root .dark-button {
+    border-radius: var(--radius-buttons);
+    font-weight: var(--weight-semi);
+    box-shadow: var(--shadow-sm), inset 0 1px 0 rgb(255 255 255 / .18);
+    transition: filter var(--motion-duration) var(--ease-glass), transform var(--motion-duration) var(--ease-glass);
+}
+
+:root .dark-button:hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+}
+
+:root select,
+:root input[type='text'],
+:root input[type='email'],
+:root input[type='search'],
+:root input[type='number'],
+:root textarea {
+    border-radius: var(--radius-sm);
+    transition: border-color var(--motion-duration) var(--ease-glass), box-shadow var(--motion-duration) var(--ease-glass);
+}
+
+:root select:hover,
+:root input[type='text']:hover,
+:root input[type='email']:hover,
+:root input[type='search']:hover,
+:root input[type='number']:hover,
+:root textarea:hover {
+    border-color: var(--color-accent-line);
+}
+
+:root .pill,
+:root .category-pill,
+:root .evidence-badge,
+:root .live-badge,
+:root .data-freshness-badge,
+:root .severity {
+    border-radius: 999px;
+    border-color: var(--glass-border);
+    background: var(--glass-bg);
+}
+
+
+/* ---- Panels and left navigation ------------------------------------ */
+
+:root .left-nav-sidebar {
+    border-right-color: var(--glass-border);
+}
+
+:root .left-nav-group-label {
+    letter-spacing: var(--tracking-overline);
+    font-weight: var(--weight-semi);
+    color: var(--color-graphite-mid);
+}
+
+:root .left-nav-sidebar button {
+    border-radius: var(--radius-sm);
+    transition:
+        background-color var(--motion-duration) var(--ease-glass),
+        color var(--motion-duration) var(--ease-glass),
+        box-shadow var(--motion-duration) var(--ease-glass);
+}
+
+:root .left-nav-sidebar button:hover {
+    background: var(--glass-bg-strong);
+}
+
+:root .left-nav-sidebar button[aria-current='true'],
+:root .left-nav-sidebar button[aria-selected='true'] {
+    background: var(--color-accent-subtle);
+    box-shadow: inset 2px 0 0 var(--color-signal-orange);
+}
+
+
+/* ---- Sign-in ------------------------------------------------------- */
+
+
+/* The showcase panel is the first thing anyone sees, so it keeps its faint
+   engineering grid and gains a single accent light source rather than losing
+   both to a flat field. */
+
+:root .signin-screen::before {
+    content: '';
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(circle 720px at 14% 18%, rgb(var(--color-glow-rgb) / .20), transparent 68%),
+        radial-gradient(circle 520px at 78% 92%, rgb(var(--color-glow-rgb) / .10), transparent 70%),
+        linear-gradient(var(--glass-border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--glass-border) 1px, transparent 1px);
+    background-size: auto, auto, 48px 48px, 48px 48px;
+}
+
+:root .signin-production .signin-panel,
+:root .signin-panel {
+    border-left-color: var(--glass-border);
+}
+
+:root .signin-card-v2 {
+    border-radius: var(--radius-cards);
+    box-shadow: var(--shadow-lg), var(--elevation-inset);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+}
+
+:root .signin-headline,
+:root .signin-subhead {
+    letter-spacing: var(--tracking-heading-lg);
+}
+
+:root .signin-tagline {
+    letter-spacing: var(--tracking-overline);
+}
+
+
+/* ---- Conversation -------------------------------------------------- */
+
+:root .chat-workspace,
+:root .chat-composer {
+    border-radius: var(--radius-cards);
+    border-color: var(--glass-border);
+    box-shadow: var(--shadow-md);
+}
+
+:root .chat-message article,
+:root .chat-evidence,
+:root .chat-resources article {
+    border-radius: var(--radius-md);
+}
+
+:root .chat-starters button {
+    border-radius: var(--radius-md);
+    transition: background-color var(--motion-duration) var(--ease-glass), transform var(--motion-duration) var(--ease-glass);
+}
+
+:root .chat-starters button:hover {
+    transform: translateY(-2px);
+    background: var(--glass-bg-strong);
+}
+
+
+/* ---- Charts and visuals -------------------------------------------- */
+
+:root .donut-chart,
+:root .daily-line-chart,
+:root .monthly-chart,
+:root .region-map,
+:root .cost-treemap {
+    border-radius: var(--radius-md);
+}
+
+:root .top-service-bar,
+:root .app-cost-bar-track,
+:root .app-cost-bar-fill,
+:root .budget-progress-track,
+:root .budget-progress-fill,
+:root .coverage-bar,
+:root .storage-tier-bar,
+:root .commitment-bar-base,
+:root .commitment-bar-savings {
+    border-radius: 999px;
+}
+
+:root .daily-line-chart-point {
+    transition: r var(--motion-duration) var(--ease-glass);
+}
+
+
+/* ---- Loading ------------------------------------------------------- */
+
+:root .subscription-skeleton>*,
+:root .workspace-skeleton-grid i {
+    border-radius: var(--radius-md);
+    background:
+        linear-gradient(90deg,
+            var(--color-skeleton) 0%,
+            color-mix(in srgb, var(--color-skeleton) 60%, var(--color-surface-hover)) 50%,
+            var(--color-skeleton) 100%);
+    background-size: 200% 100%;
+    animation: premium-shimmer 1.4s linear infinite;
+}
+
+@keyframes premium-shimmer {
+    to {
+        background-position: -200% 0;
+    }
+}
+
+
+/* Motion is decoration here, so it is the first thing to go when the reader has
+   asked for less of it. The interface must still show state - only the travel stops. */
+
+@media (prefers-reduced-motion: reduce) {
+
+    :root *,
+    :root *::before,
+    :root *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    :root .kpi-card:hover,
+    :root .primary-command:hover:not(:disabled),
+    :root .scope-run-button:hover:not(:disabled),
+    :root .outline-command:hover,
+    :root .ghost-link:hover,
+    :root .theme-toggle:hover,
+    :root .dark-button:hover,
+    :root .chat-starters button:hover {
+        transform: none;
+    }
+}
+
+/* =====================================================================
+   PREMIUM PRESENTATION LAYER - REPORT WORKSPACE
+   ---------------------------------------------------------------------
+   report-workspace.css loads after this file and owns the workspace at
+   `.app-shell x` specificity, so these refinements are raised one step with
+   `:root` rather than being written into that sheet - which is held to a
+   literal-free contract by its own test. Presentation only.
+   ===================================================================== */
+
+
+/* Type: the workspace zeroes tracking across the board, which is right for
+   controls and wrong for figures and display headings - those close up. */
+
+:root .app-shell :is(.section-title, .dashboard-title, .report-page-title h1, .operations-heading h1) {
+    letter-spacing: var(--tracking-heading);
+}
+
+:root .app-shell :is(.kpi-value, .summary-tile-value, .billing-metrics output) {
+    letter-spacing: var(--tracking-heading-lg);
+    font-variant-numeric: var(--nums);
+}
+
+:root .app-shell :is(.report-table, .resource-table, .data-table, .schedule-table) td {
+    font-variant-numeric: var(--nums);
+}
+
+
+/* The working surface: one card, lifted off the canvas, with the navigation
+   inside it rather than floating beside it. */
+
+:root .app-shell .dashboard-frame {
+    border: var(--border-width) solid var(--glass-border);
+    border-radius: var(--radius-cards);
+    background: var(--color-carbon-lift);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+}
+
+:root .app-shell .dashboard-main {
+    background: var(--color-surface);
+    border-left: var(--border-width) solid var(--glass-border);
+}
+
+:root .app-shell .left-nav-sidebar {
+    padding: var(--space-4) var(--space-3);
+    background: transparent;
+}
+
+:root .app-shell .left-nav-group-toggle {
+    letter-spacing: var(--tracking-overline);
+    text-transform: uppercase;
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell :is(.left-nav-group button, .left-nav-children button) {
+    border-radius: var(--radius-sm);
+}
+
+:root .app-shell :is(.left-nav-group button:hover, .left-nav-children button:hover) {
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell .left-nav-children button.active {
+    position: relative;
+    background: var(--color-accent-subtle);
+    box-shadow: inset 2px 0 0 var(--color-signal-orange);
+}
+
+:root .app-shell .left-nav-group button.active {
+    box-shadow: var(--shadow-sm);
+}
+
+
+/* Scope ribbon: kept flat, as the workspace intends, but closed with a hairline
+   so the header block reads as one piece rather than stopping arbitrarily. */
+
+:root .app-shell .scope-ribbon {
+    border-bottom: var(--border-width) solid var(--glass-border);
+}
+
+:root .app-shell .scope-run-button {
+    border-color: transparent;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--color-signal-orange) 92%, white) 0%, var(--color-signal-orange) 100%);
+    box-shadow: var(--shadow-sm), inset 0 1px 0 rgb(255 255 255 / .22);
+}
+
+:root .app-shell .scope-run-button:hover:not(:disabled) {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--color-signal-orange) 84%, white) 0%, var(--color-signal-orange) 100%);
+    box-shadow: var(--shadow-md), inset 0 1px 0 rgb(255 255 255 / .28);
+}
+
+:root .app-shell .scope-run-button:disabled {
+    background: var(--color-carbon-lift);
+    box-shadow: none;
+}
+
+:root .app-shell .subscription-grid li {
+    border-color: var(--glass-border);
+    border-radius: var(--radius-md);
+}
+
+:root .app-shell .subscription-grid li:hover {
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell .subscription-grid li.selected {
+    box-shadow: inset 0 0 0 1px var(--color-signal-orange);
+}
+
+
+/* Workspace switcher and category pills: the same segmented treatment as the
+   shell, so a person moving between them is looking at one control family. */
+
+:root .app-shell .workspace-nav {
+    border-radius: 999px;
+    background: var(--color-surface);
+    border-color: var(--glass-border);
+}
+
+:root .app-shell .workspace-nav button {
+    border-radius: 999px;
+    font-weight: var(--weight-medium);
+}
+
+:root .app-shell .workspace-nav button.active {
+    color: var(--color-signal-orange);
+    box-shadow: inset 0 0 0 1px var(--color-accent-line);
+    font-weight: var(--weight-semi);
+}
+
+:root .app-shell .category-pill {
+    border-color: var(--glass-border);
+    background: var(--color-surface);
+}
+
+:root .app-shell .category-pill:hover {
+    border-color: var(--color-accent-line);
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell .category-pill.active {
+    box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--color-signal-orange);
+}
+
+:root .app-shell .time-range-selector button[aria-pressed='true'],
+:root .app-shell .time-range-selector button.active {
+    border-color: var(--color-signal-orange);
+    background: var(--color-accent-subtle);
+    color: var(--color-bone);
+    font-weight: var(--weight-semi);
+}
+
+
+/* Metrics: the workspace flattens these to keep the page calm. Keep them calm at
+   rest and let them answer the pointer - a one-pixel accent edge and a shadow,
+   not a colour change, so nothing on the page appears to change value. */
+
+:root .app-shell :is(.kpi-card, .summary-tile) {
+    transition:
+        border-color var(--motion-duration) var(--ease-glass),
+        box-shadow var(--motion-duration) var(--ease-glass),
+        background-color var(--motion-duration) var(--ease-glass);
+}
+
+:root .app-shell .kpi-card {
+    border-color: var(--glass-border);
+}
+
+:root .app-shell .kpi-card:hover {
+    border-color: var(--color-accent-line);
+    box-shadow: var(--shadow-sm);
+}
+
+:root .app-shell .summary-strip {
+    background: var(--color-carbon-lift);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+:root .app-shell .summary-tile {
+    border-right-color: var(--glass-border);
+}
+
+:root .app-shell .summary-tile:hover {
+    background: var(--color-surface-hover);
+}
+
+
+/* Tables: a header that stays put while a long list scrolls, alternating rows so
+   the eye can track across a wide one, and a hover that marks the row being read. */
+
+:root .app-shell :is(.report-table, .resource-table, .data-table, .schedule-table) th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--color-carbon-lift);
+    box-shadow: inset 0 -1px 0 var(--color-ash-stroke);
+}
+
+:root .app-shell :is(.report-table, .resource-table, .data-table) tbody tr:nth-child(even) {
+    background: color-mix(in srgb, var(--color-bone) 3%, transparent);
+}
+
+:root .app-shell :is(.report-table, .resource-table, .data-table) tbody tr:hover {
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell :is(.report-table, .resource-table, .data-table) td {
+    border-color: var(--glass-border);
+}
+
+
+/* Dialogs sit above everything, so they carry the only heavy elevation in the app. */
+
+:root .app-shell :is(.remediation-dialog, .report-export-dialog, .custom-report-dialog, .focus-export-dialog, .storage-onboarding-dialog) {
+    border-radius: var(--radius-cards);
+    border: var(--border-width) solid var(--glass-border);
+    box-shadow: var(--shadow-lg);
+}
+
+:root .remediation-backdrop {
+    backdrop-filter: blur(3px);
+}
+
+
+/* Conversation and schedules share the working-surface treatment. */
+
+:root .app-shell :is(.chat-workspace, .schedule-table-wrap, .schedule-editor, .export-config-editor) {
+    border-radius: var(--radius-cards);
+    border-color: var(--glass-border);
+}
+
+:root .app-shell .chat-composer {
+    border-radius: var(--radius-md);
+    border-color: var(--glass-border);
+}
+
+:root .app-shell .chat-composer:focus-within {
+    border-color: var(--color-accent-line);
+    box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+:root .app-shell .chat-message.user>p {
+    border-radius: var(--radius-md);
+}
+
+
+/* Links: the accent, underlined on approach rather than permanently. */
+
+:root .app-shell :is(.finding-link, .resource-link, a[href]:not(.ghost-link):not(.dark-button):not(.primary-command):not(.outline-command)) {
+    color: var(--color-signal-orange);
+    text-underline-offset: .18em;
+    text-decoration-thickness: 1px;
+}
+
+/* The inverted page band is the one deliberate high-contrast figure in the
+   workspace. Kept inverted - softened at the corners, given an accent edge and a
+   contact shadow so it reads as a masthead rather than a pasted-in rectangle. */
+
+:root .app-shell :is(.executive-section-band, .report-page-title) {
+    border-radius: var(--radius-md);
+    background-image: linear-gradient(135deg, var(--color-accent-glow), transparent 58%);
+    box-shadow: inset 3px 0 0 var(--color-signal-orange), var(--shadow-sm);
+}
+
+:root .app-shell .report-page-title h1 {
+    letter-spacing: var(--tracking-heading-lg);
+}
+
+
+/* ================================================================
+   Density & masthead polish
+   ----------------------------------------------------------------
+   Measured before this layer: 422px of chrome sat above the first
+   content row on a 1000px viewport - 42% of the screen spent on
+   furniture. The work here is subtractive: the inverted title slab
+   becomes a typographic masthead, and the four stacked control
+   strips give back their dead vertical padding. Nothing changes
+   size-of-text or colour-of-text, so contrast and the density
+   scale (--ui-scale) keep behaving exactly as before.
+   ================================================================ */
+
+/* The masthead. An inverted slab is a heavy way to say "you are here":
+   it competes with the data for attention and costs 104px to do it.
+   An eyebrow, a tight title and a short accent rule say the same thing
+   quietly, and read as considered rather than pasted on. */
+
+:root .app-shell :is(.executive-section-band, .report-page-title) {
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    border-radius: 0;
+    color: inherit;
+    padding: 0;
+}
+
+:root .app-shell .report-page-title {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding-left: var(--space-3);
+    border-left: 2px solid var(--color-signal-orange);
+}
+
+:root .app-shell .report-page-title>span {
+    color: var(--color-signal-orange);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-semi);
+    line-height: 1.4;
+    letter-spacing: var(--tracking-overline);
+    text-transform: uppercase;
+}
+
+:root .app-shell .report-page-title h1 {
+    color: var(--color-bone);
+    font-size: var(--text-heading);
+    font-weight: var(--weight-semi);
+    line-height: 1.25;
+    letter-spacing: var(--tracking-heading-lg);
+}
+
+/* Section bands inside the report get the same treatment: a rule and a
+   caption rather than a filled bar, so a page of them reads as one
+   document instead of a stack of separate panels. */
+
+:root .app-shell .executive-section-band {
+    margin-top: var(--space-4);
+    padding: 0 0 var(--space-2);
+    border-bottom: 1px solid var(--color-ash-stroke);
+    color: var(--color-bone);
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading);
+}
+
+/* Reclaimed vertical space. Each of these strips was carrying padding
+   sized for a comfortable density it never actually runs at. */
+
+:root .app-shell .dashboard-titlebar {
+    align-items: center;
+    padding: var(--space-2) 0 var(--space-3);
+    margin-bottom: var(--space-1);
+    border-bottom: 1px solid var(--color-ash-stroke);
+}
+
+:root .app-shell .scope-disclosure {
+    padding-block: var(--space-2);
+}
+
+:root .app-shell .saved-report-controls {
+    gap: var(--space-3);
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--font-size-xs);
+}
+
+/* A secondary utility strip should not carry the same visual weight as
+   the scope bar above it. Muted, tight, and out of the way until wanted. */
+
+:root .app-shell .saved-report-controls label {
+    color: var(--color-warm-granite);
+}
+
+:root .app-shell .dashboard-main {
+    padding-top: 0;
+}
+
+/* The metric tiles. Reads as one continuous instrument rather than a row
+   of detached chips: tabular figures so the columns align, and the label
+   demoted to a caption so the number carries the row. */
+
+:root .app-shell .summary-tile {
+    padding: var(--space-1) var(--space-3);
+    gap: 0;
+}
+
+:root .app-shell .summary-tile-value {
+    font-variant-numeric: var(--nums);
+    letter-spacing: var(--tracking-heading);
+}
+
+:root .app-shell .category-pill {
+    padding: var(--space-1) var(--space-3);
+    gap: 0;
+    border-radius: var(--radius-sm);
+}
+
+:root .app-shell .category-pill>span:first-child {
+    font-size: var(--font-size-xs);
+    letter-spacing: var(--tracking-overline);
+}
+
+:root .app-shell .category-pill strong {
+    font-variant-numeric: var(--nums);
+    letter-spacing: var(--tracking-heading);
+}
+
+/* Content rhythm. Section padding and heading margins were stacking -
+   a 14px section pad, then a 10.5px heading margin, then a 10.5px
+   control margin, all resolving to ~35px of nothing between two rows
+   that belong together. Collapsed to a single consistent step so
+   related controls group visually instead of floating apart. */
+
+:root .app-shell :is(.cost-window-overview, .cost-budget-context, .billing-filters, .anomaly-overview) {
+    padding-block: var(--space-2);
+}
+
+:root .app-shell :is(.cost-range-controls, .cost-section-heading) {
+    margin-block: var(--space-2);
+}
+
+:root .app-shell .time-range-selector {
+    margin: 0 var(--space-4) var(--space-2) 0;
+}
+
+:root .app-shell .executive-masthead {
+    padding-block: var(--space-1) var(--space-2);
+}
+
+/* Cards carry their own edge, so they do not also need a wide internal
+   margin to look separate from the page. */
+
+:root .app-shell :is(.kpi-card, .summary-tile, .billing-metrics>div, .billing-metrics>button) {
+    padding: var(--space-2) var(--space-3);
+}
+
+:root .app-shell .kpi-value {
+    font-variant-numeric: var(--nums);
+}
+
+/* Section headings: sized down from display weight to editorial weight.
+   At 30px every section shouted; at 20px the page has a hierarchy and
+   the numbers become the loudest thing on screen, which is the point. */
+
+:root .app-shell :is(.cost-section-heading h2, .section-title) {
+    font-size: var(--text-heading);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading);
+    line-height: 1.3;
+}
+
+
+/* ----------------------------------------------------------------
+   One masthead, three surfaces
+   ----------------------------------------------------------------
+   Report, Schedules and Chat each arrived at their own way of saying
+   "you are here": an inverted slab, a 28px grid band with a mono
+   kicker, and a baseline-aligned toolbar. Same job, three accents,
+   three heights. They now share one pattern - accent rule, micro-caps
+   eyebrow, 20px title - so moving between tabs feels like one product
+   rather than three screens that happen to share a header.
+   ---------------------------------------------------------------- */
+
+:root .app-shell :is(.operations-heading, .chat-toolbar>span:first-child) {
+    min-height: 0;
+    padding-left: var(--space-3);
+    border-left: 2px solid var(--color-signal-orange);
+}
+
+:root .app-shell .operations-heading {
+    align-content: center;
+    padding-block: var(--space-2);
+    margin-bottom: var(--space-3);
+    column-gap: var(--space-4);
+}
+
+:root .app-shell .chat-toolbar>span:first-child {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+}
+
+:root .app-shell :is(.operations-kicker, .chat-toolbar>span:first-child>small) {
+    color: var(--color-signal-orange);
+    font-family: var(--font-geist);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-semi);
+    line-height: 1.4;
+    letter-spacing: var(--tracking-overline);
+    text-transform: uppercase;
+}
+
+:root .app-shell :is(.operations-heading h1, .chat-toolbar h1) {
+    margin: 0;
+    color: var(--color-bone);
+    font-size: var(--text-heading);
+    font-weight: var(--weight-semi);
+    line-height: 1.25;
+    letter-spacing: var(--tracking-heading-lg);
+}
+
+:root .app-shell .chat-toolbar {
+    min-height: 0;
+    padding-block: var(--space-2);
+}
+
+/* Summary figures sat at display size for counts that rarely exceed two
+   digits. At heading size they still lead the eye without turning a
+   three-item summary into the tallest element on the page. */
+
+:root .app-shell .operations-metrics {
+    gap: var(--space-5);
+}
+
+:root .app-shell .operations-metrics strong {
+    font-size: var(--text-heading);
+    font-weight: var(--weight-semi);
+    line-height: 1.2;
+    font-variant-numeric: var(--nums);
+    letter-spacing: var(--tracking-heading);
+}
+
+/* The second masthead. "FOCUS schedules" repeated what the h1 directly
+   above it already said, at nearly the same size. Demoted to a section
+   rule so the table it labels starts higher up the page. */
+
+:root .app-shell .schedule-section-header {
+    align-items: center;
+    padding-block: 0 var(--space-2);
+    margin-bottom: var(--space-2);
+}
+
+:root .app-shell .schedule-section-header h2 {
+    margin: 0;
+    font-size: var(--font-size-md);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading);
+}
+
+:root .app-shell .schedule-section-header>div:first-child>span {
+    color: var(--color-warm-granite);
+    font-size: var(--font-size-xs);
+    letter-spacing: var(--tracking-overline);
+    text-transform: uppercase;
+}
+
+/* Table density. Operational tables are scanned, not read - tighter rows
+   put more of the estate on screen at once, which is the whole job. */
+
+:root .app-shell :is(.schedule-table, .report-table, .resource-table) :is(td, th) {
+    padding-block: var(--space-2);
+}
+
+:root .app-shell .operations-view {
+    padding-top: var(--space-2);
+}
+
+
+/* ----------------------------------------------------------------
+   Canvas and elevation
+   ----------------------------------------------------------------
+   The atmosphere tokens were doing real work but could not be seen:
+   the content frame is opaque and covers all but ~17px of the
+   viewport, and the canvas underneath sat only 7/255 away from it
+   (dark: #0F1214 canvas against a #16191D surface). At that distance
+   the page reads as one flat slab and the elevation is wasted.
+
+   Fixed by separating the two ends rather than by adding decoration -
+   the canvas drops away, the surface stays put, and the frame gets a
+   real edge and a layered shadow. Light keeps white cards and simply
+   deepens the ground they sit on. Measured headroom before changing
+   anything: the worst asserted light-theme ratio was 7.34 against a
+   4.5 floor, and the deeper canvas spends only ~0.5 of that.
+   ---------------------------------------------------------------- */
+
+:root {
+    --color-obsidian-canvas: #080A0C;
+    --color-carbon-lift: #171B20;
+    /* Strokes were measured at 1.02-1.46:1 against their own surface, which is
+       why areas stopped reading as divided. Structural edges now sit at ~2:1,
+       and interactive boundaries get a separate, heavier stroke that meets the
+       3:1 floor WCAG sets for UI components. */
+    --color-ash-stroke: #434B56;
+    --color-control-stroke: #5F6975;
+    --glass-border: rgb(255 255 255 / .16);
+    --canvas-wash:
+        radial-gradient(1100px 580px at 14% -12%, rgb(79 168 245 / .16), transparent 60%),
+        radial-gradient(900px 520px at 90% 2%, rgb(46 210 224 / .09), transparent 58%),
+        linear-gradient(180deg, rgb(255 255 255 / .022), transparent 38%);
+}
+
+:root[data-theme='light'] {
+    --color-obsidian-canvas: #E9EEF5;
+    --color-carbon-lift: #FFFFFF;
+    --color-ash-stroke: #AEB9C7;
+    --color-control-stroke: #8A96A6;
+    --glass-border: rgb(16 40 70 / .22);
+    --canvas-wash:
+        radial-gradient(1100px 580px at 14% -12%, rgb(15 108 189 / .13), transparent 60%),
+        radial-gradient(900px 520px at 90% 2%, rgb(0 128 155 / .07), transparent 58%),
+        linear-gradient(180deg, rgb(16 40 70 / .03), transparent 34%);
+}
+
+/* The content frame now has to earn its place above the canvas: a
+   defined edge, a tight contact shadow to anchor it, and a wide
+   ambient one for height. Without the contact shadow a card this
+   large just floats.
+
+   The edge is an inset ring rather than a border on purpose. A 1px
+   border shifts everything inside the frame by 1px, which pushed the
+   nav rail to x=40 while the bars above it sat at x=39 - a visible
+   jog down the left edge of the page. An inset shadow draws the same
+   line without taking part in layout. */
+
+:root .app-shell .dashboard-frame {
+    position: relative;
+    border: 0;
+    border-radius: var(--radius-lg);
+    box-shadow:
+        inset 0 0 0 1px var(--glass-border),
+        0 1px 2px rgb(0 0 0 / .10),
+        0 12px 32px rgb(0 0 0 / .14);
+}
+
+/* A single hairline of light along the top edge. This is what stops a
+   large flat surface reading as a hole cut in the page. */
+
+:root .app-shell .dashboard-frame::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 1px;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    background: var(--hairline);
+    pointer-events: none;
+}
+
+/* The nav rail is a different plane from the report it navigates, so
+   it sits on the canvas tint rather than on the content surface. */
+
+:root .app-shell .left-nav-sidebar {
+    background: color-mix(in srgb, var(--color-obsidian-canvas) 40%, transparent);
+    border-right: 1px solid var(--color-ash-stroke);
+}
+
+/* Cards read against the surface, not the canvas, so they need only a
+   quiet edge - the separation is already carried by the frame. */
+
+:root .app-shell :is(.kpi-card, .summary-tile, .panel) {
+    border-color: var(--color-ash-stroke);
+}
+
+
+/* ================================================================
+   Craft layer
+   ----------------------------------------------------------------
+   With the structure and the ground sorted, what was left reading as
+   unfinished were the parts you actually touch: browser-default
+   selects at 44px dominating the Rate Optimization page, table
+   headers indistinguishable from their data, and no consistent
+   answer to hover or focus.
+
+   Note on sizing: the rate panel asserts >=14px and >=4.5 contrast
+   across 24 selectors, including .rate-table th and .rate-controls
+   select. So headers here get small-caps treatment through spacing,
+   weight and colour - never by shrinking the type.
+   ================================================================ */
+
+/* Controls. A form control should read as an inset surface you can
+   type into, not as a raised slab.
+
+   Two cascade notes, both learned the hard way by measuring:
+   - background-COLOR, not the background shorthand. The shorthand
+     resets background-image, which silently removed the select
+     chevron set below.
+   - .app-shell.app-shell is deliberate. report-workspace.css carries
+     selectors like :is(p, small, label, select, th, .rate-refresh),
+     and a class inside :is() makes the whole compound count as a
+     class - (0,4,0) - which outranks a normal (0,3,2) selector no
+     matter which file loads last. Doubling the class is the smallest
+     honest way to sit above that without !important.
+
+   Heights are deliberately NOT touched: .rate-controls select is
+   pinned to --touch-height (44px) upstream, which is a touch-target
+   accessibility decision, not an oversight. */
+
+:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local']) {
+    padding-block: var(--space-1);
+    border: 1px solid var(--color-ash-stroke);
+    background-color: var(--color-surface);
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / .05);
+    line-height: 1.4;
+}
+
+/* The native select arrow is the most obviously unstyled thing in the
+   app. Replaced with a chevron matching the icon set. */
+
+:root .app-shell.app-shell select {
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: var(--space-8);
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237A8696' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right var(--space-2) center;
+}
+
+:root .app-shell.app-shell :is(select, input):hover:not(:disabled) {
+    border-color: var(--color-graphite-mid);
+}
+
+:root .app-shell :is(select, input, button, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 1px;
+}
+
+:root .app-shell.app-shell :is(select, input):focus-visible {
+    border-color: var(--color-focus);
+    box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+/* Tables. A header row should be a different kind of thing from the
+   data under it. Same size - the rate panel asserts >=14px on
+   .rate-table th - so the separation is carried by weight, tracking
+   and colour instead of by shrinking the type. */
+
+:root .app-shell.app-shell :is(.report-table, .resource-table, .rate-table, .schedule-table, .anomaly-table, .pricing-table) thead th {
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-overline);
+    text-transform: uppercase;
+    color: var(--color-warm-granite);
+    border-bottom: 1px solid var(--color-ash-stroke);
+    white-space: nowrap;
+}
+
+/* Figures line up only if they are tabular and right-aligned; a cost
+   table where the decimal points wander is the fastest way to look
+   amateur. */
+
+:root .app-shell :is(.report-table, .resource-table, .rate-table, .schedule-table) :is(td, th) {
+    font-variant-numeric: var(--nums);
+}
+
+:root .app-shell :is(.report-table, .resource-table, .rate-table, .schedule-table) tbody tr {
+    transition: background-color var(--motion-duration) var(--ease-glass);
+}
+
+:root .app-shell.app-shell :is(.report-table, .resource-table, .rate-table, .schedule-table) tbody tr:hover {
+    background: var(--color-surface-hover);
+}
+
+/* Buttons. One ladder: a filled primary, a bordered secondary, a bare
+   tertiary - each answering hover with a small lift rather than a
+   colour change, which is what makes a surface feel physical. */
+
+:root .app-shell :is(.primary-command, .scope-run-button, .dark-button, .outline-command, .ghost-button, .icon-command) {
+    transition:
+        background-color var(--motion-duration) var(--ease-glass),
+        border-color var(--motion-duration) var(--ease-glass),
+        box-shadow var(--motion-duration) var(--ease-glass),
+        transform var(--motion-duration) var(--ease-glass);
+}
+
+:root .app-shell :is(.primary-command, .scope-run-button, .dark-button):hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+:root .app-shell :is(.outline-command, .ghost-button, .icon-command):hover:not(:disabled) {
+    border-color: var(--color-graphite-mid);
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell :is(.primary-command, .scope-run-button, .dark-button, .outline-command, .icon-command):active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: var(--shadow-sm);
+}
+
+:root .app-shell button:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+}
+
+/* Nav rail. The active page is marked by an accent edge rather than by
+   a filled block, so the rail stays quiet while you read the report. */
+
+:root .app-shell .left-nav-children button {
+    border-radius: var(--radius-sm);
+    transition:
+        background-color var(--motion-duration) var(--ease-glass),
+        color var(--motion-duration) var(--ease-glass);
+}
+
+:root .app-shell .left-nav-children button:hover:not(.active) {
+    background: var(--color-surface-hover);
+}
+
+/* Data cards lift off the surface, matching the frame's own language. */
+
+:root .app-shell :is(.kpi-card, .summary-tile, .commitment-actual-card) {
+    border-radius: var(--radius-md);
+    transition: border-color var(--motion-duration) var(--ease-glass), box-shadow var(--motion-duration) var(--ease-glass);
+}
+
+:root .app-shell :is(.kpi-card, .commitment-actual-card):hover {
+    border-color: var(--color-graphite-mid);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Scrollbars and selection: small surfaces, but default chrome on
+   either is immediately recognisable as "nobody looked at this". */
+
+:root .app-shell *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+:root .app-shell *::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+:root .app-shell *::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: var(--scrollbar-thumb);
+    background-clip: content-box;
+}
+
+:root .app-shell *::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: content-box;
+}
+
+/* ----------------------------------------------------------------
+   Page grid
+   ----------------------------------------------------------------
+   Measured, not eyeballed: the four stacked bars down the top of the
+   page were each using a different inner gutter - header 2px, scope
+   bar 0px, saved strip 10px, against a 21px rail and 22px content
+   column. Their content therefore started at x=20, 18 and 28, which
+   is precisely the ragged left edge that reads as "unfinished" even
+   when nothing else is wrong.
+
+   One gutter now governs every full-width bar, chosen to match the
+   nav rail's own text inset so the top chrome and the rail below it
+   share a single left edge, and the right edges resolve to one line
+   as well.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell :is(.app-header, .scope-ribbon, .saved-report-controls) {
+    padding-inline: var(--space-6);
+}
+
+/* The scope bar's two halves sit inside that gutter rather than
+   spanning past it, so "Update report" lines up with "Sign out"
+   above it and with the report content below. */
+
+:root .app-shell.app-shell .scope-run-area {
+    padding-right: 0;
+}
+
+:root .app-shell.app-shell .scope-disclosure {
+    padding-left: 0;
+}
+
+/* The idle "awaiting report" state is deliberately, completely static
+   upstream (.app-shell .report-awaiting * { transition: none }) - an
+   empty state should not shimmer while it waits, and a test asserts
+   zero running animations there. The button rules above are broader
+   than that rule and re-enabled a background-color transition on its
+   .dark-button, which is exactly the regression the test caught.
+   Re-asserted here above my own specificity rather than narrowing
+   every rule above. */
+
+:root .app-shell.app-shell :is(.report-awaiting, .report-awaiting *) {
+    transition: none;
+    animation: none;
+}
+
+/* Reduced motion is already handled globally and with !important in
+   report-workspace.css, so this layer deliberately adds no second
+   implementation of it. */
+
+
+/* ================================================================
+   Density layer
+   ----------------------------------------------------------------
+   Measured, not estimated. Every band of chrome above the report was
+   reserving more height than the tallest control it actually holds:
+
+     app header        64px reserved / 43px nav pill
+     scope disclosure  59px reserved / 45px of label text
+     title bar       17.5px of padding around a 43px title block
+     dashboard body  17.5px top and bottom around a single child
+
+   That surplus compounds downward - four bands each a dozen pixels
+   too generous pushed the first real content 175px down the page,
+   and the same slack repeated inside every metric card. The rule
+   applied here is that a box is its own content plus one step of
+   air, taken from the spacing scale rather than chosen by eye.
+
+   Three things are deliberately NOT touched: the 44px touch targets
+   (--touch-height), which are an accessibility floor and not spare
+   room; the horizontal gutter resolved in the layer above, since
+   this pass is purely vertical; and the chart and table viewport
+   heights, which are scroll windows onto larger content rather
+   than boxes with empty space in them.
+
+   Heights here are minimums, never fixed heights, so a narrow
+   viewport that wraps these bands can still grow.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell .app-header {
+    height: auto;
+    min-height: calc(var(--touch-height) + var(--space-2));
+}
+
+:root .app-shell.app-shell .scope-disclosure,
+:root .app-shell.app-shell .scope-run-area {
+    padding-block: var(--space-1);
+}
+
+/* With that padding removed the band is 52px of content inside a 58px
+   floor, so the floor drops to the touch-target minimum and the bar
+   is sized by its label rather than by a number. */
+
+:root .app-shell.app-shell .scope-ribbon-main {
+    min-height: var(--touch-height);
+}
+
+:root .app-shell.app-shell .dashboard-titlebar {
+    padding-block: var(--space-1);
+}
+
+:root .app-shell.app-shell .dashboard-body {
+    padding-block: var(--space-2);
+}
+
+:root .app-shell.app-shell .report-context-body {
+    padding-block: var(--space-2);
+}
+
+/* The figure cards. Their padding was competing with the number for
+   the eye: the value should set the height of the card, so the box
+   is tightened to the value and its caption and nothing more. An
+   earlier rule in this file set the tile to space-1 and a later one
+   reset it to space-2; this settles that conflict in one place. */
+
+:root .app-shell.app-shell :is(.kpi-card, .summary-tile) {
+    padding: var(--space-1) var(--space-3);
+}
+
+:root .app-shell.app-shell {
+    padding-bottom: var(--space-3);
+}
+
+
+/* ================================================================
+   Type scale normalisation
+   ----------------------------------------------------------------
+   The interface has a five-step scale (12 / 14 / 16 / 20 / 28) and
+   one family, and almost everything already sits on it. The visual
+   panels did not: they were written with their own hand-set sizes
+   and were never picked up by the layers above, so they rendered at
+   7, 8, 9, 10, 11 and 34px - six sizes that exist nowhere else in
+   the product. Next to a 14px body that reads as a different
+   application pasted into the page.
+
+   Two of those were worse than merely inconsistent. The legend
+   percentage was sized in em inside an already-reduced parent, so
+   it compounded to 8.3px, and the map credit sat at 7px, which is
+   below what anyone should be asked to read.
+
+   Everything here is mapped onto the existing scale rather than
+   nudged: captions to 12px, prose to 14px, the donut figure to the
+   28px display step. No new sizes are introduced.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell :is(.executive-visual>header>span, .executive-visual>header>strong, .executive-visual>header>small) {
+    font-size: var(--font-size-xs);
+}
+
+:root .app-shell.app-shell .donut-chart>span small,
+:root .app-shell.app-shell .spend-legend>span,
+:root .app-shell.app-shell :is(.monthly-column>strong, .monthly-column>span),
+:root .app-shell.app-shell .daily-line-chart-axis-labels span,
+:root .app-shell.app-shell .daily-trend-legend-item,
+:root .app-shell.app-shell :is(.treemap-breadcrumb button, .treemap-breadcrumb b),
+:root .app-shell.app-shell .map-attribution {
+    font-size: var(--font-size-xs);
+}
+
+/* Sized in em against a parent that was itself reduced, so it
+   compounded down to 8.3px. Pinned to the scale instead. */
+
+:root .app-shell.app-shell .spend-legend :is(small, b, strong) {
+    font-size: var(--font-size-xs);
+}
+
+/* A sentence of prose, not a caption - it takes the body size. */
+
+:root .app-shell.app-shell .visual-empty {
+    font-size: var(--font-size-sm);
+}
+
+/* The one display figure in these panels; 34px is not a step on the
+   scale, 28px is. */
+
+:root .app-shell.app-shell .donut-chart>span strong {
+    font-size: var(--font-size-xl);
+    font-variant-numeric: var(--nums);
+}
+
+
+/* ================================================================
+   Executive sections
+   ----------------------------------------------------------------
+   The executive view ran as one long column - range controls, then
+   charts, then signals, then three tables - separated only by
+   full-bleed inverted bands. Everything had equal weight, so there
+   was no way to tell where a subject started, and no way to put
+   one away once read. That is what read as scattered.
+
+   The content is now grouped under named sections, and these are
+   their surface. The design intent:
+
+     - the header is the only thing you must read to navigate, so
+       it carries the title, a one-line caption and the figure that
+       says whether the section is worth opening;
+     - sections sit on the card surface with a hairline between
+       them, so the group reads as one instrument rather than six
+       detached panels;
+     - the open/closed state is shown by a single rotating chevron
+       on the left, where the eye already is when scanning titles.
+
+   Expansion is native details/summary, so this is presentation
+   only - keyboard, focus and find-in-page behaviour are the
+   platform's.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell .report-section-stack {
+    display: flex;
+    flex-direction: column;
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    overflow: hidden;
+}
+
+/* One hairline between neighbours rather than a border per section,
+   so the stack does not double up its edges. */
+
+:root .app-shell.app-shell .report-section+.report-section {
+    border-top: var(--border-width) solid var(--color-ash-stroke);
+}
+
+:root .app-shell.app-shell .report-section-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    transition: background-color var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell .report-section-summary::-webkit-details-marker {
+    display: none;
+}
+
+:root .app-shell.app-shell .report-section-summary:hover {
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell.app-shell .report-section-summary:focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: calc(var(--focus-width) * -1);
+}
+
+:root .app-shell.app-shell .report-section-chevron {
+    flex: 0 0 auto;
+    color: var(--color-graphite-mid);
+    transition: transform var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell .report-section[open]>.report-section-summary .report-section-chevron {
+    transform: rotate(90deg);
+}
+
+/* Title and caption share a column so the caption hangs under the
+   title rather than competing with it on the same line. */
+
+:root .app-shell.app-shell .report-section-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+    flex: 1;
+}
+
+:root .app-shell.app-shell .report-section-heading strong {
+    color: var(--color-bone);
+    font-size: var(--font-size-md);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading);
+}
+
+:root .app-shell.app-shell .report-section-heading small {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+}
+
+/* The figure that decides whether the section is worth opening.
+   Tabular so the column of them stays aligned down the stack. */
+
+:root .app-shell.app-shell .report-section-meta {
+    flex: 0 0 auto;
+    padding: var(--space-1) var(--space-3);
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-sm);
+    background: var(--color-obsidian-canvas);
+    color: var(--color-pale-stone);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: var(--nums);
+    white-space: nowrap;
+}
+
+:root .app-shell.app-shell .report-section-body {
+    padding: 0 var(--space-4) var(--space-4);
+    border-top: var(--border-width) solid var(--color-ash-stroke);
+    padding-top: var(--space-4);
+}
+
+/* Panels inside a section already sit within its padding, so they
+   drop the outer margin that kept them clear of the old bands. */
+
+:root .app-shell.app-shell .report-section-body>:first-child {
+    margin-top: 0;
+}
+
+:root .app-shell.app-shell .report-section-body>:last-child {
+    margin-bottom: 0;
+}
+
+/* A single panel that fills a section was drawing its own border,
+   background and radius inside the section's border, background
+   and radius - a card in a card, which is most of what still read
+   as cluttered. The section already supplies the frame, so the
+   child gives its up. The chart grid is exempt: those are several
+   distinct visuals that genuinely are separate cards. */
+
+:root .app-shell.app-shell .report-section-body>:is(.executive-table-scroll, .hourly-cost-panel) {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding-inline: 0;
+}
+
+/* The range applies to every section below it, so it is presented
+   once, above the stack, rather than inside the first section that
+   happens to use it. */
+
+:root .app-shell.app-shell .analysis-scope-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+:root .app-shell.app-shell .analysis-scope-label {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-overline);
+}
+
+:root .app-shell.app-shell .analysis-scope-bar .time-range-selector {
+    margin: 0;
+}
+
+@media (max-width: 640px) {
+
+    /* The caption is the first thing to go when the header has to
+       share a line with a figure on a narrow screen. */
+    :root .app-shell.app-shell .report-section-heading small {
+        display: none;
+    }
+
+    :root .app-shell.app-shell .report-section-summary {
+        padding: var(--space-3);
+        min-height: var(--touch-height);
+    }
+
+    :root .app-shell.app-shell .report-section-body {
+        padding-inline: var(--space-2);
+    }
+}
+
+/* The two top-level disclosures - "Report details" and "Explore costs
+   and findings" - now introduce a structured stack rather than a loose
+   run of content, so they are given the weight of a control instead of
+   reading as a stray line of body text. They stay lighter than the
+   section headers inside them: a parent should not outshout its
+   children. */
+
+:root .app-shell.app-shell .overview-details>summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    color: var(--color-bone);
+    font-weight: var(--weight-medium);
+    cursor: pointer;
+    list-style: none;
+    transition: background-color var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell .overview-details>summary::-webkit-details-marker {
+    display: none;
+}
+
+/* Laying the summary out as a flex row drops the native disclosure
+   marker, so the indicator is drawn back in - matching the rotating
+   chevron used by the sections below, so open and closed look the
+   same wherever they appear. */
+
+:root .app-shell.app-shell .overview-details>summary::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    margin-inline-start: 2px;
+    border-right: 1.5px solid var(--color-graphite-mid);
+    border-bottom: 1.5px solid var(--color-graphite-mid);
+    transform: rotate(-45deg);
+    transition: transform var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell .overview-details[open]>summary::before {
+    transform: rotate(45deg);
+}
+
+:root .app-shell.app-shell .overview-details>summary:hover {
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell.app-shell .overview-details>summary:focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: calc(var(--focus-width) * -1);
+}
+
+:root .app-shell.app-shell .overview-details>summary>span {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-weight: 400;
+}
+
+
+/* ================================================================
+   Cost window in the saved-report strip
+   ----------------------------------------------------------------
+   The window applies to every tab that reads it, so it is presented
+   once here rather than repeated inside four of them. The picker was
+   written for a full-width row inside a panel - stacked labels and
+   date fields that grow to fill - which inside this strip wrapped
+   onto three lines and pushed it to 161px tall. In the strip it
+   becomes a compact inline row instead: labels beside their fields,
+   fields sized to their content, and the whole group sitting at the
+   trailing edge so "Open saved report" keeps the leading position.
+   It still wraps on a narrow viewport, and the 44px controls keep
+   their touch size.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell .saved-report-controls .cost-range-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0 0 0 auto;
+}
+
+:root .app-shell.app-shell .saved-report-controls .cost-range-controls .billing-filter {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    max-width: none;
+}
+
+:root .app-shell.app-shell .saved-report-controls .cost-range-controls .billing-filter input {
+    width: auto;
+    min-height: var(--control-height);
+}
+
+/* The validation message is a sentence, not a field: it takes the
+   whole row rather than being squeezed between two date inputs. */
+
+:root .app-shell.app-shell .saved-report-controls .cost-range-controls [role='alert'] {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--color-error);
+    font-size: var(--font-size-xs);
+}
+
+@media (max-width: 640px) {
+    :root .app-shell.app-shell .saved-report-controls .cost-range-controls {
+        margin-inline-start: 0;
+    }
+}
+
+
+/* ================================================================
+   Theme: boundaries and surfaces
+   ----------------------------------------------------------------
+   Measured across both themes, every structural stroke was landing
+   between 1.02 and 1.46:1 against the surface behind it - light
+   #D6DDE7 on white at 1.17, dark #2F3740 on #16191D at 1.43. At
+   those values a border is present in the DOM and absent to the
+   eye, which is why areas stopped reading as divided even though
+   the markup was correct.
+
+   The tokens above now carry two strokes instead of one:
+   structural edges at ~2:1, which divides without turning every
+   hairline into a rule, and a heavier control stroke at ~3:1 for
+   things you operate. The 3:1 figure is not taste - it is the
+   floor WCAG 1.4.11 sets for the boundary of a UI component.
+
+   Applied below to the controls that were relying on the softer
+   stroke, plus the one button in the header that was never given
+   an appearance at all.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local'], textarea) {
+    border-color: var(--color-control-stroke);
+}
+
+:root .app-shell.app-shell :is(.ghost-button, .outline-command, .icon-command, .time-range-selector button) {
+    border-color: var(--color-control-stroke);
+}
+
+/* Table header rules and section separators are structure, not
+   controls, so they take the structural stroke - but they do need
+   to be visible, which at the old value they were not. */
+
+:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .schedule-table, .rate-table, .billing-table, .pricing-table, .anomaly-table) :is(th, td) {
+    border-color: var(--color-ash-stroke);
+}
+
+/* The header's Sign out is a .ghost-button, but the rule that gives
+   that class an appearance was written scoped to a handful of report
+   containers, so this one matched nothing and fell through to the
+   user-agent default - a light #f0f0f0 button with an outset bevel,
+   sitting in a dark header. The appearance is defined here without a
+   container so every ghost button is themed wherever it appears. */
+
+:root .app-shell.app-shell .ghost-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: var(--border-width) solid var(--color-control-stroke);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-bone);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+}
+
+:root .app-shell.app-shell .ghost-button:disabled {
+    cursor: not-allowed;
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 1. Controls
+   ----------------------------------------------------------------
+   Measured before this pass: ten button heights (21 to 107px), four
+   font weights, three radii, four input heights. Each screen had
+   been solved on its own terms, which is what makes an interface
+   read as assembled rather than designed.
+
+   One ladder now governs everything you operate:
+
+     --control-sm   28px   dense, in-table and inline controls
+     --control-md   32px   the default for commands and inputs
+     --control-lg   40px   primary actions and page-level controls
+
+   On sizing and touch: the previous pass pinned controls to 44px
+   because that is the touch-target guidance. That is right for a
+   finger and wrong for a mouse - at 44px a row of desktop buttons
+   reads as chunky, not premium. The ladder is therefore sized for a
+   fine pointer and lifted to 44px under `pointer: coarse`, so the
+   accessibility floor is kept exactly where it applies rather than
+   being paid for everywhere.
+
+   Weight: 500 for secondary, 600 for primary. 400 made buttons read
+   as text, 700 made navigation shout.
+   ---------------------------------------------------------------- */
+
+:root {
+    --control-sm: 28px;
+    --control-md: 32px;
+    --control-lg: 40px;
+    --control-radius: var(--radius-sm);
+    /* One curve for the press so every control answers identically. */
+    --press-ease: cubic-bezier(.16, 1, .3, 1);
+    --press-duration: 140ms;
+}
+
+@media (pointer: coarse) {
+    :root {
+        --control-sm: var(--touch-height);
+        --control-md: var(--touch-height);
+        --control-lg: var(--touch-height);
+    }
+}
+
+/* --- Command buttons ------------------------------------------- */
+
+:root .app-shell.app-shell :is(.ghost-button, .outline-command, .dark-button, .primary-command, .scope-run-button, .icon-command) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-height: var(--control-md);
+    padding: 0 var(--space-3);
+    border-radius: var(--control-radius);
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-medium);
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+        background-color var(--press-duration) var(--press-ease),
+        border-color var(--press-duration) var(--press-ease),
+        color var(--press-duration) var(--press-ease),
+        box-shadow var(--press-duration) var(--press-ease);
+}
+
+/* Page-level actions sit one step up the ladder and carry the
+   heavier weight, so the primary action on a screen is obvious
+   without resorting to colour alone. */
+
+:root .app-shell.app-shell :is(.primary-command, .scope-run-button, .dark-button) {
+    min-height: var(--control-lg);
+    padding-inline: var(--space-4);
+    font-weight: var(--weight-semi);
+}
+
+/* Icon-only controls are square at their height rather than
+   inheriting text padding, which is what made them look lopsided
+   next to labelled buttons. */
+
+:root .app-shell.app-shell .icon-command {
+    min-width: var(--control-md);
+    padding-inline: 0;
+}
+
+/* The header toggles and the export controls are icon buttons too;
+   they were sized by their glyph and padding rather than by the
+   ladder, so they sat 4px proud of everything beside them. */
+
+:root .app-shell.app-shell :is(.theme-toggle, .focus-download-control, .report-download-control) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--control-md);
+    min-height: var(--control-md);
+    padding: 0;
+    border-radius: var(--control-radius);
+    transition:
+        background-color var(--press-duration) var(--press-ease),
+        border-color var(--press-duration) var(--press-ease),
+        color var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell :is(.theme-toggle, .focus-download-control, .report-download-control):hover:not(:disabled) {
+    background: var(--color-surface-hover);
+    border-color: var(--color-control-stroke);
+}
+
+/* Icons: one size and stroke across the product. Lucide defaults to
+   a 2px stroke, which at 16px reads heavier than the 14px text it
+   sits beside; 1.75 matches the type without going wispy. */
+
+:root .app-shell.app-shell svg:not(.cost-comparison-chart):not(.daily-line-chart):not(.region-map):not(.anomaly-chart) {
+    flex: 0 0 auto;
+    stroke-width: 1.75;
+    vertical-align: middle;
+}
+
+/* Press feedback: a real depression rather than a lift. Lifting on
+   press fights the physical metaphor - you are pushing the control
+   away from you, not pulling it. */
+
+:root .app-shell.app-shell :is(.ghost-button, .outline-command, .dark-button, .primary-command, .scope-run-button, .icon-command):active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+:root .app-shell.app-shell button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+/* --- Inputs ----------------------------------------------------- */
+
+:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local']) {
+    min-height: var(--control-md);
+    padding: 0 var(--space-3);
+    border-radius: var(--control-radius);
+    font-size: var(--font-size-sm);
+    line-height: 1.2;
+    transition:
+        border-color var(--press-duration) var(--press-ease),
+        box-shadow var(--press-duration) var(--press-ease);
+}
+
+/* The native select arrow needs room; without it the caret sits on
+   top of the longest option text. */
+
+:root .app-shell.app-shell select {
+    padding-inline-end: var(--space-8);
+}
+
+/* One focus treatment for every control: a ring outside the border
+   rather than an outline that shifts layout, and the same accent in
+   both themes. */
+
+:root .app-shell.app-shell :is(select, input, textarea):focus-visible {
+    border-color: var(--color-focus);
+    box-shadow: 0 0 0 3px var(--color-accent-glow);
+    outline: none;
+}
+
+/* Headings are given tabindex="-1" so navigation can move focus to
+   them for screen-reader users. They are not keyboard-reachable
+   controls, so they must not draw a focus ring - excluding negative
+   tabindex keeps the ring on things you actually tab to. */
+
+:root .app-shell.app-shell :is(button, summary, [tabindex]:not([tabindex='-1'])):focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: 2px;
+}
+
+/* Segmented controls - the range picker and the top workspace nav -
+   read as one object with a selected cell, not as loose buttons. */
+
+:root .app-shell.app-shell .time-range-selector {
+    display: inline-flex;
+    gap: 0;
+    padding: 0;
+    border: var(--border-width) solid var(--color-control-stroke);
+    border-radius: var(--control-radius);
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell .time-range-selector button {
+    min-width: 0;
+    min-height: var(--control-md);
+    padding-inline: var(--space-3);
+    border: 0;
+    border-radius: 0;
+    background: var(--color-surface);
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-medium);
+    transition: background-color var(--press-duration) var(--press-ease), color var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell .time-range-selector button+button {
+    border-inline-start: var(--border-width) solid var(--color-ash-stroke);
+}
+
+:root .app-shell.app-shell .time-range-selector button:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+    color: var(--color-bone);
+}
+
+:root .app-shell.app-shell .time-range-selector button.active {
+    background: var(--color-accent-subtle);
+    color: var(--color-signal-orange);
+    font-weight: var(--weight-semi);
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 2. Navigation
+   ----------------------------------------------------------------
+   The rail carried the loudest weight in the product (700) while
+   doing the quietest job, and its rows sat at 38px against a 32px
+   control ladder. Selection was also signalled three different ways
+   across the three navigations - a fill here, an inset bar there, a
+   ring on the top nav.
+
+   Settled: one selected language - accent text, a tinted ground and
+   a 2px leading marker - applied consistently, with weight used to
+   separate group headers from their children rather than to shout.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell :is(.left-nav-children button, .left-nav-group button, .left-nav-group-toggle) {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: var(--control-md);
+    padding: 0 var(--space-3);
+    border-radius: var(--control-radius);
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-medium);
+    text-align: start;
+    transition:
+        background-color var(--press-duration) var(--press-ease),
+        color var(--press-duration) var(--press-ease);
+}
+
+/* Group headers are the only overline in the rail: smaller, tracked
+   out, and muted, so they read as labels rather than as options. */
+
+:root .app-shell.app-shell .left-nav-group-toggle {
+    justify-content: space-between;
+    gap: var(--space-2);
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-overline);
+}
+
+:root .app-shell.app-shell :is(.left-nav-children button, .left-nav-group button):hover:not(.active) {
+    background: var(--color-surface-hover);
+    color: var(--color-bone);
+}
+
+/* One selected treatment, used everywhere a page is current. */
+
+:root .app-shell.app-shell :is(.left-nav-children button.active, .left-nav-group button.active) {
+    background: var(--color-accent-subtle);
+    color: var(--color-signal-orange);
+    font-weight: var(--weight-semi);
+    box-shadow: inset 2px 0 0 var(--color-signal-orange);
+}
+
+/* The top workspace nav is a segmented control, so it keeps its pill
+   geometry but adopts the same selected colour language. */
+
+:root .app-shell.app-shell .workspace-nav button {
+    min-height: var(--control-md);
+    padding-inline: var(--space-4);
+    font-weight: var(--weight-medium);
+}
+
+:root .app-shell.app-shell .workspace-nav button.active {
+    background: var(--color-accent-subtle);
+    color: var(--color-signal-orange);
+    font-weight: var(--weight-semi);
+    box-shadow: none;
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 3. Elevation and surfaces
+   ----------------------------------------------------------------
+   Six distinct shadows were in play and radii included one-off 16px
+   and 2px values. Depth now comes from three steps only, and each
+   step means something:
+
+     rest     a hairline edge, no shadow - most cards
+     raised   contact + ambient - things that float (dialogs, menus)
+     hover    a slightly stronger ambient, no movement
+
+   Cards do not lift on hover. A dashboard where every tile rises
+   under the cursor feels restless; the interaction that matters is
+   the row and the control, not the container.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell :is(.panel, .kpi-card, .summary-tile, .executive-visual, .report-section-stack, .dashboard-frame, .commitment-actual-card) {
+    border-radius: var(--radius-md);
+}
+
+:root .app-shell.app-shell :is(.kpi-card, .summary-tile, .executive-visual, .commitment-actual-card) {
+    box-shadow: none;
+    transition: border-color var(--press-duration) var(--press-ease), background-color var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell :is(.kpi-card, .commitment-actual-card):hover {
+    transform: none;
+    border-color: var(--color-control-stroke);
+    box-shadow: none;
+}
+
+/* Overlays are the one place that genuinely needs to float. */
+
+:root .app-shell.app-shell :is(.remediation-dialog, .report-export-dialog, .custom-report-dialog, .focus-export-dialog, .storage-onboarding-dialog) {
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 4. Tables
+   ----------------------------------------------------------------
+   Header cells were rendering in the same full-strength ink as the
+   data beneath them, so a table read as an undifferentiated block
+   and the eye had to work out where the data started. Headers are
+   now demoted the way a caption is - smaller, tracked out, muted -
+   and closed with a real rule, which lets the data carry the weight.
+
+   Numeric columns take tabular figures so digits align in a column;
+   without it, money in a table never quite lines up.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .schedule-table, .rate-table, .billing-table, .pricing-table, .anomaly-table, .executive-subscription-table, .executive-findings-table) {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .schedule-table, .rate-table, .billing-table, .pricing-table, .anomaly-table) thead th {
+    padding: var(--space-2) var(--space-3);
+    border-bottom: var(--border-width) solid var(--color-control-stroke);
+    background: var(--color-surface);
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-overline);
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .schedule-table, .rate-table, .billing-table, .pricing-table, .anomaly-table) :is(td, tbody th) {
+    padding: var(--space-2) var(--space-3);
+    border-bottom: var(--border-width) solid var(--color-ash-stroke);
+    font-size: var(--font-size-sm);
+    vertical-align: middle;
+}
+
+/* Money and counts are read by comparison down a column, so they get
+   tabular figures and a right edge to compare against. */
+
+:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .schedule-table, .rate-table, .billing-table, .pricing-table, .anomaly-table) :is(td.num, th.num) {
+    text-align: end;
+    font-variant-numeric: var(--nums);
+}
+
+/* The row is the unit of interest in a table, so it is the row that
+   responds - not the cell, and not the whole card. */
+
+:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .billing-table, .anomaly-table) tbody tr {
+    transition: background-color var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .billing-table, .anomaly-table) tbody tr:hover {
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table) tbody tr:last-child :is(td, th) {
+    border-bottom: 0;
+}
+
+/* Totals close a table, so they are separated by a heavier rule and
+   set in the ink used for figures rather than for body copy. */
+
+:root .app-shell.app-shell .executive-total-row :is(td, th) {
+    border-top: var(--border-width) solid var(--color-control-stroke);
+    color: var(--color-bone);
+    font-weight: var(--weight-semi);
+}
+
+/* In a scrolling table the header has to stay with the data it
+   labels, otherwise a long list loses its column meanings. */
+
+:root .app-shell.app-shell :is(.billing-table-scroll, .executive-table-scroll, .cost-detail-scroll) thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 5. Metrics
+   ----------------------------------------------------------------
+   A KPI tile has exactly one job: let someone read the number from
+   across the room and the qualifier only if they care. The note was
+   set at body size in full-strength ink, so all three lines competed for
+   attention and the figure stopped dominating.
+
+   Ranking is now unambiguous: label (caption, muted), figure (28px,
+   tabular), note (caption, muted).
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell :is(.kpi-card, .summary-tile) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    justify-content: flex-start;
+}
+
+:root .app-shell.app-shell :is(.kpi-label, .summary-tile-label) {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-medium);
+    line-height: 1.3;
+}
+
+:root .app-shell.app-shell :is(.kpi-value, .summary-tile-value, .billing-metrics output) {
+    font-variant-numeric: var(--nums);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading-lg);
+    line-height: 1.1;
+}
+
+:root .app-shell.app-shell .kpi-note {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    line-height: 1.4;
+}
+
+/* The category chips are metrics too, not buttons, so they follow
+   the same ranking and stop competing with the command ladder. */
+
+:root .app-shell.app-shell .category-pill {
+    align-items: flex-start;
+    gap: 0;
+    padding: var(--space-2) var(--space-3);
+    text-align: start;
+}
+
+:root .app-shell.app-shell .category-pill>span:first-child {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-medium);
+}
+
+:root .app-shell.app-shell .category-pill strong {
+    font-variant-numeric: var(--nums);
+    font-weight: var(--weight-semi);
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 6. States
+   ----------------------------------------------------------------
+   Empty, loading and error states were each solved locally, so the
+   product told you "nothing here" in several different voices. They
+   now share one: muted body copy at readable size, centred in the
+   space the content would have filled, with semantic colour used
+   only where it carries meaning.
+
+   The skeleton gains a slow sweep. A static grey block reads as a
+   broken layout; a moving one reads as work in progress. It is kept
+   deliberately slow and low-contrast, and it is switched off under
+   reduced-motion and inside the idle report state, which is
+   required to stay completely still.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell :is(.empty-state, .visual-empty) {
+    margin: 0;
+    padding: var(--space-6) var(--space-4);
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    text-align: center;
+}
+
+:root .app-shell.app-shell :is([role='status'], [role='alert']) {
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+}
+
+:root .app-shell.app-shell [role='alert'] {
+    color: var(--color-error);
+}
+
+@keyframes ui-skeleton-sweep {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+}
+
+:root .app-shell.app-shell .ui-skeleton {
+    border-radius: var(--radius-sm);
+    background-image: linear-gradient(
+        90deg,
+        var(--color-skeleton) 0%,
+        var(--color-surface-hover) 50%,
+        var(--color-skeleton) 100%);
+    background-size: 200% 100%;
+    animation: ui-skeleton-sweep 1.6s linear infinite;
+}
+
+:root .app-shell.app-shell .workspace-skeleton-grid>i {
+    border-radius: var(--radius-md);
+}
+
+/* Progress and busy indicators share the control ladder's motion so
+   the whole interface appears to run at one speed. */
+
+:root .app-shell.app-shell .spin {
+    animation-duration: 900ms;
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 7. Charts
+   ----------------------------------------------------------------
+   The charts already render at 1:1 and take their labels from the
+   shared type scale. What remained was their furniture: grid lines
+   competing with data, and legends set like body copy rather than
+   like the captions they are.
+
+   Grid lines drop to the structural stroke so the series sits in
+   front of the grid rather than among it.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell :is(.cost-chart-grid, .daily-line-chart-grid) {
+    stroke: var(--color-ash-stroke);
+}
+
+:root .app-shell.app-shell :is(.cost-chart-legend, .daily-trend-legend, .spend-legend) {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+}
+
+:root .app-shell.app-shell .cost-chart-legend i {
+    border-radius: 2px;
+}
+
+/* Data points are targets, so they answer the cursor. */
+
+:root .app-shell.app-shell .cost-comparison-chart circle[role='button'] {
+    transition: r var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell .cost-comparison-chart circle[role='button']:hover {
+    r: 6;
+}
+
+/* Chart panels sit inside a section that already frames them, so
+   their headers take the caption treatment used elsewhere rather
+   than a second, competing title style. */
+
+:root .app-shell.app-shell .executive-visual>header {
+    min-height: 0;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: var(--border-width) solid var(--color-ash-stroke);
+}
+
+:root .app-shell.app-shell .executive-visual>header>span {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-overline);
+}
+
+
+/* Filters stretch to fill their row, which on a screen with two or
+   three of them produced 600px-wide date fields. A control should be
+   about as wide as the value it holds; capping them keeps a filter
+   row compact and lets the eye group them as a set. */
+
+:root .app-shell.app-shell .billing-filter {
+    max-width: var(--filter-wide);
+}
+
+:root .app-shell.app-shell .billing-filter:has(input[type='date']) {
+    max-width: var(--filter-narrow);
+}
+
+:root .app-shell.app-shell .billing-filters {
+    align-items: end;
+    gap: var(--space-3);
+}
+
+
+/* The idle report state is required to be completely static - a
+   waiting screen should not shimmer. Re-asserted after the skeleton
+   sweep above, which is broader than it. */
+
+:root .app-shell.app-shell :is(.report-awaiting, .report-awaiting *) {
+    transition: none;
+    animation: none;
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 8. Chat
+   ----------------------------------------------------------------
+   Chat had been built before the system existed and showed it: the
+   context rail sat unframed on the canvas while the thread had a
+   card, so the two halves did not read as one surface; the suggested
+   questions - the primary affordance on an empty thread - were
+   borderless list rows that gave no sign of being clickable; the
+   welcome state was stranded in the top-left of a very large empty
+   panel; the composer floated mid-panel rather than anchoring; and
+   the context badge was a hard green square on #101010, a colour
+   used nowhere else in the product.
+
+   Type here also predated the scale, running at 10, 12 and 20px.
+
+   Everything below puts chat on the same footing as the report:
+   one framed surface, the shared control ladder, the shared type
+   scale, and interaction that shows where it is offered.
+   ---------------------------------------------------------------- */
+
+/* One surface. The rail is a column inside the card, divided by a
+   hairline, rather than a separate floating thing. */
+
+:root .app-shell.app-shell .chat-layout {
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell .chat-context {
+    padding: var(--space-4);
+    border-right: var(--border-width) solid var(--color-ash-stroke);
+    background: var(--color-obsidian-canvas);
+}
+
+:root .app-shell.app-shell .chat-main {
+    background: transparent;
+}
+
+/* The badge now speaks the product's accent rather than a one-off
+   green, and takes the radius used by every other small tile. */
+
+:root .app-shell.app-shell .chat-context-mark {
+    width: var(--control-md);
+    height: var(--control-md);
+    margin-bottom: var(--space-4);
+    border-radius: var(--radius-sm);
+    background: var(--color-accent-subtle);
+    color: var(--color-signal-orange);
+}
+
+/* Context labels and figures on the shared scale. */
+
+:root .app-shell.app-shell :is(.chat-context>span, .chat-context nav>span) {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-overline);
+}
+
+:root .app-shell.app-shell .chat-context>strong {
+    margin: var(--space-1) 0 var(--space-4);
+    font-size: var(--font-size-lg);
+    font-weight: var(--weight-semi);
+    font-variant-numeric: var(--nums);
+    letter-spacing: var(--tracking-heading);
+}
+
+:root .app-shell.app-shell .chat-context dl {
+    margin: 0 0 var(--space-5);
+}
+
+:root .app-shell.app-shell .chat-context dl>div {
+    padding: var(--space-2) 0;
+    border-bottom-color: var(--color-ash-stroke);
+    font-size: var(--font-size-xs);
+}
+
+:root .app-shell.app-shell .chat-context dd {
+    color: var(--color-bone);
+    font-variant-numeric: var(--nums);
+}
+
+/* The suggested questions are the main thing to do on an empty
+   thread, so they are presented as cards you can obviously press,
+   not as rows in a list. */
+
+:root .app-shell.app-shell .chat-context nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+:root .app-shell.app-shell .chat-context nav>span {
+    margin-bottom: var(--space-1);
+}
+
+:root .app-shell.app-shell .chat-context nav button {
+    min-height: 0;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-bone);
+    transition:
+        background-color var(--press-duration) var(--press-ease),
+        border-color var(--press-duration) var(--press-ease),
+        transform var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell .chat-context nav button:last-child {
+    border-bottom: var(--border-width) solid var(--color-ash-stroke);
+}
+
+:root .app-shell.app-shell .chat-context nav button:hover:not(:disabled) {
+    border-color: var(--color-signal-orange);
+    background: var(--color-surface-hover);
+    color: var(--color-bone);
+}
+
+:root .app-shell.app-shell .chat-context nav button:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+:root .app-shell.app-shell .chat-context nav button svg {
+    color: var(--color-signal-orange);
+}
+
+:root .app-shell.app-shell .chat-context nav button strong {
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-semi);
+}
+
+:root .app-shell.app-shell .chat-context nav button small {
+    margin-top: var(--space-1);
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    line-height: 1.45;
+}
+
+/* Thread: fills the card so the composer anchors to the bottom
+   instead of floating wherever the content happens to end. */
+
+:root .app-shell.app-shell .chat-main {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+:root .app-shell.app-shell .chat-thread {
+    flex: 1;
+    min-height: 0;
+    /* The thread was capped at 60vh, which made sense when it sat in
+       normal flow. Now that the panel is a column that fills the card,
+       the cap left ~210px of dead white below the composer instead of
+       letting the conversation use the space. */
+    max-height: none;
+    padding: var(--space-5);
+    overflow-y: auto;
+}
+
+/* An empty thread centres its invitation rather than leaving it in
+   the corner of a large blank panel. */
+
+:root .app-shell.app-shell .chat-thread:has(.chat-welcome) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+:root .app-shell.app-shell .chat-welcome {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0;
+    text-align: center;
+}
+
+:root .app-shell.app-shell .chat-welcome>span {
+    display: grid;
+    place-items: center;
+    width: var(--space-12);
+    height: var(--space-12);
+    margin-bottom: var(--space-2);
+    border-radius: var(--radius-md);
+    background: var(--color-accent-subtle);
+    color: var(--color-signal-orange);
+}
+
+:root .app-shell.app-shell .chat-welcome h2 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading);
+}
+
+:root .app-shell.app-shell .chat-welcome small {
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+}
+
+/* Composer: anchored, with the focus ring on the whole control so it
+   reads as one field rather than a textarea with a button beside it. */
+
+:root .app-shell.app-shell .chat-composer {
+    margin: 0 var(--space-5) var(--space-5);
+    border: var(--border-width) solid var(--color-control-stroke);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    transition: border-color var(--press-duration) var(--press-ease), box-shadow var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell .chat-composer:focus-within {
+    border-color: var(--color-focus);
+    box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+:root .app-shell.app-shell .chat-composer textarea {
+    border: 0;
+    background: transparent;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    resize: none;
+}
+
+:root .app-shell.app-shell .chat-composer textarea:focus-visible {
+    outline: none;
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell .chat-composer button[type='submit'] {
+    min-width: var(--control-md);
+    min-height: var(--control-md);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--color-signal-orange);
+    color: var(--color-on-action);
+    transition:
+        background-color var(--press-duration) var(--press-ease),
+        transform var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell .chat-composer button[type='submit']:hover:not(:disabled) {
+    background: var(--color-violet-glow);
+}
+
+:root .app-shell.app-shell .chat-composer button[type='submit']:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+/* Messages: the avatar anchors the turn, the bubble carries it. */
+
+:root .app-shell.app-shell .chat-avatar {
+    display: grid;
+    place-items: center;
+    width: var(--space-8);
+    height: var(--space-8);
+    border-radius: var(--radius-sm);
+    background: var(--color-accent-subtle);
+    color: var(--color-signal-orange);
+}
+
+:root .app-shell.app-shell .chat-message {
+    gap: var(--space-3);
+}
+
+:root .app-shell.app-shell .chat-message.user>p {
+    border-radius: var(--radius-md);
+    background: var(--color-accent-subtle);
+    color: var(--color-bone);
+    font-size: var(--font-size-sm);
+    line-height: 1.55;
+}
+
+:root .app-shell.app-shell .chat-answer>p {
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+}
+
+/* The waiting indicator is the one place chat animates: three dots
+   at a slow, even cadence. Long enough to read as thinking rather
+   than as a glitch, and silenced under reduced motion by the global
+   rule. */
+
+@keyframes chat-thinking-pulse {
+    0%, 80%, 100% { opacity: .25; }
+    40% { opacity: 1; }
+}
+
+:root .app-shell.app-shell .chat-thinking p i {
+    display: inline-block;
+    width: var(--space-1);
+    height: var(--space-1);
+    margin-right: 3px;
+    border-radius: 50%;
+    background: var(--color-signal-orange);
+    animation: chat-thinking-pulse 1.4s ease-in-out infinite;
+}
+
+:root .app-shell.app-shell .chat-thinking p i:nth-child(2) { animation-delay: .2s; }
+:root .app-shell.app-shell .chat-thinking p i:nth-child(3) { animation-delay: .4s; }
+
+/* Toolbar: the router chip is status, not a control, so it reads as
+   a quiet badge rather than as something to press. */
+
+:root .app-shell.app-shell .chat-router-state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+}
+
+@media (max-width: 900px) {
+    :root .app-shell.app-shell .chat-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    :root .app-shell.app-shell .chat-context {
+        border-right: 0;
+        border-bottom: var(--border-width) solid var(--color-ash-stroke);
+    }
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 9. Interface scale
+   ----------------------------------------------------------------
+   One knob that renders the product at a fixed fraction of its
+   natural size, the way a browser zoom does - but as a property of
+   the design rather than of the user's window, so it is consistent
+   for everyone and survives a shared link or a screenshot.
+
+   Three families have to move together or the result reads as
+   "cramped" rather than "zoomed out":
+
+     type      rem-based, so scaling the root font size carries the
+               whole scale (12/14/16/20/28) down in proportion
+     spacing   already derived from --ui-scale, so the zoom is
+               folded into that multiplier
+     controls  fixed pixel heights and widths, multiplied directly
+
+   The space tokens themselves are deliberately not touched in
+   design-tokens.css: their exact expression is asserted by
+   DesignTokens.test.ts, so the zoom is applied by redefining the
+   multiplier they already read rather than by rewriting them.
+
+   Two things intentionally do NOT scale:
+     - --touch-height, the 44px touch floor, which only applies
+       under a coarse pointer where nobody is zoomed out;
+     - border widths, which would turn into blurred sub-pixel lines
+       and undo the divider contrast work.
+   ---------------------------------------------------------------- */
+
+:root {
+    --ui-zoom: .8;
+    font-size: calc(100% * var(--ui-zoom));
+}
+
+/* Spacing follows the zoom through the multiplier it already uses,
+   preserving the comfortable/compact density toggle on top of it. */
+
+:root {
+    --ui-scale: var(--ui-zoom);
+}
+
+:root[data-density='compact'] {
+    --ui-scale: calc(.875 * var(--ui-zoom));
+}
+
+/* Control geometry and the fixed layout widths. */
+
+:root {
+    --control-sm: calc(28px * var(--ui-zoom));
+    --control-md: calc(32px * var(--ui-zoom));
+    --control-lg: calc(40px * var(--ui-zoom));
+    --filter-narrow: calc(156px * var(--ui-zoom));
+    --filter-wide: calc(240px * var(--ui-zoom));
+    --table-max-height: calc(440px * var(--ui-zoom));
+    --table-min-width: calc(500px * var(--ui-zoom));
+    --nav-mobile-height: calc(280px * var(--ui-zoom));
+}
+
+/* The touch floor is restored wherever a finger is the pointer, so
+   zooming the interface out never shrinks a tap target. */
+
+@media (pointer: coarse) {
+    :root {
+        --control-sm: var(--touch-height);
+        --control-md: var(--touch-height);
+        --control-lg: var(--touch-height);
+    }
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 10. Brand
+   ----------------------------------------------------------------
+   The lockup was previously a synthetic mark: four clipped dollar
+   glyphs in the Microsoft quadrant colours, standing in for a logo
+   the product did not have. It now uses the real CloudLens mark.
+
+   The supplied artwork is a wordmark on a dark ground, which cannot
+   be dropped into the header as-is - "Cloud" is set in white and
+   would disappear against the light theme. So the lockup is split
+   the way brand systems normally are: the icon ships as artwork
+   (keyed to transparency, so it sits on either theme), and the
+   wordmark stays live text, which keeps it crisp at any zoom,
+   selectable, searchable, and readable in both themes.
+
+   The wordmark takes a gradient that fades from the current text
+   colour into the accent, echoing the artwork's Cloud/Lens split
+   without hard-coding where the name divides - brand.ts remains the
+   only place the product name is defined.
+   ---------------------------------------------------------------- */
+
+/* Sized to the header band rather than to the type beside it. At 22px the
+   mark read as an afterthought next to the wordmark; at 32 it holds the
+   corner and its cloud/dollar detail is actually legible. The ui-zoom
+   multiplier keeps it in step when the interface is scaled down. */
+
+:root .app-shell.app-shell .brand-mark,
+.signin-screen .brand-mark {
+    width: auto;
+    height: calc(40px * var(--ui-zoom));
+    flex: none;
+    object-fit: contain;
+}
+
+/* The gradient must name its colours outright. Using currentColor here is a
+   trap: background-clip:text requires color:transparent, and currentColor then
+   resolves to that same transparent value - which silently erased the first
+   half of the name. */
+
+/* Sized against the mark, not the body text. The wordmark had stayed at body
+   size while the mark grew to 32px, so the lockup read as an icon with a
+   caption rather than as one piece of branding. At the display step the
+   cap height sits at roughly two-thirds of the mark, which is the usual
+   balance for a horizontal lockup. */
+
+/* The mark runs cyan through blue into violet, so the wordmark ends on the
+   same violet rather than on the flat accent - the two halves of the lockup
+   then read as one object. Kept above the large-text contrast floor in both
+   themes, since the name is the product's primary identifier. */
+
+:root .app-shell.app-shell .brand-product {
+    font-family: var(--font-geist);
+    font-size: var(--font-size-xl);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading-lg);
+    line-height: 1.1;
+    text-transform: none;
+    background: linear-gradient(
+        100deg,
+        var(--color-bone) 0%,
+        var(--color-bone) 50%,
+        var(--color-signal-orange) 72%,
+        var(--color-category-ai) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+/* The rule between mark and name tracks the taller of the two so it reads
+   as a divider rather than a tick. */
+
+:root .app-shell.app-shell .brand-divider {
+    height: calc(28px * var(--ui-zoom));
+}
+
+/* The sign-in showcase sits on a light panel in both themes, so it keeps the
+   solid ink it already had rather than the theme-following gradient. */
+
+.brand-lockup.on-light .brand-product {
+    background: none;
+    color: inherit;
+}
+
+/* Windows High Contrast turns off background-clip painting, which
+   would leave the name invisible; the fallback restores solid ink. */
+
+@media (forced-colors: active) {
+    :root .app-shell.app-shell .brand-product,
+    .signin-screen .brand-product {
+        background: none;
+        color: CanvasText;
+    }
+}
+
+/* Programmatic focus targets never draw a ring.
+
+   Changing report page moves focus to the page heading so a screen reader
+   announces the new view. Those headings carry tabindex="-1" - they are not
+   keyboard-reachable controls - but a global `:focus-visible` rule and an
+   earlier `[tabindex]` selector both matched them, so every navigation click
+   drew a blue box around the page title. Scoped here rather than by editing
+   the broader rules, which are correct for everything else they match. */
+
+:root .app-shell.app-shell [tabindex='-1']:focus,
+:root .app-shell.app-shell [tabindex='-1']:focus-visible {
+    outline: none;
+    box-shadow: none;
+}
+
+
+/* ================================================================
+   Section headings — disclosure parity
+   ----------------------------------------------------------------
+   "Explore costs and findings" and "Daily subscription amounts" are
+   top-level sections of the report, the same rank as "Subscription
+   cost comparison", but they were set at body size because they
+   happen to be rendered as a <summary> rather than an <h2>. Being a
+   disclosure is a behaviour, not a demotion, so they now take the
+   same size, weight and tracking as the heading they sit beside.
+
+   "Report details" is deliberately left at caption size: it is a
+   footnote to the masthead rather than a section of the report, and
+   promoting it would flatten that distinction.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell :is(.cost-analysis-details, .cost-daily-values)>summary {
+    font-size: var(--font-size-lg);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading);
+    color: var(--color-bone);
+}
+
+/* The caption beside the title stays a caption. */
+
+:root .app-shell.app-shell .cost-analysis-details>summary>span {
+    font-size: var(--font-size-xs);
+    font-weight: 400;
+    letter-spacing: normal;
+}
+
+/* The daily figures are a plain <details>, so they get the same
+   pressable summary treatment as the other sections rather than a
+   bare native marker next to a heading. */
+
+:root .app-shell.app-shell .cost-daily-values>summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    list-style: none;
+    transition: background-color var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell .cost-daily-values>summary::-webkit-details-marker {
+    display: none;
+}
+
+:root .app-shell.app-shell .cost-daily-values>summary:hover {
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell.app-shell .cost-daily-values>summary:focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: calc(var(--focus-width) * -1);
+}
+
+:root .app-shell.app-shell .cost-daily-values>summary::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    margin-inline-start: 2px;
+    border-right: 1.5px solid var(--color-graphite-mid);
+    border-bottom: 1.5px solid var(--color-graphite-mid);
+    transform: rotate(-45deg);
+    transition: transform var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell .cost-daily-values[open]>summary::before {
+    transform: rotate(45deg);
+}
+
+
+/* ================================================================
+   DESIGN SYSTEM — 11. Dashboard sections
+   ----------------------------------------------------------------
+   The executive view was a single long panel: eight blocks in a row,
+   each announcing itself with its own rule, band or heading, and no
+   structure above them. Everything was at the same level, so there
+   was nothing to scan.
+
+   It now reads as five named phases - Cost Overview, Cost Comparison,
+   Insights & Findings, Budget Context, Daily Cost Breakdown - each a
+   card with one title. The rules:
+
+     - one border per section, and nothing inside draws a second one;
+     - 32px between sections, 24px inside them, so the gap between
+       ideas is always larger than the gap within one;
+     - no shadows on sections. Depth is for things that float; a
+       section is part of the page, and eight drop shadows down a
+       column is the single fastest way to look cheap;
+     - the section header is the only heading at its level, so blocks
+       that previously carried their own title give it up.
+   ---------------------------------------------------------------- */
+
+:root .app-shell.app-shell .executive-report {
+    display: flex;
+    flex-direction: column;
+    /* Section rhythm is structural, so it follows the interface zoom but not
+       the density toggle - how far apart two ideas sit should not change when
+       a user compacts row spacing. Lands at 26px, inside the 24-32 band. */
+    gap: calc(32px * var(--ui-zoom));
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell .dashboard-section {
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    box-shadow: none;
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell .dashboard-section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    padding: calc(28px * var(--ui-zoom)) calc(28px * var(--ui-zoom)) 0;
+}
+
+:root .app-shell.app-shell .dashboard-section-heading h2 {
+    margin: 0;
+    color: var(--color-bone);
+    font-size: var(--font-size-lg);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading);
+    line-height: 1.25;
+}
+
+:root .app-shell.app-shell .dashboard-section-heading p {
+    margin: var(--space-1) 0 0;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-sm);
+    line-height: 1.45;
+}
+
+:root .app-shell.app-shell .dashboard-section-aside {
+    flex: 0 0 auto;
+}
+
+:root .app-shell.app-shell .dashboard-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: calc(24px * var(--ui-zoom));
+    padding: calc(20px * var(--ui-zoom)) calc(28px * var(--ui-zoom)) calc(28px * var(--ui-zoom));
+}
+
+/* Blocks inside a section have already been framed by the section, so
+   they drop their own frame, ground and internal heading padding.
+   This is where most of the old clutter came from - a card, inside a
+   card, inside a panel. */
+
+:root .app-shell.app-shell .dashboard-section-body :is(.cost-window-overview, .anomaly-overview, .cost-budget-context, .cost-daily-values, .executive-report>*) {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell .dashboard-section-body>:is(.cost-window-overview, .anomaly-overview) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+/* The export control sits at the trailing edge of its own row now that
+   the section owns the title. */
+
+:root .app-shell.app-shell .cost-section-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* Budget context opened with its own heading, which repeated the section
+   title immediately above it. The heading goes; its refresh control stays,
+   moved to the trailing edge as a bare action row. */
+
+:root .app-shell.app-shell .dashboard-section-body .cost-budget-context>.cost-section-heading :is(h2, h3) {
+    display: none;
+}
+
+:root .app-shell.app-shell .dashboard-section-body .cost-budget-context>.cost-section-heading {
+    justify-content: flex-end;
+    margin: 0;
+    min-height: 0;
+}
+
+/* Inside Insights, the disclosure is a peer of the anomaly block, so
+   it is separated by space rather than by a rule. */
+
+:root .app-shell.app-shell .dashboard-section-body>.overview-details {
+    margin: 0;
+    border: 0;
+    border-top: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: 0;
+    padding-top: var(--space-5);
+    background: transparent;
+}
+
+/* Report details is a footnote to the overview, not a peer of it. */
+
+:root .app-shell.app-shell .dashboard-section-body>.report-evidence-details {
+    border-top: 0;
+    padding-top: 0;
+}
+
+:root .app-shell.app-shell .executive-hero-grid {
+    gap: var(--space-3);
+    margin: 0;
+}
+
+@media (max-width: 640px) {
+    :root .app-shell.app-shell .executive-report {
+        gap: var(--space-5);
+    }
+    :root .app-shell.app-shell .dashboard-section-header {
+        padding: var(--space-4) var(--space-4) 0;
+    }
+    :root .app-shell.app-shell .dashboard-section-body {
+        gap: var(--space-4);
+        padding: var(--space-4);
+    }
+}
+
+

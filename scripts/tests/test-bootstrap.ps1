@@ -34,6 +34,10 @@ function az {
                    tags = @{ 'azd-env-name' = $environmentName; 'app-name' = 'cost-assessment' } } | ConvertTo-Json -Depth 5 -Compress)
     }
     if ($arguments[0] -eq 'account' -and $arguments[1] -eq 'get-access-token') {
+        if ($global:bootstrapTestState.scenario -eq 'graph-token-failure') {
+            $global:LASTEXITCODE = 1
+            return
+        }
         if ($arguments -contains '--subscription' -or $arguments -notcontains '--tenant' -or
             $arguments[$arguments.IndexOf('--tenant') + 1] -ne $tenantId) {
             throw 'Graph token acquisition must select only the verified tenant, not tenant plus subscription.'
@@ -162,8 +166,18 @@ try {
         $federations[0].subject = $originalSubject
         if (-not $denied -or $writes.Count -ne $count) { throw "Unsafe bootstrap failure: $failure" }
     }
+    $global:bootstrapTestState.scenario = 'graph-token-failure'
+    $count = $writes.Count
+    $graphAuthFailure = $null
+    try { & $bootstrap @parameters | Out-Null } catch { $graphAuthFailure = $_.Exception.Message }
+    if (-not $graphAuthFailure.Contains('AADSTS530004') -or
+        -not $graphAuthFailure.Contains("az login --tenant `"$tenantId`" --scope `"https://graph.microsoft.com/.default`"") -or
+        $writes.Count -ne $count) {
+        throw 'Graph authentication failure must provide tenant-specific remediation and stop before writes.'
+    }
     [ordered]@{ result = 'passed'; networkCalls = 0; registrations = 2; federations = 1; consentGrants = 2;
-                idempotentCreates = $true; rejectedConflictsBeforeWrites = 4; consentFailureRecoverable = $true } | ConvertTo-Json -Compress
+                idempotentCreates = $true; rejectedConflictsBeforeWrites = 4; consentFailureRecoverable = $true;
+                graphAuthenticationFailureActionable = $true } | ConvertTo-Json -Compress
 } finally {
     Remove-Variable -Name bootstrapTestState -Scope Global -ErrorAction SilentlyContinue
     if ($hadApproval) { $env:APP_ALLOW_AZURE_CHANGES = $oldApproval }

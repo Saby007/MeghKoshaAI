@@ -265,7 +265,7 @@ export function ScheduleManager() {
         && (schedule.state === 'active' || schedule.state === 'paused' || schedule.state === 'not_scheduled'
           || (schedule.state === 'unknown' && schedule.availability === 'export_unavailable')))
       .map((schedule) => schedule.subscriptionId);
-    if (!subscriptionIds.length) return;
+    if (!subscriptionIds.length || subscriptionIds.length !== schedules.length) return;
     setRunningAll(true);
     setError(null);
     try {
@@ -360,6 +360,10 @@ export function ScheduleManager() {
   const runAllCount = schedules.filter((schedule) => schedule.readAccess === true && schedule.costAccess === true
     && (schedule.state === 'active' || schedule.state === 'paused' || schedule.state === 'not_scheduled'
       || (schedule.state === 'unknown' && schedule.availability === 'export_unavailable'))).length;
+  // "Run all" acts on every listed subscription. Offering it while any row cannot be run
+  // would silently act on a subset while presenting it as the whole estate, so it stays
+  // disabled unless every listed subscription is runnable (or bootstrappable via export).
+  const canRunAll = runAllCount > 0 && runAllCount === schedules.length;
   const loadStatus = loadError instanceof ApiRequestError && loadError.status === 401 ? 'Sign-in required'
     : loadError instanceof ApiRequestError && loadError.status === 403 ? 'Access not verified'
     : 'Subscription status unavailable';
@@ -386,7 +390,7 @@ export function ScheduleManager() {
           <div><span>Six-month monthly refresh</span><h2 id="schedule-list-title">FOCUS schedules</h2></div>
           <div className="schedule-header-actions">
             <span role="status">{loading ? 'Refreshing...' : loadError ? 'Refresh failed' : loadedAt ? `Checked ${formatDate(loadedAt)}` : ''}</span>
-            <button className="outline-command" type="button" onClick={() => void runAll()} disabled={runningAll || loading || !!loadError || runAllCount === 0}>{runningAll ? <RefreshCw className="spin" size={15} /> : <Play size={15} />} Run all</button>
+            <button className="outline-command" type="button" onClick={() => void runAll()} disabled={runningAll || loading || !!loadError || !canRunAll}>{runningAll ? <RefreshCw className="spin" size={15} /> : <Play size={15} />} Run all</button>
             <button className="icon-command" type="button" onClick={() => void refresh()} disabled={loading} title="Refresh schedules" aria-label="Refresh schedules"><RefreshCw className={loading ? 'spin' : ''} size={17} /></button>
           </div>
         </header>

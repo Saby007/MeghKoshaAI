@@ -50,9 +50,10 @@ import { BillingHistoryTab, HourlyCostPanel } from './BillingHistory';
 import { AICostAlerts, AnomalyOverview, useAnomalySummary, type AnomalyState } from './AnomalyOverview';
 import { billingWindow } from '../report/billingHistory';
 import { tagDistribution } from '../report/tagDistribution';
-import { CostWindowOverview, PeriodCostAnomalies, RequiredTagCosts, SubscriptionCostBreakdown } from './CostExplorer';
-import { presetCostWindow, type CostFilter, type CostWindow } from '../report/costDetails';
-import { useBudgetSummary } from './BudgetContext';
+import { CostExportButton, CostFilters, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
+import { GroupedCostBreakdown } from './CostBreakdown';
+import { presetCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { BudgetContext, useBudgetSummary, type BudgetState } from './BudgetContext';
 import { ServiceRetirements } from './ServiceRetirements';
 import { BRAND_NAME } from '../brand';
 
@@ -513,12 +514,20 @@ function CategorySpendPills({
   );
 }
 
-export function ReportView({ report, narration, snapshotId, snapshotCreatedAt }: { report: FullReport; narration: CostAgentOutput; snapshotId: string | null; snapshotCreatedAt?: string }) {
+export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, costWindow: controlledCostWindow, onCostWindowChange }: { report: FullReport; narration: CostAgentOutput; snapshotId: string | null; snapshotCreatedAt?: string; costWindow?: CostWindow; onCostWindowChange?: (value: CostWindow) => void }) {
   const [tab, setTab] = useState<Tab>('Executive Summary');
-  const [costWindow, setCostWindow] = useState<CostWindow>(() => presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend.days.map((day) => day.date), 30));
+  /* The cost window is now presented once, in the saved-report strip, which is
+     owned by App - so in the running application this is a controlled value.
+     The uncontrolled fallback keeps ReportView complete on its own, which is
+     how it is mounted in tests and how a caller that does not want to own a
+     window can still use it. Same contract as a React input with value vs
+     defaultValue. */
+  const [uncontrolledCostWindow, setUncontrolledCostWindow] = useState<CostWindow>(() => presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend.days.map((day) => day.date), 30));
+  const costWindow = controlledCostWindow ?? uncontrolledCostWindow;
+  const setCostWindow = onCostWindowChange ?? setUncontrolledCostWindow;
   const [costFilters, setCostFilters] = useState<CostFilter>({});
   useEffect(() => setCostFilters({}), [report]);
-  useEffect(() => setCostWindow(presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend.days.map((day) => day.date), 30)), [report]);
+  useEffect(() => setUncontrolledCostWindow(presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend.days.map((day) => day.date), 30)), [report]);
   const anomalyState = useAnomalySummary(report);
   const budgetState = useBudgetSummary(report);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
@@ -725,10 +734,22 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt }:
       <div className="dashboard-body">
         <div className="tab-panel" key={tab}>
           {tab === 'Executive Summary' && (
-            <>
-              <CostWindowOverview report={report} snapshotId={snapshotId} window={costWindow} onChange={setCostWindow} formatMoney={formatHourlyMoney} onOpenAnomalies={() => selectTab('Cost Anomalies')} budgetState={budgetState} filters={costFilters} onFiltersChange={setCostFilters} />
-              <ExecutiveSummaryTab report={report} narrativeSummary={narration?.executive_summary} onOpenFinding={openFinding} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} displayCurrency={displayCurrency} anomalyState={anomalyState} onOpenAnomalies={() => selectTab('Cost Anomalies')} />
-            </>
+            <ExecutiveSummaryTab
+              report={report}
+              narrativeSummary={narration?.executive_summary}
+              onOpenFinding={openFinding}
+              formatMoney={formatMoney}
+              formatHourlyMoney={formatHourlyMoney}
+              displayCurrency={displayCurrency}
+              anomalyState={anomalyState}
+              onOpenAnomalies={() => selectTab('Cost Anomalies')}
+              snapshotId={snapshotId}
+              costWindow={costWindow}
+              onCostWindowChange={setCostWindow}
+              costFilters={costFilters}
+              onCostFiltersChange={setCostFilters}
+              budgetState={budgetState}
+            />
           )}
           {tab === 'Savings Roadmap' && (
             <SavingsRoadmapTab report={report} onOpenFinding={openFinding} onOpenRemediation={openRemediation} formatMoney={formatMoney} displayCurrency={displayCurrency} />
@@ -737,8 +758,18 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt }:
             <StaleResourcesTab report={report} formatMoney={formatMoney} displayCurrency={displayCurrency} />
           )}
           {tab === 'Subscription Breakdown' && <SubscriptionCostBreakdown report={report} snapshotId={snapshotId} window={costWindow} onChange={setCostWindow} formatMoney={formatHourlyMoney} filters={costFilters} onFiltersChange={setCostFilters} />}
-          {tab === 'History' && <BillingHistoryTab report={report} formatMoney={formatHourlyMoney} />}
-          {tab === 'Cost by Hour' && <HourlyCostPanel report={report} formatMoney={formatHourlyMoney} formatHourlyMoney={formatHourlyMoney} snapshotId={snapshotId} budgetState={budgetState} costWindow={costWindow} onWindowChange={setCostWindow} costFilters={costFilters} onFiltersChange={setCostFilters} />}
+          {tab === 'History' && (
+            <BillingHistoryTab
+              report={report}
+              formatMoney={formatHourlyMoney}
+              details={report.costDetails}
+              costWindow={costWindow}
+              costFilters={costFilters}
+              onCostFiltersChange={setCostFilters}
+              displayCurrency={displayCurrency}
+            />
+          )}
+          {tab === 'Cost by Hour' && <HourlyCostPanel report={report} formatMoney={formatHourlyMoney} formatHourlyMoney={formatHourlyMoney} snapshotId={snapshotId} budgetState={budgetState} costWindow={costWindow} onWindowChange={setCostWindow} costFilters={costFilters} onFiltersChange={setCostFilters} displayCurrency={displayCurrency} />}
           {tab === 'EA Pricing' && <PricingTab report={report} formatMoney={formatMoney} displayCurrency={displayCurrency} />}
           {tab === 'Rate Optimization' && (
             <RateOptimizationTab report={report} formatMoney={formatMoney} displayCurrency={displayCurrency} />
@@ -821,7 +852,14 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt }:
           {tab === 'Advisor Reconciliation' && <AdvisorTab report={report} formatMoney={formatMoney} />}
           {tab === 'Governance & Risk' && <><RequiredTagCosts report={report} snapshotId={snapshotId} window={costWindow} formatMoney={formatHourlyMoney} filters={costFilters} /><GovernanceTab report={report} /><ServiceRetirements report={report} snapshotId={snapshotId} /></>}
           {tab === 'Cost by Tags' && (
-            <CostByTagsTab report={report} formatMoney={formatMoney} displayCurrency={displayCurrency} />
+            <CostByTagsTab
+              report={report}
+              formatMoney={formatMoney}
+              displayCurrency={displayCurrency}
+              costWindow={costWindow}
+              costFilters={costFilters}
+              onCostFiltersChange={setCostFilters}
+            />
           )}
           {tab === 'Budgets' && (
             <BudgetsTab report={report} />
@@ -1394,6 +1432,77 @@ function RangeSpendSummary({ report, formatMoney, rangeDays }: { report: FullRep
   );
 }
 
+/* A categorised, collapsible block. The executive view previously ran as one
+   continuous column of tables and charts separated only by full-bleed dividers,
+   so nothing signalled where one subject ended and the next began. Grouping the
+   same content under named sections gives the page a spine, and making each one
+   collapsible lets a reader close what they are not asking about.
+
+   Built on details/summary so expansion, keyboard operation and find-in-page
+   come from the platform rather than from bespoke state. */
+function ReportSection({
+  id,
+  title,
+  caption,
+  meta,
+  defaultOpen = true,
+  children,
+}: {
+  id: string;
+  title: string;
+  caption?: string;
+  meta?: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="report-section" open={defaultOpen} data-section={id}>
+      <summary className="report-section-summary">
+        <ChevronRight className="report-section-chevron" size={16} aria-hidden="true" />
+        <span className="report-section-heading">
+          <strong>{title}</strong>
+          {caption && <small>{caption}</small>}
+        </span>
+        {meta !== undefined && meta !== null && <span className="report-section-meta">{meta}</span>}
+      </summary>
+      <div className="report-section-body">{children}</div>
+    </details>
+  );
+}
+
+/* A top-level, always-visible section of the dashboard. Distinct from
+   ReportSection, which is the collapsible block used inside a section: this
+   one names a phase of reading the report and never hides its contents.
+   The header carries the title, an optional one-line caption, and an
+   optional figure or control on the trailing edge. */
+function DashboardSection({
+  id,
+  title,
+  caption,
+  aside,
+  children,
+}: {
+  id: string;
+  title: string;
+  caption?: string;
+  aside?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const headingId = `dashboard-section-${id}`;
+  return (
+    <section className="dashboard-section" aria-labelledby={headingId} data-dashboard-section={id}>
+      <header className="dashboard-section-header">
+        <div className="dashboard-section-heading">
+          <h2 id={headingId}>{title}</h2>
+          {caption && <p>{caption}</p>}
+        </div>
+        {aside && <div className="dashboard-section-aside">{aside}</div>}
+      </header>
+      <div className="dashboard-section-body">{children}</div>
+    </section>
+  );
+}
+
 function ExecutiveSummaryTab({
   report,
   narrativeSummary,
@@ -1403,6 +1512,12 @@ function ExecutiveSummaryTab({
   displayCurrency,
   anomalyState,
   onOpenAnomalies,
+  snapshotId,
+  costWindow,
+  onCostWindowChange,
+  costFilters,
+  onCostFiltersChange,
+  budgetState,
 }: {
   report: FullReport;
   narrativeSummary?: string;
@@ -1412,195 +1527,321 @@ function ExecutiveSummaryTab({
   displayCurrency: string;
   anomalyState: AnomalyState;
   onOpenAnomalies: () => void;
+  snapshotId: string | null;
+  costWindow: CostWindow;
+  onCostWindowChange: (value: CostWindow) => void;
+  costFilters: CostFilter;
+  onCostFiltersChange: (value: CostFilter) => void;
+  budgetState?: BudgetState;
 }) {
   const s = report.executiveSummary;
   const metadata = report.reportMetadata;
   const completeness = report.completeness;
   const [rangeDays, setRangeDays] = useState<TimeRangeDays>(30);
   const [costDetailsOpened, setCostDetailsOpened] = useState(false);
+  /* The daily figures sit at the end of the report rather than under the
+     chart, so the day selection they drive is owned here and handed to the
+     cost window instead of living inside it. */
+  const [selectedDay, setSelectedDay] = useState<SelectedDay | null>(null);
   return (
     <div className="panel executive-report">
-      <header className="executive-masthead">
-        <div>
-          <h2>Assessment Headlines</h2>
-          <p>
-            {reportDate(metadata.periodStart)} – {reportDate(metadata.periodEnd)} · {metadata.costBasis} · {metadata.currency}
-          </p>
-        </div>
-        <div className={`completeness-stamp ${completeness.complete ? 'complete' : ''}`}>
-          <span>{completeness.status}</span>
-          <strong>{completeness.availableSubscriptions}/{completeness.requestedSubscriptions}</strong>
-          <small>subscriptions</small>
-        </div>
-      </header>
-
-      <details className="overview-details report-evidence-details">
-        <summary>Report details <span>Source, integrity and narrative</span></summary>
-        <div className="executive-provenance">
-        <span><b>Period</b>{metadata.period}</span>
-        <span><b>Cost basis</b>{metadata.costBasis}</span>
-        <span><b>Source</b>{metadata.source}</span>
-        <span><b>Integrity</b>Completed runs + blob size verified</span>
-        </div>
-        {narrativeSummary && <div className="executive-narrative">{narrativeSummary}</div>}
-      </details>
-
-      <div className="kpi-grid executive-hero-grid">
-        <div className="kpi-card">
-          <div className="kpi-label">Total monthly spend</div>
-          <div className="kpi-value">{formatMoney(s.currentMonthlySpend)}</div>
-          <div className="kpi-note">
-            {s.spendChangePercentage === null
-              ? `${completeness.availableSubscriptions} complete exports · comparison accrues next month`
-              : `${s.spendChangePercentage >= 0 ? '▲' : '▼'} ${Math.abs(s.spendChangePercentage * 100).toFixed(1)}% vs previous complete month`}
+      <DashboardSection
+        id="cost-overview"
+        title="Cost Overview"
+        caption={`${reportDate(metadata.periodStart)} – ${reportDate(metadata.periodEnd)} · ${metadata.costBasis} · ${metadata.currency}`}
+        aside={
+          <div className={`completeness-stamp ${completeness.complete ? 'complete' : ''}`}>
+            <span>{completeness.status}</span>
+            <strong>{completeness.availableSubscriptions}/{completeness.requestedSubscriptions}</strong>
+            <small>subscriptions</small>
+          </div>
+        }
+      >
+        <div className="kpi-grid executive-hero-grid">
+          <div className="kpi-card">
+            <div className="kpi-label">Total monthly spend</div>
+            <div className="kpi-value">{formatMoney(s.currentMonthlySpend)}</div>
+            <div className="kpi-note">
+              {s.spendChangePercentage === null
+                ? `${completeness.availableSubscriptions} complete exports · comparison accrues next month`
+                : `${s.spendChangePercentage >= 0 ? '▲' : '▼'} ${Math.abs(s.spendChangePercentage * 100).toFixed(1)}% vs previous complete month`}
+            </div>
+          </div>
+          <div className="kpi-card risk">
+            <div className="kpi-label">Estimated wastage</div>
+            <div className="kpi-value">{formatMoney(s.estimatedWastageMonth)}</div>
+            <div className="kpi-note">{percent(s.pctWastage)} of total · includes billed cost at risk</div>
+          </div>
+          <div className="kpi-card positive">
+            <div className="kpi-label">Potential savings</div>
+            <div className="kpi-value">{formatMoney(s.potentialSavingsMonth)}</div>
+            <div className="kpi-note">{percent(s.pctRecoverable)} of total bill · estimated / month</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">{s.idleReviewCandidates == null ? 'Active resources' : 'Other billed resources'}</div>
+            <div className="kpi-value">{s.activeResources.toLocaleString()}</div>
+            <div className="kpi-note">Cost-bearing resources across {completeness.availableSubscriptions} subscriptions</div>
+          </div>
+          <div className="kpi-card risk">
+            <div className="kpi-label">{s.idleReviewCandidates == null ? 'Idle resources (legacy)' : 'Confirmed idle resources'}</div>
+            <div className="kpi-value">{s.idleResources.toLocaleString()}</div>
+            {s.idleReviewCandidates != null && <div className="kpi-note">{s.idleReviewCandidates.toLocaleString()} candidates require evidence or owner review</div>}
+            <div className="kpi-note">{percent(s.idleResourcePercentage)} of assessed active + idle resources</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Advisor score</div>
+            <div className="kpi-value">{report.advisorScore.score === null ? '—' : `${report.advisorScore.score.toFixed(0)} / 100`}</div>
+            <div className="kpi-note">
+              {report.advisorScore.monthlyChange === null
+                ? report.advisorScore.status
+                : `${report.advisorScore.monthlyChange >= 0 ? '▲' : '▼'} ${Math.abs(report.advisorScore.monthlyChange).toFixed(1)} pts this month`}
+            </div>
           </div>
         </div>
-        <div className="kpi-card risk">
-          <div className="kpi-label">Estimated wastage</div>
-          <div className="kpi-value">{formatMoney(s.estimatedWastageMonth)}</div>
-          <div className="kpi-note">{percent(s.pctWastage)} of total · includes billed cost at risk</div>
-        </div>
-        <div className="kpi-card positive">
-          <div className="kpi-label">Potential savings</div>
-          <div className="kpi-value">{formatMoney(s.potentialSavingsMonth)}</div>
-          <div className="kpi-note">{percent(s.pctRecoverable)} of total bill · estimated / month</div>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-label">{s.idleReviewCandidates == null ? 'Active resources' : 'Other billed resources'}</div>
-          <div className="kpi-value">{s.activeResources.toLocaleString()}</div>
-          <div className="kpi-note">Cost-bearing resources across {completeness.availableSubscriptions} subscriptions</div>
-        </div>
-        <div className="kpi-card risk">
-          <div className="kpi-label">{s.idleReviewCandidates == null ? 'Idle resources (legacy)' : 'Confirmed idle resources'}</div>
-          <div className="kpi-value">{s.idleResources.toLocaleString()}</div>
-          {s.idleReviewCandidates != null && <div className="kpi-note">{s.idleReviewCandidates.toLocaleString()} candidates require evidence or owner review</div>}
-          <div className="kpi-note">{percent(s.idleResourcePercentage)} of assessed active + idle resources</div>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-label">Advisor score</div>
-          <div className="kpi-value">{report.advisorScore.score === null ? '—' : `${report.advisorScore.score.toFixed(0)} / 100`}</div>
-          <div className="kpi-note">
-            {report.advisorScore.monthlyChange === null
-              ? report.advisorScore.status
-              : `${report.advisorScore.monthlyChange >= 0 ? '▲' : '▼'} ${Math.abs(report.advisorScore.monthlyChange).toFixed(1)} pts this month`}
-          </div>
-        </div>
-      </div>
-      <AnomalyOverview state={anomalyState} onOpenDetails={onOpenAnomalies} formatMoney={formatMoney} />
 
-      <details className="overview-details cost-analysis-details" onToggle={(event) => {
-        if (event.currentTarget.open) setCostDetailsOpened(true);
-      }}>
+        <details className="overview-details report-evidence-details">
+          <summary>Report details <span>Source, integrity and narrative</span></summary>
+          <div className="executive-provenance">
+            <span><b>Period</b>{metadata.period}</span>
+            <span><b>Cost basis</b>{metadata.costBasis}</span>
+            <span><b>Source</b>{metadata.source}</span>
+            <span><b>Integrity</b>Completed runs + blob size verified</span>
+          </div>
+          {narrativeSummary && <div className="executive-narrative">{narrativeSummary}</div>}
+        </details>
+      </DashboardSection>
+
+      <DashboardSection
+        id="cost-comparison"
+        title="Cost Comparison"
+        caption="Selected period against the preceding one"
+        aside={<CostExportButton report={report} snapshotId={snapshotId} window={costWindow} filters={costFilters} />}
+      >
+        <CostWindowOverview
+          report={report}
+          snapshotId={snapshotId}
+          window={costWindow}
+          onChange={onCostWindowChange}
+          formatMoney={formatHourlyMoney}
+          onOpenAnomalies={onOpenAnomalies}
+          budgetState={budgetState}
+          filters={costFilters}
+          onFiltersChange={onCostFiltersChange}
+          showBudget={false}
+          showDailyValues={false}
+          showHeading={false}
+          selectedDay={selectedDay}
+          onSelectDay={setSelectedDay}
+        />
+      </DashboardSection>
+
+      <DashboardSection
+        id="insights-findings"
+        title="Insights & Findings"
+        caption="Anomalies, distribution and prioritised actions"
+      >
+        <AnomalyOverview state={anomalyState} onOpenDetails={onOpenAnomalies} formatMoney={formatMoney} />
+
+        <details className="overview-details cost-analysis-details" onToggle={(event) => {
+          if (event.currentTarget.open) setCostDetailsOpened(true);
+        }}>
       <summary>Explore costs and findings <span>Charts, hourly costs, subscriptions and evidence</span></summary>
       {costDetailsOpened && <>
-      <TimeRangeSelector days={rangeDays} onChange={setRangeDays} />
-      <RangeSpendSummary report={report} formatMoney={formatHourlyMoney} rangeDays={rangeDays} />
-      <HourlyCostPanel report={report} formatMoney={formatHourlyMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} embedded />
-      <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} />
-
-      <div className="executive-signal-grid">
-        {report.operationalSignals.map((signal) => (
-          <div className={`executive-signal ${signal.tone}`} key={signal.key}>
-            <span>{signal.label}</span>
-            <strong>{signal.value}</strong>
-            <small>{signal.detail}</small>
-          </div>
-        ))}
+      <div className="analysis-scope-bar">
+        <span className="analysis-scope-label">Analysis range</span>
+        <TimeRangeSelector days={rangeDays} onChange={setRangeDays} />
       </div>
 
-      {report.topServices.length > 0 && (
-        <>
-          <div className="executive-section-band">Top 10 Azure services by closed-period spend</div>
-          <div className="top-services" aria-label="Top Azure services by monthly spend">
-            {report.topServices.map((service) => (
-              <div className="top-service-row" key={service.serviceName}>
-                <span className="top-service-rank">{String(service.rank).padStart(2, '0')}</span>
-                <span className="top-service-name">
-                  <strong>{service.displayName}</strong>
-                  <small>{service.serviceName}</small>
-                </span>
-                <span className="top-service-bar" aria-hidden="true">
-                  <i style={{ width: `${Math.min(service.pctOfTotal * 100, 100)}%` }} />
-                </span>
-                <strong className="top-service-spend">{formatMoney(service.monthlySpend)}</strong>
-                <span className="top-service-share">{percent(service.pctOfTotal)}</span>
-              </div>
-            ))}
+      <div className="report-section-stack">
+        <ReportSection
+          id="spend-over-time"
+          title="Spend over time"
+          caption="Range totals and hourly cost"
+          meta={`Last ${rangeDays} days`}
+        >
+          <RangeSpendSummary report={report} formatMoney={formatHourlyMoney} rangeDays={rangeDays} />
+          <HourlyCostPanel report={report} formatMoney={formatHourlyMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} embedded />
+        </ReportSection>
+
+        <ReportSection
+          id="spend-distribution"
+          title="Spend distribution"
+          caption="Where the money goes, by type, tag and region"
+          meta={formatMoney(s.currentMonthlySpend)}
+        >
+          <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} />
+        </ReportSection>
+
+        {report.operationalSignals.length > 0 && (
+          <ReportSection
+            id="operational-signals"
+            title="Operational signals"
+            caption="Platform observations across the assessed estate"
+            defaultOpen={false}
+            meta={`${report.operationalSignals.length} ${report.operationalSignals.length === 1 ? 'signal' : 'signals'}`}
+          >
+            <div className="executive-signal-grid">
+              {report.operationalSignals.map((signal) => (
+                <div className={`executive-signal ${signal.tone}`} key={signal.key}>
+                  <span>{signal.label}</span>
+                  <strong>{signal.value}</strong>
+                  <small>{signal.detail}</small>
+                </div>
+              ))}
+            </div>
+          </ReportSection>
+        )}
+
+        {report.topServices.length > 0 && (
+          <ReportSection
+            id="top-services"
+            title="Top Azure services"
+            caption="Ranked by closed-period spend"
+            defaultOpen={false}
+            meta={`${report.topServices.length} ${report.topServices.length === 1 ? 'service' : 'services'}`}
+          >
+            <div className="top-services" aria-label="Top Azure services by monthly spend">
+              {report.topServices.map((service) => (
+                <div className="top-service-row" key={service.serviceName}>
+                  <span className="top-service-rank">{String(service.rank).padStart(2, '0')}</span>
+                  <span className="top-service-name">
+                    <strong>{service.displayName}</strong>
+                    <small>{service.serviceName}</small>
+                  </span>
+                  <span className="top-service-bar" aria-hidden="true">
+                    <i style={{ width: `${Math.min(service.pctOfTotal * 100, 100)}%` }} />
+                  </span>
+                  <strong className="top-service-spend">{formatMoney(service.monthlySpend)}</strong>
+                  <span className="top-service-share">{percent(service.pctOfTotal)}</span>
+                </div>
+              ))}
+            </div>
+          </ReportSection>
+        )}
+
+        <ReportSection
+          id="subscriptions"
+          title="Subscriptions"
+          caption="Spend against verified saving"
+          defaultOpen={false}
+          meta={`${report.subscriptionBreakdown.length} ${report.subscriptionBreakdown.length === 1 ? 'subscription' : 'subscriptions'}`}
+        >
+          <div className="executive-table-scroll">
+            <table className="report-table executive-subscription-table">
+              <thead>
+                <tr>
+                  <th>Subscription</th>
+                  <th className="num">Effective spend ({displayCurrency})</th>
+                  <th className="num">Verified saving ({displayCurrency})</th>
+                  <th className="num">% recoverable</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.subscriptionBreakdown.map((row) => (
+                  <tr key={row.subscriptionId}>
+                    <td>{row.subscriptionName}</td>
+                    <td className="num">{formatMoney(row.currentSpend)}</td>
+                    <td className="num positive-text">{formatMoney(row.totalWaste)}</td>
+                    <td className="num">{percent(row.pctSaved)}</td>
+                  </tr>
+                ))}
+                <tr className="executive-total-row">
+                  <td>Total</td>
+                  <td className="num">{formatMoney(s.currentMonthlySpend)}</td>
+                  <td className="num">{formatMoney(s.potentialSavingsMonth)}</td>
+                  <td className="num">{percent(s.pctRecoverable)}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-        </>
-      )}
+        </ReportSection>
 
-      <div className="executive-section-band">Spend vs verified saving by subscription</div>
-      <div className="executive-table-scroll">
-        <table className="report-table executive-subscription-table">
-          <thead>
-            <tr>
-              <th>Subscription</th>
-              <th className="num">Effective spend ({displayCurrency})</th>
-              <th className="num">Verified saving ({displayCurrency})</th>
-              <th className="num">% recoverable</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.subscriptionBreakdown.map((row) => (
-              <tr key={row.subscriptionId}>
-                <td>{row.subscriptionName}</td>
-                <td className="num">{formatMoney(row.currentSpend)}</td>
-                <td className="num positive-text">{formatMoney(row.totalWaste)}</td>
-                <td className="num">{percent(row.pctSaved)}</td>
-              </tr>
-            ))}
-            <tr className="executive-total-row">
-              <td>Total</td>
-              <td className="num">{formatMoney(s.currentMonthlySpend)}</td>
-              <td className="num">{formatMoney(s.potentialSavingsMonth)}</td>
-              <td className="num">{percent(s.pctRecoverable)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div className="executive-section-band">Prioritised findings</div>
-      <div className="executive-table-scroll">
-        <table className="report-table executive-findings-table">
-          <thead>
-            <tr>
-              <th className="num">#</th>
-              <th>Finding</th>
-              <th>Evidence and impact</th>
-              <th className="num">Monthly impact</th>
-              <th>Severity</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.prioritizedFindings.length === 0 && (
-              <tr><td colSpan={5}>No prioritised findings in this snapshot. Review coverage and domain evidence before concluding that no action is needed.</td></tr>
-            )}
-            {report.prioritizedFindings.map((finding) => (
-              <tr key={finding.category}>
-                <td className="num finding-rank">{finding.rank}</td>
-                <td>
-                  <button className="finding-link" type="button" onClick={() => onOpenFinding(finding.category)}>
-                    <strong>{finding.finding}</strong><ChevronRight size={15} aria-hidden="true" />
-                  </button>
-                </td>
-                <td className="finding-evidence">{finding.evidence}</td>
-                <td className="num">
-                  {finding.impactType === 'cost_at_risk'
-                    ? finding.monthlyCostAtRisk === null ? '—' : formatMoney(finding.monthlyCostAtRisk)
-                    : finding.monthlySaving === null ? '—' : formatMoney(finding.monthlySaving)}
-                  <small className={`impact-label ${finding.impactType}`}>
-                    {finding.impactType === 'cost_at_risk' ? 'Cost at risk' : 'Potential saving'}
-                  </small>
-                </td>
-                <td><span className={`severity severity-${finding.severity.toLowerCase()}`}>{finding.severity}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <ReportSection
+          id="prioritised-findings"
+          title="Prioritised findings"
+          caption="Ranked by monthly impact"
+          defaultOpen={false}
+          meta={report.prioritizedFindings.length === 0 ? 'None' : `${report.prioritizedFindings.length} ${report.prioritizedFindings.length === 1 ? 'finding' : 'findings'}`}
+        >
+          <div className="executive-table-scroll">
+            <table className="report-table executive-findings-table">
+              <thead>
+                <tr>
+                  <th className="num">#</th>
+                  <th>Finding</th>
+                  <th>Evidence and impact</th>
+                  <th className="num">Monthly impact</th>
+                  <th>Severity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.prioritizedFindings.length === 0 && (
+                  <tr><td colSpan={5}>No prioritised findings in this snapshot. Review coverage and domain evidence before concluding that no action is needed.</td></tr>
+                )}
+                {report.prioritizedFindings.map((finding) => (
+                  <tr key={finding.category}>
+                    <td className="num finding-rank">{finding.rank}</td>
+                    <td>
+                      <button className="finding-link" type="button" onClick={() => onOpenFinding(finding.category)}>
+                        <strong>{finding.finding}</strong><ChevronRight size={15} aria-hidden="true" />
+                      </button>
+                    </td>
+                    <td className="finding-evidence">{finding.evidence}</td>
+                    <td className="num">
+                      {finding.impactType === 'cost_at_risk'
+                        ? finding.monthlyCostAtRisk === null ? '—' : formatMoney(finding.monthlyCostAtRisk)
+                        : finding.monthlySaving === null ? '—' : formatMoney(finding.monthlySaving)}
+                      <small className={`impact-label ${finding.impactType}`}>
+                        {finding.impactType === 'cost_at_risk' ? 'Cost at risk' : 'Potential saving'}
+                      </small>
+                    </td>
+                    <td><span className={`severity severity-${finding.severity.toLowerCase()}`}>{finding.severity}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </ReportSection>
       </div>
       </>}
       </details>
+      </DashboardSection>
+
+      {budgetState && (
+        <DashboardSection
+          id="budget-context"
+          title="Budget Context"
+          caption="Native Azure budgets against the assessed scope"
+          aside={
+            <button
+              type="button"
+              className="ghost-button"
+              disabled={budgetState.loading}
+              onClick={budgetState.refresh}
+              aria-label="Refresh budget context"
+              title="Refresh budget context"
+            >
+              <RefreshCw size={15} aria-hidden="true" />
+            </button>
+          }
+        >
+          <BudgetContext state={budgetState} details={report.costDetails} filters={costFilters} showHeading={false} />
+        </DashboardSection>
+      )}
+
+      <DashboardSection
+        id="daily-breakdown"
+        title="Daily Cost Breakdown"
+        caption="Per-day figures behind the comparison"
+      >
+        <DailySubscriptionValues
+          details={report.costDetails}
+          window={costWindow}
+          filters={costFilters}
+          formatMoney={formatHourlyMoney}
+          onSelectDay={(date, previousDate, subscriptionId) => setSelectedDay({ date, previousDate, subscriptionId })}
+        />
+      </DashboardSection>
     </div>
   );
 }
@@ -1794,6 +2035,11 @@ function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDay
   );
   const width = Math.max(rangeDays * 34, 480);
   const height = 240;
+  /* One label per day only fits if the label is tiny; at the interface's
+     caption size a date needs roughly 40px, while a day column is ~34px.
+     Thinning to every Nth day buys each surviving label the room to be
+     read, and the blank cells keep the row aligned to the plot above. */
+  const dailyLabelStep = Math.max(1, Math.ceil(currentDays.length / 10));
   const padX = 28;
   const padY = 24;
   const baselineY = height - padY;
@@ -1908,8 +2154,8 @@ function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDay
               })}
             </svg>
             <div className="daily-line-chart-labels" style={{ gridTemplateColumns: `repeat(${currentDays.length}, minmax(34px, 1fr))`, minWidth: width }}>
-              {currentDays.map((day) => (
-                <span key={day.date}>{new Date(`${day.date}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })}</span>
+              {currentDays.map((day, index) => (
+                <span key={day.date}>{index % dailyLabelStep === 0 ? new Date(`${day.date}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }) : ''}</span>
               ))}
             </div>
           </div>
@@ -3607,21 +3853,36 @@ function CostByTagsTab({
   report,
   formatMoney,
   displayCurrency,
+  costWindow,
+  costFilters,
+  onCostFiltersChange,
 }: {
   report: FullReport;
   formatMoney: MoneyFormatter;
   displayCurrency: string;
+  costWindow: CostWindow;
+  costFilters: CostFilter;
+  onCostFiltersChange: (value: CostFilter) => void;
 }) {
   const summary = report.tagCosts;
   const dimensions = summary?.dimensions ?? [];
   const [selectedKey, setSelectedKey] = useState<string>(dimensions[0]?.tagKey ?? '');
   const [selectedValue, setSelectedValue] = useState<string | null>(null);
+  const [breakdown, setBreakdown] = useState<CostDimension>('service');
   const dimension = dimensions.find((item) => item.tagKey === selectedKey) ?? dimensions[0];
   const allRows = dimension?.rows ?? [];
   const activeValue = dimension?.tagKey === selectedKey && allRows.some((row) => row.value === selectedValue)
     ? selectedValue : null;
   const rows = activeValue === null ? allRows : allRows.filter((row) => row.value === activeValue);
   const maxCost = Math.max(...allRows.map((row) => row.monthlyCost), 1);
+  /* Selecting a tag key and value here scopes the breakdowns below, so the two
+     halves of this page answer the same question rather than sitting side by
+     side unaware of each other. */
+  const scopedFilters: CostFilter = {
+    ...costFilters,
+    ...(dimension?.tagKey ? { tagKey: dimension.tagKey } : {}),
+    ...(activeValue === null ? {} : { tagValue: activeValue }),
+  };
   return (
     <div className="panel">
       <h2 className="section-title">Cost by Tags</h2>
@@ -3694,6 +3955,29 @@ function CostByTagsTab({
           )}
         </>
       )}
+
+      {/* Where the tagged money actually went. Scoped by the tag selection
+          above when one is active, so this answers "what is this tag paying
+          for" rather than repeating the estate totals. */}
+      <section className="tag-cost-breakdowns" aria-label="Cost breakdown by dimension">
+        <h3 className="section-title">Cost breakdown</h3>
+        <p className="section-subtitle">
+          {activeValue === null
+            ? `Across the selected range${dimension?.tagKey ? `, all ${dimension.tagKey} values` : ''}.`
+            : `Scoped to ${dimension?.tagKey} = ${activeValue || '(empty)'}.`}
+        </p>
+        <CostFilters details={report.costDetails} value={costFilters} onChange={onCostFiltersChange} />
+        <GroupedCostBreakdown
+          details={report.costDetails}
+          window={costWindow}
+          filters={scopedFilters}
+          formatMoney={formatMoney}
+          displayCurrency={displayCurrency}
+          dimension={breakdown}
+          onDimensionChange={setBreakdown}
+          label="Tagged cost breakdown"
+        />
+      </section>
     </div>
   );
 }
