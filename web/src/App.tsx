@@ -157,6 +157,21 @@ function SignInScreen({ theme, onToggleTheme, notice }: { theme: Theme; onToggle
     }
   }
 
+  /* Going straight to Entra without a hint is a supported path - the client
+     omits loginHint when it is empty and prompts for account selection - so
+     this is the same redirect, minus the step of typing an address the user
+     is about to choose anyway. */
+  async function handleMicrosoftSignIn() {
+    setError(null);
+    setStep('redirecting');
+    try {
+      await redirectApiIdentity('');
+    } catch (failure) {
+      setStep('email');
+      setError(failure instanceof Error ? failure.message : 'Microsoft sign-in could not start. Retry the connection.');
+    }
+  }
+
   return (
     <main className="signin-screen signin-production" aria-labelledby="signin-heading">
       <ThemeToggle theme={theme} onToggle={onToggleTheme} />
@@ -164,38 +179,53 @@ function SignInScreen({ theme, onToggleTheme, notice }: { theme: Theme; onToggle
         <BrandLockup />
         <p className="signin-tagline">See. Assess. Save.</p>
         <p className="signin-headline">Total clarity for your <span>Azure spend</span>.</p>
+        <p className="signin-subhead">Turn your cloud data into insights, savings and smarter decisions.</p>
         <ul className="signin-feature-list">
-          <li><BarChart3 size={18} aria-hidden="true" /><div><strong>Azure cost assessment</strong><small>Costs, anomalies, and evidence-backed opportunities.</small></div></li>
-          <li><ShieldCheck size={18} aria-hidden="true" /><div><strong>Access scoped to you</strong><small>Subscriptions in your organization's tenant, verified against your Azure roles.</small></div></li>
-          <li><CalendarClock size={18} aria-hidden="true" /><div><strong>Explicit control changes</strong><small>Resource assessment is read-only. Budget and export changes require authorized operators.</small></div></li>
+          <li><span className="signin-feature-icon"><BarChart3 size={18} aria-hidden="true" /></span><div><strong>Azure cost assessment</strong><small>Costs, anomalies, and evidence-backed opportunities.</small></div></li>
+          <li><span className="signin-feature-icon"><ShieldCheck size={18} aria-hidden="true" /></span><div><strong>Access scoped to you</strong><small>Subscriptions in your organization's tenant, verified against your Azure roles.</small></div></li>
+          <li><span className="signin-feature-icon"><CalendarClock size={18} aria-hidden="true" /></span><div><strong>Explicit control changes</strong><small>Resource assessment is read-only. Budget and export changes require authorized operators.</small></div></li>
         </ul>
+        <p className="signin-trust">Trusted by teams building a smarter cloud.</p>
       </section>
       <section className="signin-panel">
         <div className="signin-card-v2">
-          <h1 id="signin-heading">Sign in</h1>
+          <h1 id="signin-heading">Sign in to {BRAND_NAME}</h1>
+          <p className="signin-card-lede">Use your organization account to continue.</p>
           {notice && <p role="alert" className="signin-error">{notice}</p>}
           {step === 'email' && (
-            <form onSubmit={handleContinue} noValidate>
-              <label className="signin-field">
-                <span>Email address</span>
-                <input
-                  type="email"
-                  autoComplete="username"
-                  autoFocus
-                  required
-                  value={email}
-                  onChange={(event) => {
-                    setEmail(event.target.value);
-                    if (error) setError(null);
-                  }}
-                  placeholder="you@company.com"
-                  aria-invalid={error ? true : undefined}
-                  aria-describedby={error ? 'signin-error' : undefined}
-                />
-              </label>
-              {error && <p id="signin-error" className="signin-error" role="alert">{error}</p>}
-              <button type="submit" className="dark-button signin-continue">Continue <ArrowRight size={16} aria-hidden="true" /></button>
-            </form>
+            <>
+              <form onSubmit={handleContinue} noValidate>
+                <label className="signin-field">
+                  <span>Email address</span>
+                  <input
+                    type="email"
+                    autoComplete="username"
+                    autoFocus
+                    required
+                    value={email}
+                    onChange={(event) => {
+                      setEmail(event.target.value);
+                      if (error) setError(null);
+                    }}
+                    placeholder="you@company.com"
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? 'signin-error' : undefined}
+                  />
+                </label>
+                {error && <p id="signin-error" className="signin-error" role="alert">{error}</p>}
+                <button type="submit" className="dark-button signin-continue">Continue <ArrowRight size={16} aria-hidden="true" /></button>
+              </form>
+              <p className="signin-or"><span>or</span></p>
+              <button type="button" className="signin-microsoft" onClick={() => void handleMicrosoftSignIn()}>
+                <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" focusable="false">
+                  <rect x="1" y="1" width="8" height="8" fill="#F25022" />
+                  <rect x="11" y="1" width="8" height="8" fill="#7FBA00" />
+                  <rect x="1" y="11" width="8" height="8" fill="#00A4EF" />
+                  <rect x="11" y="11" width="8" height="8" fill="#FFB900" />
+                </svg>
+                Sign in with Microsoft
+              </button>
+            </>
           )}
           {step !== 'email' && (
             <div className="signin-detecting" role="status" aria-live="polite">
@@ -205,6 +235,7 @@ function SignInScreen({ theme, onToggleTheme, notice }: { theme: Theme; onToggle
           )}
           <p className="signin-card-footnote">Microsoft Entra ID · Your organization's access policy</p>
         </div>
+        <p className="signin-strapline">Insights today. A smarter tomorrow.</p>
       </section>
     </main>
   );

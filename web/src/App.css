@@ -10493,6 +10493,338 @@ body {
 
 
 /* ================================================================
+   DESIGN SYSTEM — 12. Sign in
+   ----------------------------------------------------------------
+   The first screen anyone sees, so it carries the product's
+   promise rather than just a form. Two columns: the case for the
+   product on the left, the one thing to do on the right.
+
+   The ground is a pale wash with a single large, very soft orb
+   bottom-right. One shape, far off-white, no hard edge - it gives
+   the page depth without becoming a decorated background.
+
+   Sign-in is exempt from the 80% interface zoom: this page has one
+   job and acres of room, so its type is set at full size while the
+   dense workspace behind it stays compact.
+   ---------------------------------------------------------------- */
+
+:root .signin-screen.signin-production {
+    --ui-zoom: 1;
+    position: relative;
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);
+    align-items: center;
+    gap: clamp(var(--space-8), 6vw, var(--space-12));
+    padding: clamp(var(--space-6), 5vw, var(--space-12)) clamp(var(--space-6), 6vw, 5rem);
+    overflow: hidden;
+    background: var(--color-obsidian-canvas);
+}
+
+/* One very soft orb, anchored off-canvas so no edge is visible. It gives the
+   page depth; a circle you can actually see the boundary of would just look
+   like a stray shape. */
+
+:root .signin-screen.signin-production::before {
+    content: '';
+    position: absolute;
+    right: -30vw;
+    bottom: -60vh;
+    width: 110vw;
+    height: 110vw;
+    /* No border-radius: the rounded box was clipping the gradient and that clip
+       edge was the visible arc. The gradient alone makes the shape, sized by
+       closest-side so it fades symmetrically and never reaches a boundary. */
+    background: radial-gradient(closest-side circle at 50% 50%, var(--color-accent-glow), transparent 100%);
+    opacity: .55;
+    pointer-events: none;
+}
+
+:root .signin-screen.signin-production>* {
+    position: relative;
+    z-index: 1;
+}
+
+/* --- Left: the case for the product ---------------------------- */
+
+:root .signin-production .signin-showcase {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-4);
+    max-width: 36rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+}
+
+:root .signin-production .signin-tagline {
+    margin: 0;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-semi);
+    letter-spacing: .24em;
+    text-transform: uppercase;
+}
+
+:root .signin-production .signin-headline {
+    margin: 0;
+    color: var(--color-bone);
+    font-size: clamp(2.25rem, 4vw, 3.25rem);
+    font-weight: 650;
+    line-height: 1.08;
+    letter-spacing: var(--tracking-heading-lg);
+}
+
+:root .signin-production .signin-headline span {
+    color: var(--color-signal-orange);
+}
+
+:root .signin-production .signin-subhead {
+    margin: 0;
+    max-width: 28rem;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-md);
+    line-height: 1.55;
+}
+
+:root .signin-production .signin-feature-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin: var(--space-4) 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+:root .signin-production .signin-feature-list li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-4);
+}
+
+/* The icon sits in a tinted tile rather than loose against the
+   page, which is what stops the list reading as a bulleted block. */
+
+:root .signin-production .signin-feature-icon {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    background: var(--color-accent-subtle);
+    color: var(--color-signal-orange);
+}
+
+:root .signin-production .signin-feature-list strong {
+    display: block;
+    color: var(--color-bone);
+    font-size: var(--font-size-md);
+    font-weight: var(--weight-semi);
+}
+
+:root .signin-production .signin-feature-list small {
+    display: block;
+    margin-top: 2px;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+}
+
+:root .signin-production .signin-trust {
+    margin: var(--space-6) 0 0;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-sm);
+}
+
+/* --- Right: the card ------------------------------------------- */
+
+:root .signin-production .signin-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-5);
+    width: 100%;
+    max-width: 28rem;
+    margin-inline-start: auto;
+    padding: 0;
+    border: 0;
+    border-left: 0;
+    background: none;
+}
+
+:root .signin-production .signin-card-v2 {
+    width: 100%;
+    max-width: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-8);
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-md);
+}
+
+:root .signin-production .signin-card-v2 h1 {
+    margin: 0;
+    color: var(--color-bone);
+    font-size: var(--font-size-xl);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading);
+}
+
+:root .signin-production .signin-card-lede {
+    margin: calc(var(--space-3) * -1) 0 0;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-sm);
+}
+
+:root .signin-production .signin-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+:root .signin-production .signin-field span {
+    color: var(--color-bone);
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-medium);
+}
+
+:root .signin-production .signin-field input {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 48px;
+    padding: 0 var(--space-4);
+    border: var(--border-width) solid var(--color-control-stroke);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-bone);
+    font: inherit;
+    font-size: var(--font-size-md);
+}
+
+:root .signin-production .signin-continue {
+    width: 100%;
+    min-height: 48px;
+    margin-top: var(--space-4);
+    font-size: var(--font-size-md);
+}
+
+/* A rule with the word set into it, rather than a word floating
+   between two rules. */
+
+:root .signin-production .signin-or {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin: 0;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-sm);
+}
+
+:root .signin-production .signin-or::before,
+:root .signin-production .signin-or::after {
+    content: '';
+    flex: 1;
+    height: var(--border-width);
+    background: var(--color-ash-stroke);
+}
+
+:root .signin-production .signin-microsoft {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    width: 100%;
+    min-height: 48px;
+    padding: 0 var(--space-4);
+    border: var(--border-width) solid var(--color-control-stroke);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-bone);
+    font: inherit;
+    font-size: var(--font-size-md);
+    font-weight: var(--weight-medium);
+    cursor: pointer;
+    transition:
+        background-color var(--press-duration) var(--press-ease),
+        border-color var(--press-duration) var(--press-ease);
+}
+
+:root .signin-production .signin-microsoft:hover {
+    background: var(--color-surface-hover);
+    border-color: var(--color-graphite-mid);
+}
+
+:root .signin-production .signin-microsoft:active {
+    transform: translateY(1px);
+}
+
+:root .signin-production .signin-card-footnote {
+    margin: 0;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+}
+
+:root .signin-production .signin-strapline {
+    margin: 0;
+    align-self: flex-end;
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-medium);
+    letter-spacing: .18em;
+    text-transform: uppercase;
+}
+
+/* The toggle is set to static elsewhere for the stacked sign-in layout, which
+   here made it a grid item - it took the first column and pushed the showcase
+   and card one cell to the right. Lifted back out of flow. */
+
+:root .signin-screen.signin-production>.theme-toggle {
+    position: absolute;
+    top: var(--space-6);
+    right: var(--space-6);
+    z-index: 2;
+}
+
+@media (max-width: 1100px) {
+    :root .signin-screen.signin-production {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--space-8);
+        padding: var(--space-6);
+        align-content: start;
+    }
+    :root .signin-production .signin-showcase,
+    :root .signin-production .signin-panel {
+        margin-inline: 0;
+        max-width: none;
+    }
+    :root .signin-production .signin-strapline {
+        align-self: flex-start;
+    }
+}
+
+@media (max-width: 640px) {
+    :root .signin-screen.signin-production {
+        padding: var(--space-5) var(--space-4);
+    }
+    :root .signin-production .signin-card-v2 {
+        padding: var(--space-5);
+    }
+    /* The feature list is supporting copy; on a phone the card is
+       the only thing that matters, so the list steps aside. */
+    :root .signin-production .signin-feature-list,
+    :root .signin-production .signin-trust {
+        display: none;
+    }
+}
+
+
+/* ================================================================
    Section headings — disclosure parity
    ----------------------------------------------------------------
    "Explore costs and findings" and "Daily subscription amounts" are
