@@ -11057,3 +11057,57 @@ body {
 }
 
 
+
+/* ==========================================================================
+   13. Sign-in recovery screen
+   The identity-failure and timeout states render a bare <main class="center-screen">,
+   which sits OUTSIDE .app-shell. Every .ghost-button rule in the codebase is scoped
+   under .app-shell or a named panel, so the Retry button here fell through to the
+   user-agent stylesheet: a 22px black `outset` bevel on #f0f0f0. Because
+   .center-screen is also a row flexbox with no gap, the alert text and that bevel
+   collided on one line. This is the first thing a user sees when auth is broken,
+   so it gets the same card treatment as the sign-in panel.
+   ========================================================================== */
+
+:root .center-screen:not(.signin-screen) {
+    flex-direction: column;
+    gap: var(--space-4);
+    text-align: center;
+}
+
+:root .center-screen:not(.signin-screen) [role='alert'] {
+    max-width: 42ch;
+    margin: 0;
+    color: var(--color-bone);
+    font-size: var(--font-size-md);
+    line-height: 1.5;
+}
+
+:root .center-screen:not(.signin-screen) .ghost-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-height: var(--control-height);
+    padding: 0 var(--space-4);
+    border: var(--border-width) solid var(--color-control-stroke);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-bone);
+    font: inherit;
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-medium);
+    line-height: 1;
+    cursor: pointer;
+    appearance: none;
+    transition: background var(--motion-duration), border-color var(--motion-duration);
+}
+
+:root .center-screen:not(.signin-screen) .ghost-button:hover {
+    background: var(--color-surface-hover);
+    border-color: var(--color-focus);
+}
+
+:root .center-screen:not(.signin-screen) .ghost-button:active {
+    transform: translateY(1px);
+}
