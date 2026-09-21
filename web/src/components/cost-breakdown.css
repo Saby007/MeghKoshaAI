@@ -73,3 +73,118 @@
     flex-direction: column;
     gap: var(--space-2);
 }
+
+/* --- Daily bar chart -------------------------------------------------------
+   The plot stacks an SVG and an HTML hit layer, so it needs a positioning
+   context sized in the same pixels the chart is drawn in. */
+
+.cost-bar-plot {
+    position: relative;
+}
+
+.cost-bar {
+    fill: var(--color-category-compute);
+    transition: fill var(--motion-duration), opacity var(--motion-duration);
+}
+
+/* Selection is shown by receding the rest rather than by recolouring the one
+   bar: the obvious accent colours are already spoken for by the budget
+   reference line, and a colour swap alone was almost invisible against the
+   default bar. */
+
+.cost-bar-dim {
+    opacity: .3;
+}
+
+.cost-bar-selected {
+    fill: var(--color-metric-green);
+}
+
+/* One transparent control per day, spanning the full column height so the
+   target is the day rather than the height the bar happens to reach. */
+
+.cost-bar-hits {
+    position: absolute;
+    inset: 0;
+}
+
+.cost-bar-hit {
+    position: absolute;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    cursor: pointer;
+    appearance: none;
+    transition: background var(--motion-duration);
+}
+
+.cost-bar-hit:hover {
+    background: var(--color-accent-glow);
+}
+
+.cost-bar-hit-selected {
+    background: var(--color-accent-glow);
+}
+
+.cost-bar-hit:focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: -2px;
+}
+
+/* The budget allowance, drawn across the plot rather than as another bar so it
+   reads as a threshold the bars are measured against.
+
+   Uses --color-warning, not --color-signal-orange: despite the name the latter
+   resolves to #4FA8F5, the same blue as the bars, so the line was invisible
+   against the data it is meant to qualify. */
+
+.cost-chart-reference {
+    stroke: var(--color-warning);
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+}
+
+.cost-chart-reference-key {
+    background: var(--color-warning);
+}
+/* --- Budget for the current tag selection ---------------------------------
+   Each budget is a card so two budgets bearing on the same tag read as two
+   answers rather than one run-on block. */
+
+.tag-cost-budgets {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin-top: var(--space-6);
+}
+
+.tag-budget-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+}
+
+.tag-budget-card h4 {
+    margin: 0;
+    font-size: var(--font-size-md);
+    font-weight: var(--weight-semi);
+}
+
+.budget-daily-chart {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+/* The drilldown sits inside a table cell, so it needs its own breathing room
+   rather than inheriting the dense row padding around it. */
+
+.budget-table .budget-daily-chart,
+.billing-table .budget-daily-chart {
+    padding-block: var(--space-3);
+}

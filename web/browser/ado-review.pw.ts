@@ -294,7 +294,7 @@ test('tag value filtering is keyboard accessible and fits desktop and mobile in 
   }));
   await page.goto('/');
   await runReport(page);
-  await selectReportPage(page, 'Cost by Tags');
+  await selectReportPage(page, 'Cost by Tags/Application');
   const tagKey = page.getByLabel('Tag key', { exact: true });
   const tagValue = page.getByLabel('Tag value', { exact: true });
   const rows = page.locator('.app-cost-table tbody tr');
@@ -551,7 +551,7 @@ test('all report pages and export dialogs remain usable in the redesigned worksp
   await page.route('**/api/**focus**', (route) => route.fulfill({ json: { subscriptionId: 'sub-1', files: [] } }));
   await page.goto('/');
   await runReport(page);
-  const tabs = ['Executive Summary', 'Subscription Breakdown', 'History', 'Cost by Hour', 'Cost by Tags', 'EA Pricing', 'Rate Optimization', 'Cost Anomalies', 'Budgets', 'Stale Resources', 'Governance & Risk', 'Advisor Reconciliation', 'Savings Roadmap', 'Compute Optimization', 'Storage Optimization', 'Network Optimization', 'Azure SQL Optimization', 'AI Optimization', 'Action Plan'];
+  const tabs = ['Executive Summary', 'Subscription Breakdown', 'History', 'Cost by Hour', 'Cost by Tags/Application', 'EA Pricing', 'Rate Optimization', 'Cost Anomalies', 'Budgets', 'Stale Resources', 'Governance & Risk', 'Advisor Reconciliation', 'Savings Roadmap', 'Compute Optimization', 'Storage Optimization', 'Network Optimization', 'Azure SQL Optimization', 'AI Optimization', 'Action Plan'];
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {

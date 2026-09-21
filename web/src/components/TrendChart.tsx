@@ -123,6 +123,143 @@ export function DailyTrendChart({
   );
 }
 
+/* A single-series daily bar chart where every day is a control.
+
+   Bars rather than a line because each day here is a thing you can open, and
+   a line implies a continuous quantity you read between the points. The
+   interactive layer is real HTML buttons positioned over the plot, not the
+   <rect>s themselves: SVG elements are not HTMLElements, so they carry no
+   native button semantics and cannot be clicked programmatically. The buttons
+   also span the full column height, so the target is the day rather than the
+   few pixels the bar happens to occupy on a quiet day.
+
+   Positioning the overlay in pixels is only sound because useChartWidth keeps
+   the viewBox at exactly 1:1 with the rendered box, so a user unit is a CSS
+   pixel. */
+export function DailyBarChart({
+  dates,
+  values,
+  formatMoney,
+  seriesName,
+  selectedDate = null,
+  onSelectDate,
+  selectLabel = (date) => date,
+  emptyMessage = 'No cost evidence matches the selected range and filters.',
+  ariaLabel = 'Daily cost',
+  reference = null,
+}: {
+  dates: string[];
+  values: (number | null)[];
+  formatMoney: Formatter;
+  seriesName: string;
+  selectedDate?: string | null;
+  onSelectDate?: (date: string) => void;
+  selectLabel?: (date: string, value: number | null) => string;
+  emptyMessage?: string;
+  ariaLabel?: string;
+  reference?: { value: number; label: string } | null;
+}) {
+  const frame = useRef<HTMLDivElement>(null);
+  const width = useChartWidth(frame);
+  const height = CHART_HEIGHT;
+  const padLeft = 78;
+  const padRight = 20;
+  const padTop = 16;
+  const baseline = height - 40;
+
+  const present = values.filter((value): value is number => value !== null);
+  /* The reference line is part of the picture, so it has to fit inside the
+     scale. Leaving it out of the maximum drew an allowance line pinned to the
+     top of the frame whenever spend was below budget, which reads as "at
+     budget" - the opposite of what it means. */
+  const maximum = Math.max(...present, reference?.value ?? 0, 0) || 1;
+  const slot = (width - padLeft - padRight) / Math.max(1, dates.length);
+  const barWidth = Math.max(2, Math.min(slot * 0.68, 34));
+  const xFor = (index: number) => padLeft + slot * (index + 0.5);
+  const yFor = (value: number) => baseline - (value / maximum) * (baseline - padTop);
+
+  if (!dates.length || !present.length) {
+    return <p role="status" className="empty-state">{emptyMessage}</p>;
+  }
+
+  const ticks = [0, 1, 2, 3, 4].map((step) => maximum * step / 4);
+  const labelStep = Math.max(1, Math.ceil(dates.length / 8));
+
+  return (
+    <div className="trend-chart">
+      <div className="cost-chart-legend">
+        <span><i style={{ background: SERIES_COLORS[0] }} />{seriesName}</span>
+        {reference && <span><i className="cost-chart-reference-key" />{reference.label}</span>}
+        {onSelectDate && <span>Select a day for its resource costs</span>}
+      </div>
+      <div className="cost-chart-scroll" ref={frame} tabIndex={0} role="region" aria-label={ariaLabel}>
+        <div className="cost-bar-plot" style={{ width: `${width}px`, height: `${height}px` }}>
+          <svg viewBox={`0 0 ${width} ${height}`} className="cost-comparison-chart" role="img" aria-label={ariaLabel}>
+            {ticks.map((value) => (
+              <g key={value}>
+                <line x1={padLeft} x2={width - padRight} y1={yFor(value)} y2={yFor(value)} className="cost-chart-grid" />
+                <text x={padLeft - 10} y={yFor(value)} textAnchor="end" dominantBaseline="middle">{formatMoney(value)}</text>
+              </g>
+            ))}
+            {dates.map((date, index) => {
+              const value = values[index];
+              if (value === null || value === undefined) return null;
+              const top = yFor(value);
+              const selected = selectedDate === date;
+              return (
+                <rect
+                  key={date}
+                  x={xFor(index) - barWidth / 2}
+                  y={top}
+                  width={barWidth}
+                  height={Math.max(1, baseline - top)}
+                  rx={2}
+                  className={`cost-bar${selected ? ' cost-bar-selected' : selectedDate ? ' cost-bar-dim' : ''}`}
+                  data-cost-date={date}
+                />
+              );
+            })}
+            {reference && (
+              <line
+                x1={padLeft}
+                x2={width - padRight}
+                y1={yFor(reference.value)}
+                y2={yFor(reference.value)}
+                className="cost-chart-reference"
+              />
+            )}
+            {dates.map((date, index) => (
+              index % labelStep === 0 || index === dates.length - 1
+                ? <text key={date} x={xFor(index)} y={height - 14} textAnchor="middle">{date.slice(5)}</text>
+                : null
+            ))}
+          </svg>
+          {onSelectDate && (
+            <div className="cost-bar-hits" aria-label={`${ariaLabel} by day`}>
+              {dates.map((date, index) => {
+                const value = values[index];
+                const money = value === null || value === undefined ? 'no cost evidence' : formatMoney(value);
+                return (
+                  <button
+                    key={date}
+                    type="button"
+                    className={`cost-bar-hit${selectedDate === date ? ' cost-bar-hit-selected' : ''}`}
+                    style={{ left: `${xFor(index) - slot / 2}px`, width: `${slot}px`, top: `${padTop}px`, height: `${baseline - padTop}px` }}
+                    aria-label={selectLabel(date, value ?? null)}
+                    aria-pressed={selectedDate === date}
+                    title={`${date}: ${money}`}
+                    onClick={() => onSelectDate(date)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Turns the top groups on a dimension into daily series. Kept next to the
    chart because the "top N by total, then per-day" shape is the same every
    time it is used, and doing it in each caller invites three subtly

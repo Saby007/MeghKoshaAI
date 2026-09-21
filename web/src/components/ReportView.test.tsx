@@ -140,7 +140,7 @@ it('keeps the overview compact and mounts detailed visuals only on demand withou
 
 it('filters tag costs by the selected key and value without changing financial evidence', async () => {
   await act(async () => root.render(<ReportView report={tagReportFixture} narration={null} snapshotId="visual-report-1" />));
-  await act(async () => button('Cost by Tags').click());
+  await act(async () => button('Cost by Tags/Application').click());
   expect(tagSelect('Tag value')).not.toBeNull();
   expect([...tagSelect('Tag value').options].map((option) => option.textContent)).toEqual(['All values', 'Platform', 'Sales']);
   const table = container.querySelector('.app-cost-table')!;
@@ -167,7 +167,7 @@ it('filters tag costs by the selected key and value without changing financial e
 
 it('falls back to all values after report changes and allows selecting values on the fallback key', async () => {
   await act(async () => root.render(<ReportView report={tagReportFixture} narration={null} snapshotId="visual-report-1" />));
-  await act(async () => button('Cost by Tags').click());
+  await act(async () => button('Cost by Tags/Application').click());
   await chooseTagOption('Tag value', 'Sales');
   const team = tagReportFixture.tagCosts.dimensions[0];
   const refreshedReport = { ...tagReportFixture, tagCosts: {
@@ -195,7 +195,7 @@ it.each(['', 'All values', 'Team "A" & Operations'])('matches the literal tag va
     ...tagReportFixture.tagCosts, dimensions: [{ ...team, rows: [{ ...team.rows[0], value }, team.rows[1]] }],
   } };
   await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" />));
-  await act(async () => button('Cost by Tags').click());
+  await act(async () => button('Cost by Tags/Application').click());
   const select = tagSelect('Tag value');
   expect(select.options[1].value).not.toBe(select.options[0].value);
   await act(async () => { select.value = select.options[1].value; select.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -205,7 +205,7 @@ it.each(['', 'All values', 'Team "A" & Operations'])('matches the literal tag va
 
 it('preserves the missing-tag state and disables the value filter for a key without rows', async () => {
   await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
-  await act(async () => button('Cost by Tags').click());
+  await act(async () => button('Cost by Tags/Application').click());
   expect(tagSelect('Tag value')).toBeNull();
   expect(container.textContent).toContain(reportFixture.tagCosts!.status);
   const report = { ...tagReportFixture, tagCosts: {
@@ -257,6 +257,6 @@ it('distinguishes missing evidence from empty findings and does not draw empty s
   await act(async () => button('Governance & Risk').click());
   expect(container.querySelector('.evidence-state')?.textContent).toContain('Governance evidence unavailable');
   expect(container.querySelector('.evidence-state')?.getAttribute('aria-busy')).toBe('false');
-  await act(async () => button('Cost by Tags').click());
+  await act(async () => button('Cost by Tags/Application').click());
   expect(container.querySelector('.evidence-state')?.textContent).toContain('Tag evidence unavailable');
 });

@@ -1,9 +1,9 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeftRight, CalendarDays, Clock3 } from 'lucide-react';
 import { billingDates, billingTags, billingWindow, compareBillingDates, DEFAULT_BUSINESS_CALENDAR, validBusinessCalendar, type BusinessCalendar, type BillingDayFilter, type BillingTimeFilter, type BillingSource } from '../report/billingHistory';
 import { CostExportButton, CostFilters, ResourceCostTable } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
-import { DailyTrendChart, useTopGroupSeries } from './TrendChart';
+import { DailyBarChart, DailyTrendChart, useTopGroupSeries } from './TrendChart';
 import { matchesCostFilter, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import type { CostDetailSummary } from '../report/models';
 import { BudgetContext, type BudgetState } from './BudgetContext';
@@ -172,32 +172,52 @@ export function HourlyCostPanel({ report, formatMoney, formatHourlyMoney, rangeD
               draw. What genuinely varies - and what every filter above moves -
               is the hourly run-rate from day to day, so that is what this
               charts. Drawing a flat 24-hour profile would imply a precision
-              the evidence does not have. */}
+              the evidence does not have.
+
+              Each bar is the day's control: the table that used to carry the
+              drilldown has gone, so selecting a bar is now how you reach a
+              day's resource costs. */}
           <section className="hourly-rate-chart" aria-label="Hourly cost rate over time">
             <h3>{result.estimated ? 'Estimated hourly rate' : 'Average hourly rate'}</h3>
-            <DailyTrendChart
+            <DailyBarChart
               dates={result.days.map((day) => day.date)}
-              series={[{
-                id: 'hourly-rate',
-                name: result.estimated ? 'Estimated cost per hour' : 'Billed cost per hour',
-                points: result.days.map((day) => day.averageHourlyCost),
-              }]}
+              values={result.days.map((day) => day.averageHourlyCost)}
+              seriesName={result.estimated ? 'Estimated cost per hour' : 'Billed cost per hour'}
               formatMoney={formatHourlyMoney}
               ariaLabel="Hourly cost rate by day"
               emptyMessage="No hourly rate can be derived for the selected days."
+              selectedDate={expandedDate}
+              onSelectDate={report.costDetails?.status === 'complete'
+                ? (date) => setExpandedDate((value) => value === date ? null : date)
+                : undefined}
+              selectLabel={(date) => `Resource costs for ${date}`}
             />
           </section>
-          <details className="billing-day-details" open={!embedded}>
-          <summary>{result.estimated ? 'Daily cost allocations' : 'Daily charges'}</summary>
-          <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Daily average hourly charges">
-            <table className="data-table billing-table">
-              <thead><tr><th scope="col">Billing date (UTC)</th><th scope="col">Selected hours</th><th scope="col">{result.estimated ? 'Estimated cost' : 'Billed cost'}</th><th scope="col">{result.estimated ? 'Estimated / hour' : 'Average / hour'}</th></tr></thead>
-              <tbody>{result.days.slice().reverse().map((day) => <Fragment key={day.date}><tr><th scope="row">{report.costDetails?.status === 'complete' ? <button type="button" className="finding-link" aria-expanded={expandedDate === day.date} aria-label={`Resource costs for ${day.date}`} onClick={() => setExpandedDate((value) => value === day.date ? null : day.date)}>{dateLabel(day.date)}</button> : dateLabel(day.date)}</th><td>{day.hours}</td><td>{moneyOrUnavailable(day.totalCost, formatMoney)}</td><td>{day.averageHourlyCost === null ? 'Unavailable' : `${formatHourlyMoney(day.averageHourlyCost)}/hr`}</td></tr>
-                {expandedDate === day.date && <tr><td colSpan={4}><ResourceCostTable details={report.costDetails} window={{ startDate: day.date, endDate: day.date }} previous={{ startDate: baselineDate, endDate: baselineDate }} filters={filters} formatMoney={formatHourlyMoney} snapshotId={snapshotId} /></td></tr>}
-              </Fragment>)}</tbody>
-            </table>
-          </div>
-        </details>
+          {expandedDate && report.costDetails?.status === 'complete' && (() => {
+            const day = result.days.find((item) => item.date === expandedDate);
+            return (
+              <section className="billing-day-drilldown" aria-label={`Resource costs on ${expandedDate}`}>
+                <header className="cost-section-heading">
+                  <h3>{dateLabel(expandedDate)}</h3>
+                  <button type="button" className="ghost-button" onClick={() => setExpandedDate(null)} aria-label="Close day details">Close</button>
+                </header>
+                {day && <p className="billing-provenance">
+                  {day.hours} selected hours · {result.estimated ? 'estimated' : 'billed'} {moneyOrUnavailable(day.totalCost, formatMoney)} · {day.averageHourlyCost === null ? 'Unavailable' : `${formatHourlyMoney(day.averageHourlyCost)}/hr`}.
+                  {' '}{baselineDate === expandedDate
+                    ? 'The comparison baseline below is this same day, so the change column reads zero; pick another baseline under Full-day resource comparison to compare.'
+                    : `Previous cost below is ${dateLabel(baselineDate)}.`}
+                </p>}
+                <ResourceCostTable
+                  details={report.costDetails}
+                  window={{ startDate: expandedDate, endDate: expandedDate }}
+                  previous={{ startDate: baselineDate, endDate: baselineDate }}
+                  filters={filters}
+                  formatMoney={formatHourlyMoney}
+                  snapshotId={snapshotId}
+                />
+              </section>
+            );
+          })()}
         </>
       )}
       {!embedded && report.costDetails?.status === 'complete' && firstDate && lastDate && (
@@ -224,7 +244,7 @@ export function HourlyCostPanel({ report, formatMoney, formatHourlyMoney, rangeD
         <ResourceCostTable details={report.costDetails} window={{ startDate: comparisonDate, endDate: comparisonDate }} previous={{ startDate: baselineDate, endDate: baselineDate }} filters={filters} formatMoney={formatHourlyMoney} snapshotId={snapshotId} />
         {report.reportMetadata && <CostExportButton report={{ costDetails: report.costDetails, reportMetadata: report.reportMetadata }} snapshotId={snapshotId} window={{ startDate: comparisonDate, endDate: comparisonDate }} previous={{ startDate: baselineDate, endDate: baselineDate }} filters={filters} />}
       </section>}
-      {budgetState && <BudgetContext state={budgetState} details={report.costDetails} filters={filters} />}
+      {budgetState && <BudgetContext state={budgetState} details={report.costDetails} filters={filters} window={firstDate && lastDate ? { startDate: firstDate, endDate: lastDate } : undefined} formatMoney={formatMoney} />}
       <p className="billing-provenance">{report.dailyCostTrend.statusMessage}{tagId ? ` ${report.tagDailyCostTrend.statusMessage}` : ''}</p>
     </section>
   );

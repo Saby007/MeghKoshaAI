@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, Inbox, LayoutDashboard, LoaderCircle, Mail, Menu, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
 import {
   downloadCustomReport,
@@ -52,8 +52,8 @@ import { billingWindow } from '../report/billingHistory';
 import { tagDistribution } from '../report/tagDistribution';
 import { CostExportButton, CostFilters, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
-import { presetCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
-import { BudgetContext, useBudgetSummary, type BudgetState } from './BudgetContext';
+import { matchesCostFilter, presetCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { BudgetContext, BudgetDailyChart, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
 import { ServiceRetirements } from './ServiceRetirements';
 import { BRAND_NAME } from '../brand';
 
@@ -160,7 +160,7 @@ const TABS = [
   'AI Optimization',
   'Advisor Reconciliation',
   'Governance & Risk',
-  'Cost by Tags',
+  'Cost by Tags/Application',
   'Budgets',
   'Action Plan',
 ] as const;
@@ -239,7 +239,7 @@ const PRIMARY_NAV_ICONS = {
 
 const PRIMARY_NAV_TABS: Record<PrimaryNav, Tab[]> = {
   dashboard: ['Executive Summary'],
-  costManagement: ['Subscription Breakdown', 'History', 'Cost by Hour', 'Cost by Tags', 'EA Pricing', 'Rate Optimization', 'Cost Anomalies', 'Budgets'],
+  costManagement: ['Subscription Breakdown', 'History', 'Cost by Hour', 'Cost by Tags/Application', 'EA Pricing', 'Rate Optimization', 'Cost Anomalies', 'Budgets'],
   resources: ['Stale Resources', 'Governance & Risk'],
   analytics: ['Advisor Reconciliation'],
   recommendations: ['Savings Roadmap', 'Compute Optimization', 'Storage Optimization', 'Network Optimization', 'Azure SQL Optimization', 'AI Optimization'],
@@ -851,7 +851,7 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           )}
           {tab === 'Advisor Reconciliation' && <AdvisorTab report={report} formatMoney={formatMoney} />}
           {tab === 'Governance & Risk' && <><RequiredTagCosts report={report} snapshotId={snapshotId} window={costWindow} formatMoney={formatHourlyMoney} filters={costFilters} /><GovernanceTab report={report} /><ServiceRetirements report={report} snapshotId={snapshotId} /></>}
-          {tab === 'Cost by Tags' && (
+          {tab === 'Cost by Tags/Application' && (
             <CostByTagsTab
               report={report}
               formatMoney={formatMoney}
@@ -859,10 +859,11 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
               costWindow={costWindow}
               costFilters={costFilters}
               onCostFiltersChange={setCostFilters}
+              budgetState={budgetState}
             />
           )}
           {tab === 'Budgets' && (
-            <BudgetsTab report={report} />
+            <BudgetsTab report={report} costWindow={costWindow} formatMoney={formatMoney} />
           )}
           {tab === 'Action Plan' && <ActionPlanTab report={report} formatMoney={formatMoney} displayCurrency={displayCurrency} snapshotId={snapshotId} />}
         </div>
@@ -1825,7 +1826,7 @@ function ExecutiveSummaryTab({
             </button>
           }
         >
-          <BudgetContext state={budgetState} details={report.costDetails} filters={costFilters} showHeading={false} />
+          <BudgetContext state={budgetState} details={report.costDetails} filters={costFilters} showHeading={false} window={costWindow} formatMoney={formatMoney} />
         </DashboardSection>
       )}
 
@@ -3856,6 +3857,7 @@ function CostByTagsTab({
   costWindow,
   costFilters,
   onCostFiltersChange,
+  budgetState,
 }: {
   report: FullReport;
   formatMoney: MoneyFormatter;
@@ -3863,6 +3865,7 @@ function CostByTagsTab({
   costWindow: CostWindow;
   costFilters: CostFilter;
   onCostFiltersChange: (value: CostFilter) => void;
+  budgetState?: BudgetState;
 }) {
   const summary = report.tagCosts;
   const dimensions = summary?.dimensions ?? [];
@@ -3883,9 +3886,21 @@ function CostByTagsTab({
     ...(dimension?.tagKey ? { tagKey: dimension.tagKey } : {}),
     ...(activeValue === null ? {} : { tagValue: activeValue }),
   };
+  /* Budgets are matched against the rows the selection actually covers, not
+     against the tag string, so a budget scoped by resource group still shows
+     up when that group is what carries the tag. */
+  const taggedBudgets = useMemo(() => {
+    if (!budgetState || report.costDetails?.status !== 'complete') return [];
+    const rows = report.costDetails.rows.filter((row) => matchesCostFilter(row, scopedFilters));
+    return relateBudgets(budgetState.budgets, rows, scopedFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [budgetState?.budgets, report.costDetails, JSON.stringify(scopedFilters)]);
+  const scopeLabel = activeValue === null
+    ? `all ${dimension?.tagKey ?? 'tag'} values`
+    : `${dimension?.tagKey} = ${activeValue || '(empty)'}`;
   return (
     <div className="panel">
-      <h2 className="section-title">Cost by Tags</h2>
+      <h2 className="section-title">Cost by Tags/Application</h2>
       <p className="section-subtitle">Grouped by any FOCUS resource tag found (inherited from the resource group when a resource has no tag of its own), with a next-month forecast based on overall spend trend.</p>
       {!summary?.available || dimensions.length === 0 ? (
         <EvidenceState title="Tag evidence unavailable" detail={summary?.status ?? 'No resource or resource-group tags were present.'} />
@@ -3956,6 +3971,47 @@ function CostByTagsTab({
         </>
       )}
 
+      {/* The budget that governs this tag, if one does.
+
+          Answered on this page rather than by sending the reader to the budget
+          tab, because "is this application within budget" is the question the
+          tag selection raises. A subscription-wide budget is reported as such:
+          it bears on the tag but is not an allocation for it. */}
+      {budgetState && (
+        <section className="tag-cost-budgets" aria-label={`Budgets covering ${dimension?.tagKey ?? 'the selected tag'}`}>
+          <h3 className="section-title">Budget for this selection</h3>
+          {budgetState.loading ? (
+            <p role="status">Checking subscription budgets...</p>
+          ) : budgetState.error ? (
+            <p role="alert">{budgetState.error}</p>
+          ) : taggedBudgets.length === 0 ? (
+            <EvidenceState
+              title="No budget covers this selection"
+              detail={`No Azure budget in the assessed subscriptions matches ${scopeLabel}. Create one on the Budgets page to track this spend against a limit.`}
+            />
+          ) : (
+            <>
+              <p className="section-subtitle">{taggedBudgets.length === 1 ? 'One budget bears' : `${taggedBudgets.length} budgets bear`} on {scopeLabel}.</p>
+              {taggedBudgets.slice(0, 3).map(({ budget, relation }) => {
+                const status = budgetThreshold(budget);
+                const native = (value: number | null) => value === null ? 'Unavailable' : `${budget.currency} ${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+                return (
+                  <article className="tag-budget-card" key={`${budget.subscriptionId}:${budget.name}`}>
+                    <header className="cost-section-heading">
+                      <h4>{budget.name}</h4>
+                      <span className={`budget-status budget-${status.tone}`}>{status.label}</span>
+                    </header>
+                    <p className="billing-provenance">{relation} · {budget.timeGrain} · {native(budget.currentSpend)} of {native(budget.amount)} reported by Azure for the current cycle.</p>
+                    <BudgetDailyChart budget={budget} details={report.costDetails} window={costWindow} formatMoney={formatMoney} />
+                  </article>
+                );
+              })}
+              {taggedBudgets.length > 3 && <p className="section-subtitle">{taggedBudgets.length - 3} further matching {taggedBudgets.length - 3 === 1 ? 'budget is' : 'budgets are'} listed on the Budgets page.</p>}
+            </>
+          )}
+        </section>
+      )}
+
       {/* Where the tagged money actually went. Scoped by the tag selection
           above when one is active, so this answers "what is this tag paying
           for" rather than repeating the estate totals. */}
@@ -3982,7 +4038,7 @@ function CostByTagsTab({
   );
 }
 
-function BudgetsTab({ report }: { report: FullReport }) {
+function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; costWindow: CostWindow; formatMoney: MoneyFormatter }) {
   function defaultStartDate(): string {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
@@ -4002,6 +4058,7 @@ function BudgetsTab({ report }: { report: FullReport }) {
   const [form, setForm] = useState<BudgetWriteRequest>(emptyForm());
   const [editing, setEditing] = useState<{ subscriptionId: string; name: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [openBudget, setOpenBudget] = useState<string | null>(null);
 
   const subscriptionIds = report.subscriptionBreakdown.map((row) => row.subscriptionId);
   const subscriptionNames = new Map(report.subscriptionBreakdown.map((row) => [row.subscriptionId, row.subscriptionName]));
@@ -4210,9 +4267,14 @@ function BudgetsTab({ report }: { report: FullReport }) {
               const pctUsed = budget.amount && budget.currentSpend !== null ? budget.currentSpend / budget.amount : 0;
               const status = pctUsed >= 1 ? 'over' : pctUsed >= 0.85 ? 'at_risk' : 'on_track';
               const forecastDelta = budget.forecastSpend !== null ? budget.forecastSpend - budget.amount : null;
+              const key = `${budget.subscriptionId}-${budget.name}`;
+              const drillable = report.costDetails?.status === 'complete';
               return (
-                <tr key={`${budget.subscriptionId}-${budget.name}`}>
-                  <td>{budget.name}</td>
+                <Fragment key={key}>
+                <tr>
+                  <td>{drillable
+                    ? <button type="button" className="finding-link" aria-expanded={openBudget === key} aria-label={`Daily spend for ${budget.name}`} onClick={() => setOpenBudget((value) => value === key ? null : key)}>{budget.name}</button>
+                    : budget.name}</td>
                   <td>{subscriptionNames.get(budget.subscriptionId) ?? budget.subscriptionId}</td>
                   <td className="num">{formatNative(budget.amount, budget.currency)}</td>
                   <td className="num">
@@ -4241,6 +4303,10 @@ function BudgetsTab({ report }: { report: FullReport }) {
                     <button type="button" onClick={() => void remove(budget)}>Delete</button>
                   </td>
                 </tr>
+                {drillable && openBudget === key && (
+                  <tr><td colSpan={8}><BudgetDailyChart budget={budget} details={report.costDetails} window={costWindow} formatMoney={formatMoney} /></td></tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>
