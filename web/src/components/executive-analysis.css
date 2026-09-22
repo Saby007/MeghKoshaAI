@@ -1,0 +1,29 @@
+.daily-line-chart text {
+    fill: var(--color-warm-granite);
+    font-family: var(--font-geist-mono);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: var(--nums);
+}
+
+:root .app-shell.app-shell .analysis-range-controls {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+:root .app-shell.app-shell .analysis-custom-period {
+    margin: 0;
+}
+
+:root .app-shell.app-shell .analysis-custom-period .billing-filter {
+    min-width: calc(var(--control-lg) * 4);
+}
+
+@media (max-width: 640px) {
+     :root .app-shell.app-shell .analysis-range-controls,
+     :root .app-shell.app-shell .analysis-custom-period {
+        width: 100%;
+    }
+}

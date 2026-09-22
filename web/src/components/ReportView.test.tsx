@@ -138,6 +138,37 @@ it('keeps the overview compact and mounts detailed visuals only on demand withou
   expect(getCostAnomalies).toHaveBeenCalledOnce();
 });
 
+it('keeps daily trend labels aligned and applies a custom period to every executive cost view', async () => {
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
+  const details = container.querySelector<HTMLDetailsElement>('.cost-analysis-details')!;
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
+
+  const chart = container.querySelector<SVGElement>('[aria-label="Daily cost trend"]')!;
+  const labels = () => [...chart.querySelectorAll('text')].map((node) => node.textContent);
+  expect(labels()).toHaveLength(30);
+  expect(labels().at(0)).toBe('08-09');
+  expect(labels().at(-1)).toBe('09-07');
+  expect(chart.querySelectorAll('text[transform^="rotate(-60"]').length).toBe(30);
+  expect(chart.getAttribute('preserveAspectRatio')).toBeNull();
+
+  await act(async () => button('Custom').click());
+  const start = container.querySelector<HTMLInputElement>('[aria-label="Analysis period start"]')!;
+  const end = container.querySelector<HTMLInputElement>('[aria-label="Analysis period end"]')!;
+  expect(start.value).toBe('2026-08-09');
+  expect(end.value).toBe('2026-09-07');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(start, '2026-09-01');
+    start.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  expect(labels()).toEqual(['09-01', '09-02', '09-03', '09-04', '09-05', '09-06', '09-07']);
+  expect(chart.querySelectorAll('text[transform]')).toHaveLength(0);
+  expect(container.querySelector('.range-spend-kpi-grid')?.textContent).toContain('7/7 covered export-calendar days');
+  const tagDonut = [...container.querySelectorAll<HTMLElement>('.executive-donut-panel')].find((section) => section.textContent?.includes('Average hourly cost by tag set'))!;
+  expect(tagDonut.textContent).toContain('7 export days');
+  expect(container.querySelector('[aria-label="Cost by hour"]')?.textContent).toContain('2026-09-01 - 2026-09-07');
+});
+
 it('filters tag costs by the selected key and value without changing financial evidence', async () => {
   await act(async () => root.render(<ReportView report={tagReportFixture} narration={null} snapshotId="visual-report-1" />));
   await act(async () => button('Cost by Tags/Application').click());

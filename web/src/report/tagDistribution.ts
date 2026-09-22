@@ -1,7 +1,11 @@
 import type { TagDailyCostTrendSummary } from './models';
+import type { CostWindow } from './costDetails';
 
-export function tagDistribution(summary: TagDailyCostTrendSummary, rangeDays: number) {
-  const dates = summary.windowDates?.slice(-rangeDays) ?? [];
+export function tagDistribution(summary: TagDailyCostTrendSummary, rangeDays: number, window?: CostWindow) {
+  const availableDates = summary.windowDates ?? [];
+  const dates = window
+    ? availableDates.filter((date) => date >= window.startDate && date <= window.endDate)
+    : availableDates.slice(-rangeDays);
   const included = new Set(dates);
   const series = summary.distributionSeries ?? [];
   if (!dates.length || !series.length) return { available: false, signed: false, total: 0, days: 0, items: [] };

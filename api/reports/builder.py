@@ -483,6 +483,9 @@ def _score_value(row: dict) -> float | None:
         properties.get("score"),
         properties.get("currentScore"),
         properties.get("percentageScore"),
+        (properties.get("latestScore") or {}).get("score")
+        if isinstance(properties.get("latestScore"), dict)
+        else None,
         (properties.get("lastRefreshedScore") or {}).get("score")
         if isinstance(properties.get("lastRefreshedScore"), dict)
         else None,
@@ -494,8 +497,23 @@ def _score_value(row: dict) -> float | None:
     return None
 
 
+def _category_score_rows(rows: list[dict]) -> list[dict]:
+    normalized = []
+    for row in rows:
+        nested = (row.get("properties") or {}).get("value")
+        if not isinstance(nested, list):
+            normalized.append(row)
+            continue
+        for item in nested:
+            item_id = str(item.get("id") or "") if isinstance(item, dict) else ""
+            if not re.search(r"/providers/microsoft\.advisor/advisorscore/category/[^/]+$", item_id, re.IGNORECASE):
+                continue
+            normalized.append({**item, "subscriptionId": row.get("subscriptionId")})
+    return normalized
+
+
 def _advisor_score(rows: list[dict]) -> AdvisorScoreSummary:
-    scored = [(row, _score_value(row)) for row in rows]
+    scored = [(row, _score_value(row)) for row in _category_score_rows(rows)]
     scored = [(row, value) for row, value in scored if value is not None]
     if not scored:
         return AdvisorScoreSummary(
@@ -524,7 +542,7 @@ def _advisor_score(rows: list[dict]) -> AdvisorScoreSummary:
         cost_score=_round2(sum(cost) / len(cost)) if cost else None,
         monthly_change=None,
         subscription_count=len({value for value in subscriptions if value}),
-        status="Mean of the latest subscription Advisor scores returned by Azure Resource Graph.",
+        status="Mean of the latest subscription-level Advisor category scores returned by Azure Resource Graph.",
     )
 
 

@@ -12,6 +12,7 @@ const summary: TagDailyCostTrendSummary = {
 it('uses selected dates instead of cached totals or per-resource active days', () => {
   expect(tagDistribution(summary, 1).total).toBe(2);
   expect(tagDistribution(summary, 2).total).toBe(1.5);
+  expect(tagDistribution(summary, 90, { startDate: '2026-07-01', endDate: '2026-07-01' }).total).toBe(1);
 });
 it('does not use overlapping legacy tag series for an additive distribution', () => {
   expect(tagDistribution({ ...summary, distributionSeries: undefined }, 7).available).toBe(false);

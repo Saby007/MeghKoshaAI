@@ -60,20 +60,20 @@ export function DayAxis({ dates, xFor, y, rotated }: {
    viewBox scales uniformly - so a fixed viewBox magnifies the labels inside
    it. Tracking the measured width keeps the scale at exactly 1 and the axis
    type at the same size as the rest of the interface. */
-function useChartWidth(ref: { current: HTMLElement | null }) {
-  const [width, setWidth] = useState(880);
+export function useChartWidth(ref: { current: HTMLElement | null }, minimum = CHART_MIN_WIDTH) {
+  const [width, setWidth] = useState(Math.max(880, minimum));
   useEffect(() => {
     const node = ref.current;
     if (!node || typeof ResizeObserver === 'undefined') return;
     const measure = () => {
       const measured = Math.round(node.clientWidth);
-      if (measured > 0) setWidth(Math.max(CHART_MIN_WIDTH, measured));
+      if (measured > 0) setWidth(Math.max(minimum, measured));
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [ref]);
+  }, [ref, minimum]);
   return width;
 }
 

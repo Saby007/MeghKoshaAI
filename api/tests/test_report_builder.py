@@ -8,7 +8,7 @@ import json
 import pytest
 
 from anomalies.models import DailyCostRecord
-from reports.builder import _daily_cost_trend, _tag_daily_cost_trend, build_full_report
+from reports.builder import _advisor_score, _daily_cost_trend, _tag_daily_cost_trend, build_full_report
 from reports.cost_details import build_cost_details
 from reports.models import FullReport
 from services.focus_history_reader import FocusHistoryData
@@ -338,6 +338,50 @@ def test_executive_dashboard_and_storage_analysis_use_verified_dimensions():
     assert report.storage_optimization.accounts[0].evidence_status == "Lifecycle candidate"
     assert report.storage_optimization.current_tier_volumes[0].tier == "Cool"
     assert report.storage_optimization.accounts[0].estimated_saving_month is None
+
+
+def test_advisor_score_reads_nested_category_scores_without_recommendation_zeroes():
+    rows = [
+        {
+            "subscriptionId": "sub-1",
+            "name": "Cost",
+            "properties": {"value": [
+                {
+                    "id": "/subscriptions/sub-1/providers/Microsoft.Advisor/advisorScore/category/Cost",
+                    "name": "Cost",
+                    "properties": {"latestScore": {"score": 71.34}},
+                },
+                {
+                    "id": "/subscriptions/sub-1/providers/Microsoft.Advisor/advisorScore/category/Cost/recommendationType/example",
+                    "name": "Cost/example",
+                    "properties": {"latestScore": {"score": 0}},
+                },
+            ]},
+        },
+        {
+            "subscriptionId": "sub-1",
+            "name": "Security",
+            "properties": {"value": [
+                {
+                    "id": "/subscriptions/sub-1/providers/Microsoft.Advisor/advisorScore/category/Security",
+                    "name": "Security",
+                    "properties": {"latestScore": {"score": 42.96}},
+                },
+                {
+                    "id": "/subscriptions/sub-1/providers/Microsoft.Advisor/advisorScore/category/Security/subCategory/Example",
+                    "name": "Security/Example",
+                    "properties": {"latestScore": {"score": 100}},
+                },
+            ]},
+        },
+    ]
+
+    summary = _advisor_score(rows)
+
+    assert summary.available is True
+    assert summary.score == 57.15
+    assert summary.cost_score == 71.34
+    assert summary.subscription_count == 1
 
 
 def test_ai_usage_summary_keeps_cost_unestimated_and_builds_deterministic_opportunities():

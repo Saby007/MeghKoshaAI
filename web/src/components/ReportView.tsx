@@ -49,14 +49,16 @@ import { CATEGORY_DISPLAY_NAMES } from '../findings/categories';
 import { SqlOptimization } from './SqlOptimization';
 import { BillingHistoryTab, HourlyCostPanel } from './BillingHistory';
 import { AICostAlerts, AnomalyOverview, useAnomalySummary, type AnomalyState } from './AnomalyOverview';
-import { billingWindow } from '../report/billingHistory';
+import { billingDates, billingWindow } from '../report/billingHistory';
 import { tagDistribution } from '../report/tagDistribution';
 import { CostExportButton, CostFilters, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
-import { matchesCostFilter, presetCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { costWindowDates, matchesCostFilter, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import { BudgetContext, BudgetDailyChart, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
 import { ServiceRetirements } from './ServiceRetirements';
+import { DayAxis, dayAxis, useChartWidth } from './TrendChart';
 import { BRAND_NAME } from '../brand';
+import './executive-analysis.css';
 import './region-map.css';
 
 const percent = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -1393,43 +1395,68 @@ function RemediationDialog({
 }
 
 type TimeRangeDays = 7 | 30 | 60 | 90;
+type AnalysisRangeMode = TimeRangeDays | 'custom';
 const TIME_RANGE_OPTIONS: TimeRangeDays[] = [7, 30, 60, 90];
 
 // Global time-range control (ADO Task 781, comment 8538467, item 1). Drives the
 // Daily Cost Trend chart and the range KPI strip below it; extending this to every
 // other tab (many of which are point-in-time inventory findings, not time-series)
 // is a materially larger follow-up, not done here.
-function TimeRangeSelector({ days, onChange }: { days: TimeRangeDays; onChange: (value: TimeRangeDays) => void }) {
+function TimeRangeSelector({ mode, window, dates, onModeChange, onWindowChange }: {
+  mode: AnalysisRangeMode;
+  window: CostWindow;
+  dates: string[];
+  onModeChange: (value: AnalysisRangeMode) => void;
+  onWindowChange: (value: CostWindow) => void;
+}) {
+  const earliest = dates[0] ?? '';
+  const latest = dates.at(-1) ?? '';
   return (
-    <div className="time-range-selector" role="group" aria-label="Time range">
-      {TIME_RANGE_OPTIONS.map((option) => (
-        <button
-          key={option}
-          type="button"
-          className={option === days ? 'active' : ''}
-          onClick={() => onChange(option)}
-        >
-          {option}d
-        </button>
-      ))}
+    <div className="analysis-range-controls">
+      <div className="time-range-selector" role="group" aria-label="Time range">
+        {TIME_RANGE_OPTIONS.map((option) => (
+          <button
+            key={option}
+            type="button"
+            className={option === mode ? 'active' : ''}
+            aria-pressed={option === mode}
+            onClick={() => onModeChange(option)}
+          >
+            {option}d
+          </button>
+        ))}
+        <button type="button" className={mode === 'custom' ? 'active' : ''} aria-pressed={mode === 'custom'} onClick={() => onModeChange('custom')}>Custom</button>
+      </div>
+      {mode === 'custom' && (
+        <div className="billing-filters analysis-custom-period" role="group" aria-label="Custom analysis period">
+          <label className="billing-filter"><span>From (UTC)</span><input type="date" aria-label="Analysis period start" value={window.startDate} min={earliest} max={window.endDate || latest} disabled={!dates.length} onChange={(event) => {
+            const startDate = event.target.value;
+            onWindowChange({ startDate, endDate: window.endDate < startDate ? startDate : window.endDate });
+          }} /></label>
+          <label className="billing-filter"><span>To (UTC)</span><input type="date" aria-label="Analysis period end" value={window.endDate} min={window.startDate || earliest} max={latest} disabled={!dates.length} onChange={(event) => {
+            const endDate = event.target.value;
+            onWindowChange({ startDate: window.startDate > endDate ? endDate : window.startDate, endDate });
+          }} /></label>
+        </div>
+      )}
     </div>
   );
 }
 
-function RangeSpendSummary({ report, formatMoney, rangeDays }: { report: FullReport; formatMoney: MoneyFormatter; rangeDays: TimeRangeDays }) {
-  const window = billingWindow(report, { rangeDays });
-  const avgDaily = window.totalCost === null ? null : window.totalCost / window.coveredDays;
+function RangeSpendSummary({ report, formatMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
+  const result = billingWindow(report, { rangeDays, startDate: costWindow.startDate, endDate: costWindow.endDate });
+  const avgDaily = result.totalCost === null ? null : result.totalCost / result.coveredDays;
   return (
     <div className="kpi-grid range-spend-kpi-grid">
       <div className="kpi-card">
-        <div className="kpi-label">Spend, last {rangeDays} days</div>
-        <div className="kpi-value">{window.totalCost === null ? 'Unavailable' : formatMoney(window.totalCost)}</div>
-        <div className="kpi-note">{window.coveredDays}/{window.days.length} covered export-calendar days</div>
+        <div className="kpi-label">Spend, {rangeLabel.toLowerCase()}</div>
+        <div className="kpi-value">{result.totalCost === null ? 'Unavailable' : formatMoney(result.totalCost)}</div>
+        <div className="kpi-note">{result.coveredDays}/{result.days.length} covered export-calendar days</div>
       </div>
       <div className="kpi-card">
         <div className="kpi-label">Average daily spend</div>
         <div className="kpi-value">{avgDaily === null ? 'Unavailable' : formatMoney(avgDaily)}</div>
-        <div className="kpi-note">Average hourly: {window.averageHourlyCost === null ? 'Unavailable' : formatMoney(window.averageHourlyCost)}</div>
+        <div className="kpi-note">Average hourly: {result.averageHourlyCost === null ? 'Unavailable' : formatMoney(result.averageHourlyCost)}</div>
       </div>
     </div>
   );
@@ -1540,12 +1567,26 @@ function ExecutiveSummaryTab({
   const s = report.executiveSummary;
   const metadata = report.reportMetadata;
   const completeness = report.completeness;
-  const [rangeDays, setRangeDays] = useState<TimeRangeDays>(30);
+  const analysisDates = useMemo(() => billingDates(report), [report]);
+  const [rangeMode, setRangeMode] = useState<AnalysisRangeMode>(30);
+  const [analysisWindow, setAnalysisWindow] = useState<CostWindow>(() => presetCostWindow(analysisDates, 30));
+  const rangeDays = costWindowDates(analysisWindow).length || 30;
+  const rangeLabel = rangeMode === 'custom'
+    ? `${reportDate(analysisWindow.startDate)} - ${reportDate(analysisWindow.endDate)}`
+    : `Last ${rangeMode} days`;
   const [costDetailsOpened, setCostDetailsOpened] = useState(false);
   /* The daily figures sit at the end of the report rather than under the
      chart, so the day selection they drive is owned here and handed to the
      cost window instead of living inside it. */
   const [selectedDay, setSelectedDay] = useState<SelectedDay | null>(null);
+  useEffect(() => {
+    setRangeMode(30);
+    setAnalysisWindow(presetCostWindow(analysisDates, 30));
+  }, [report, analysisDates]);
+  function selectAnalysisRange(mode: AnalysisRangeMode) {
+    setRangeMode(mode);
+    if (mode !== 'custom') setAnalysisWindow(presetCostWindow(analysisDates, mode));
+  }
   return (
     <div className="panel executive-report">
       <DashboardSection
@@ -1652,7 +1693,7 @@ function ExecutiveSummaryTab({
       {costDetailsOpened && <>
       <div className="analysis-scope-bar">
         <span className="analysis-scope-label">Analysis range</span>
-        <TimeRangeSelector days={rangeDays} onChange={setRangeDays} />
+        <TimeRangeSelector mode={rangeMode} window={analysisWindow} dates={analysisDates} onModeChange={selectAnalysisRange} onWindowChange={setAnalysisWindow} />
       </div>
 
       <div className="report-section-stack">
@@ -1660,10 +1701,10 @@ function ExecutiveSummaryTab({
           id="spend-over-time"
           title="Spend over time"
           caption="Range totals and hourly cost"
-          meta={`Last ${rangeDays} days`}
+          meta={rangeLabel}
         >
-          <RangeSpendSummary report={report} formatMoney={formatHourlyMoney} rangeDays={rangeDays} />
-          <HourlyCostPanel report={report} formatMoney={formatHourlyMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} embedded />
+          <RangeSpendSummary report={report} formatMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
+          <HourlyCostPanel report={report} formatMoney={formatHourlyMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} embedded />
         </ReportSection>
 
         <ReportSection
@@ -1672,7 +1713,7 @@ function ExecutiveSummaryTab({
           caption="Where the money goes, by type, tag and region"
           meta={formatMoney(s.currentMonthlySpend)}
         >
-          <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} />
+          <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
         </ReportSection>
 
         {report.operationalSignals.length > 0 && (
@@ -1947,8 +1988,8 @@ function MonthlySpendChart({ report, formatMoney }: { report: FullReport; format
     </section>
   );
 }
-function ApplicationHourlyCostDonut({ report, formatMoney, rangeDays }: { report: FullReport; formatMoney: MoneyFormatter; rangeDays: TimeRangeDays }) {
-  const { available, signed, total, days, items } = tagDistribution(report.tagDailyCostTrend, rangeDays);
+function ApplicationHourlyCostDonut({ report, formatMoney, rangeDays, costWindow }: { report: FullReport; formatMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow }) {
+  const { available, signed, total, days, items } = tagDistribution(report.tagDailyCostTrend, rangeDays, costWindow);
   const radius = 48;
   const circumference = 2 * Math.PI * radius;
   let cumulative = 0;
@@ -2011,13 +2052,16 @@ const TREND_SERIES_PALETTE = [
   'var(--color-periwinkle-glow)',
 ];
 
-function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDays }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: TimeRangeDays }) {
+function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
   const [selectedValues, setSelectedValues] = useState<string[]>([]);
+  const chartFrame = useRef<HTMLDivElement>(null);
+  const measuredWidth = useChartWidth(chartFrame, 480);
   const tagTrend = report.tagDailyCostTrend;
   const availableToAdd = tagTrend.availableTagValues.filter((value) => !selectedValues.includes(value) && tagTrend.series.some(item => item.tagValue === value));
 
-  const currentDays = report.dailyCostTrend.days.slice(-rangeDays);
-  const previousDays = report.dailyCostTrend.days.slice(-(rangeDays * 2), -rangeDays);
+  const previousWindow = previousCostWindow(costWindow);
+  const currentDays = report.dailyCostTrend.days.filter((day) => day.date >= costWindow.startDate && day.date <= costWindow.endDate);
+  const previousDays = report.dailyCostTrend.days.filter((day) => day.date >= previousWindow.startDate && day.date <= previousWindow.endDate);
   const dateToSlot = new Map(currentDays.map((day, index) => [day.date, index]));
 
   const appSeries = selectedValues.map((value, index) => {
@@ -2036,17 +2080,16 @@ function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDay
     ...appSeries.flatMap((item) => item.days.map((day) => day.totalCost)),
     0.01,
   );
-  const width = Math.max(rangeDays * 34, 480);
+    const dates = currentDays.map((day) => day.date);
+    const baseWidth = Math.max(currentDays.length * 34, measuredWidth);
   const height = 240;
-  /* One label per day only fits if the label is tiny; at the interface's
-     caption size a date needs roughly 40px, while a day column is ~34px.
-     Thinning to every Nth day buys each surviving label the room to be
-     read, and the blank cells keep the row aligned to the plot above. */
-  const dailyLabelStep = Math.max(1, Math.ceil(currentDays.length / 10));
   const padX = 28;
   const padY = 24;
+    const axis = dayAxis(dates, baseWidth, padX, padX, Math.max(1, dates.length - 1));
+    const width = axis.width;
+    const chartHeight = height + axis.extraHeight;
   const baselineY = height - padY;
-  const stepX = rangeDays > 1 ? (width - padX * 2) / (rangeDays - 1) : 0;
+  const stepX = currentDays.length > 1 ? (width - padX * 2) / (currentDays.length - 1) : 0;
 
   function xForSlot(slot: number): number {
     return padX + slot * stepX;
@@ -2061,7 +2104,7 @@ function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDay
   const currentPoints = currentDays.map((day, index) => ({ x: xForSlot(index), y: yFor(day.totalCost), day }));
   // Right-align the previous window so its most recent day sits under the current
   // window's most recent day, even if there isn't enough history for a full window.
-  const previousOffset = rangeDays - previousDays.length;
+  const previousOffset = currentDays.length - previousDays.length;
   const previousPoints = previousDays.map((day, index) => ({ x: xForSlot(previousOffset + index), y: yFor(day.totalCost), day }));
   const areaPath = currentPoints.length > 0
     ? `${pathFor(currentPoints)} L ${currentPoints[currentPoints.length - 1].x.toFixed(1)} ${baselineY} L ${currentPoints[0].x.toFixed(1)} ${baselineY} Z`
@@ -2074,7 +2117,7 @@ function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDay
   return (
     <section className="executive-visual executive-history-panel daily-trend-panel-wide">
       <header>
-        <span>Daily spend &amp; average hourly cost, per tag — last {rangeDays} days vs the {rangeDays} before</span>
+        <span>Daily spend &amp; average hourly cost, per tag — {rangeLabel} vs the preceding {rangeDays} days</span>
         <small>{report.dailyCostTrend.statusMessage} {tagTrend.statusMessage}</small>
       </header>
       <div className="daily-trend-controls">
@@ -2126,8 +2169,8 @@ function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDay
               <span key={tick.value}>{formatMoney(tick.value)}</span>
             ))}
           </div>
-          <div className="daily-line-chart-main">
-            <svg className="daily-line-chart" viewBox={`0 0 ${width} ${height}`} width={width} height={height} style={{ width: '100%', minWidth: width }} preserveAspectRatio="none" role="img" aria-label="Daily cost trend">
+          <div className="daily-line-chart-main" ref={chartFrame}>
+            <svg className="daily-line-chart" viewBox={`0 0 ${width} ${chartHeight}`} width={width} height={chartHeight} style={{ width: `${width}px`, minWidth: `${width}px` }} role="img" aria-label="Daily cost trend">
               {yTicks.map((tick) => (
                 <line key={tick.value} className="daily-line-chart-grid" x1={padX} x2={width - padX} y1={tick.y} y2={tick.y} />
               ))}
@@ -2155,12 +2198,8 @@ function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDay
                   </g>
                 );
               })}
+              <DayAxis dates={dates} xFor={xForSlot} y={baselineY + (axis.rotated ? 14 : 18)} rotated={axis.rotated} />
             </svg>
-            <div className="daily-line-chart-labels" style={{ gridTemplateColumns: `repeat(${currentDays.length}, minmax(34px, 1fr))`, minWidth: width }}>
-              {currentDays.map((day, index) => (
-                <span key={day.date}>{index % dailyLabelStep === 0 ? new Date(`${day.date}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' }) : ''}</span>
-              ))}
-            </div>
           </div>
         </div>
       ) : <p className="visual-empty">Daily FOCUS export history is not available.</p>}
@@ -2308,13 +2347,13 @@ function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMon
   );
 }
 
-function ExecutiveSpendVisuals({ report, formatMoney, formatHourlyMoney, rangeDays }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: TimeRangeDays }) {
+function ExecutiveSpendVisuals({ report, formatMoney, formatHourlyMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
   return (
     <div className="executive-visual-grid">
       <SpendCategoryDonut report={report} formatMoney={formatMoney} />
       <MonthlySpendChart report={report} formatMoney={formatMoney} />
-      <DailySpendTrendChart report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} />
-      <ApplicationHourlyCostDonut report={report} formatMoney={formatHourlyMoney} rangeDays={rangeDays} />
+      <DailySpendTrendChart report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={costWindow} rangeLabel={rangeLabel} />
+      <ApplicationHourlyCostDonut report={report} formatMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={costWindow} />
       <CostTreemap report={report} formatMoney={formatMoney} />
       <RegionSpendMap report={report} formatMoney={formatMoney} />
     </div>
