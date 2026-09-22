@@ -37,7 +37,6 @@ def configuration(monkeypatch):
     user_arm_client.access_control._access_cache.clear()
     user_arm_client._live_access_cache.clear()
     monkeypatch.setattr(user_arm_client, "_COST_MIN_REQUEST_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(user_arm_client, "_COST_MIN_REQUEST_INTERVAL_SECONDS", 0.0)
 
     async def assignments(subscription_id, principal_object_id):
         return [{"properties": {

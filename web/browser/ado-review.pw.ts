@@ -105,7 +105,7 @@ test('backend managed identity failure preserves sign-in without consent acquisi
     return { status: response.status, detail: payload.detail, userId: profile.userId, consentApiExposed: typeof identity.authorizeAzureAccess === 'function' };
   });
   expect(failure).toEqual({ status: 503, detail: { code: 'azure_managed_identity_unavailable', message }, userId: 'visual-user', consentApiExposed: false });
-  await expect(page.getByRole('heading', { name: 'Sign in to CloudLens', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Sign in to MeghKoshaAI', exact: true })).toHaveCount(0);
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     for (const theme of ['light', 'dark']) {
@@ -474,7 +474,7 @@ test('workspace states support sign-in, report retry, chat retry and schedule re
     if (!sessionStorage.getItem('app-browser-session')) sessionStorage.setItem('app-browser-session', 'signed_out');
   });
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Sign in to CloudLens', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sign in to MeghKoshaAI', exact: true })).toBeVisible();
   /* Entra is the only credential path, so there is no email field to validate
      and nothing to type before the redirect. */
   await expect(page.getByLabel('Email address')).toHaveCount(0);
@@ -490,7 +490,7 @@ test('workspace states support sign-in, report retry, chat retry and schedule re
   await page.getByRole('button', { name: 'Sign in with Microsoft', exact: true }).click();
   await expect(page).toHaveURL(/\/auth-callback.html\?fixture_login_hint=/);
   /* An empty hint is the point: Entra prompts for account selection instead of
-     CloudLens pre-filling an address the user is about to choose anyway. */
+     MeghKoshaAI pre-filling an address the user is about to choose anyway. */
   expect(new URL(page.url()).searchParams.get('fixture_login_hint')).toBe('');
   await page.evaluate(() => sessionStorage.setItem('app-browser-session', 'signed_in'));
   await page.goto('/');
@@ -532,7 +532,7 @@ test('workspace states support sign-in, report retry, chat retry and schedule re
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('390-schedules-empty.png'), fullPage: true, animations: 'disabled' });
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Sign in to CloudLens', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sign in to MeghKoshaAI', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Download FocusCost files' })).toHaveCount(0);
   expect(legacyRequests).toEqual([]);
   expect(errors).toEqual([]);

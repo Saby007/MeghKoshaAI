@@ -5341,10 +5341,12 @@ body {
     margin-top: 4px;
 }
 
+
 /* Each label owns a single ~34px day column, but a date at caption size
    needs about 38px. Now that only every Nth day is labelled, the columns
    on either side are empty, so the label is allowed to use that space
    instead of being ellipsised inside its own cell. */
+
 .daily-line-chart-labels span {
     overflow: visible;
     color: var(--color-warm-granite);
@@ -7322,6 +7324,7 @@ body {
     }
 }
 
+
 /* =====================================================================
    PREMIUM PRESENTATION LAYER
    ---------------------------------------------------------------------
@@ -7426,7 +7429,7 @@ body {
 }
 
 @media (max-width: 560px) {
-    :root .app-header {
+     :root .app-header {
         height: auto;
         min-height: 64px;
     }
@@ -7454,9 +7457,7 @@ body {
     border-radius: 999px;
     letter-spacing: var(--tracking-overline);
     font-weight: var(--weight-semi);
-    transition:
-        color var(--motion-duration) var(--ease-glass),
-        background-color var(--motion-duration) var(--ease-glass);
+    transition: color var(--motion-duration) var(--ease-glass), background-color var(--motion-duration) var(--ease-glass);
 }
 
 :root .primary-nav-rail button:hover,
@@ -7730,16 +7731,12 @@ body {
 :root .scope-run-button {
     border-radius: var(--radius-buttons);
     border-color: transparent;
-    background:
-        linear-gradient(180deg, color-mix(in srgb, var(--color-signal-orange) 92%, white) 0%, var(--color-signal-orange) 100%);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--color-signal-orange) 92%, white) 0%, var(--color-signal-orange) 100%);
     color: var(--color-on-action);
     font-weight: var(--weight-semi);
     letter-spacing: 0;
     box-shadow: var(--shadow-sm), inset 0 1px 0 rgb(255 255 255 / .22);
-    transition:
-        filter var(--motion-duration) var(--ease-glass),
-        box-shadow var(--motion-duration) var(--ease-glass),
-        transform var(--motion-duration) var(--ease-glass);
+    transition: filter var(--motion-duration) var(--ease-glass), box-shadow var(--motion-duration) var(--ease-glass), transform var(--motion-duration) var(--ease-glass);
 }
 
 :root .primary-command:hover:not(:disabled),
@@ -7769,11 +7766,7 @@ body {
     border-radius: var(--radius-buttons);
     border-color: var(--glass-border);
     background: var(--glass-bg);
-    transition:
-        background-color var(--motion-duration) var(--ease-glass),
-        border-color var(--motion-duration) var(--ease-glass),
-        color var(--motion-duration) var(--ease-glass),
-        transform var(--motion-duration) var(--ease-glass);
+    transition: background-color var(--motion-duration) var(--ease-glass), border-color var(--motion-duration) var(--ease-glass), color var(--motion-duration) var(--ease-glass), transform var(--motion-duration) var(--ease-glass);
 }
 
 :root .outline-command:hover,
@@ -7843,10 +7836,7 @@ body {
 
 :root .left-nav-sidebar button {
     border-radius: var(--radius-sm);
-    transition:
-        background-color var(--motion-duration) var(--ease-glass),
-        color var(--motion-duration) var(--ease-glass),
-        box-shadow var(--motion-duration) var(--ease-glass);
+    transition: background-color var(--motion-duration) var(--ease-glass), color var(--motion-duration) var(--ease-glass), box-shadow var(--motion-duration) var(--ease-glass);
 }
 
 :root .left-nav-sidebar button:hover {
@@ -7874,11 +7864,7 @@ body {
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    background:
-        radial-gradient(circle 720px at 14% 18%, rgb(var(--color-glow-rgb) / .20), transparent 68%),
-        radial-gradient(circle 520px at 78% 92%, rgb(var(--color-glow-rgb) / .10), transparent 70%),
-        linear-gradient(var(--glass-border) 1px, transparent 1px),
-        linear-gradient(90deg, var(--glass-border) 1px, transparent 1px);
+    background: radial-gradient(circle 720px at 14% 18%, rgb(var(--color-glow-rgb) / .20), transparent 68%), radial-gradient(circle 520px at 78% 92%, rgb(var(--color-glow-rgb) / .10), transparent 70%), linear-gradient(var(--glass-border) 1px, transparent 1px), linear-gradient(90deg, var(--glass-border) 1px, transparent 1px);
     background-size: auto, auto, 48px 48px, 48px 48px;
 }
 
@@ -7962,11 +7948,7 @@ body {
 :root .subscription-skeleton>*,
 :root .workspace-skeleton-grid i {
     border-radius: var(--radius-md);
-    background:
-        linear-gradient(90deg,
-            var(--color-skeleton) 0%,
-            color-mix(in srgb, var(--color-skeleton) 60%, var(--color-surface-hover)) 50%,
-            var(--color-skeleton) 100%);
+    background: linear-gradient(90deg, var(--color-skeleton) 0%, color-mix(in srgb, var(--color-skeleton) 60%, var(--color-surface-hover)) 50%, var(--color-skeleton) 100%);
     background-size: 200% 100%;
     animation: premium-shimmer 1.4s linear infinite;
 }
@@ -7982,27 +7964,26 @@ body {
    asked for less of it. The interface must still show state - only the travel stops. */
 
 @media (prefers-reduced-motion: reduce) {
-
-    :root *,
-    :root *::before,
-    :root *::after {
+     :root *,
+     :root *::before,
+     :root *::after {
         animation-duration: .001ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: .001ms !important;
         scroll-behavior: auto !important;
     }
-
-    :root .kpi-card:hover,
-    :root .primary-command:hover:not(:disabled),
-    :root .scope-run-button:hover:not(:disabled),
-    :root .outline-command:hover,
-    :root .ghost-link:hover,
-    :root .theme-toggle:hover,
-    :root .dark-button:hover,
-    :root .chat-starters button:hover {
+     :root .kpi-card:hover,
+     :root .primary-command:hover:not(:disabled),
+     :root .scope-run-button:hover:not(:disabled),
+     :root .outline-command:hover,
+     :root .ghost-link:hover,
+     :root .theme-toggle:hover,
+     :root .dark-button:hover,
+     :root .chat-starters button:hover {
         transform: none;
     }
 }
+
 
 /* =====================================================================
    PREMIUM PRESENTATION LAYER - REPORT WORKSPACE
@@ -8162,10 +8143,7 @@ body {
    not a colour change, so nothing on the page appears to change value. */
 
 :root .app-shell :is(.kpi-card, .summary-tile) {
-    transition:
-        border-color var(--motion-duration) var(--ease-glass),
-        box-shadow var(--motion-duration) var(--ease-glass),
-        background-color var(--motion-duration) var(--ease-glass);
+    transition: border-color var(--motion-duration) var(--ease-glass), box-shadow var(--motion-duration) var(--ease-glass), background-color var(--motion-duration) var(--ease-glass);
 }
 
 :root .app-shell .kpi-card {
@@ -8259,6 +8237,7 @@ body {
     text-decoration-thickness: 1px;
 }
 
+
 /* The inverted page band is the one deliberate high-contrast figure in the
    workspace. Kept inverted - softened at the corners, given an accent edge and a
    contact shadow so it reads as a masthead rather than a pasted-in rectangle. */
@@ -8285,6 +8264,7 @@ body {
    size-of-text or colour-of-text, so contrast and the density
    scale (--ui-scale) keep behaving exactly as before.
    ================================================================ */
+
 
 /* The masthead. An inverted slab is a heavy way to say "you are here":
    it competes with the data for attention and costs 104px to do it.
@@ -8325,6 +8305,7 @@ body {
     letter-spacing: var(--tracking-heading-lg);
 }
 
+
 /* Section bands inside the report get the same treatment: a rule and a
    caption rather than a filled bar, so a page of them reads as one
    document instead of a stack of separate panels. */
@@ -8338,6 +8319,7 @@ body {
     font-weight: var(--weight-semi);
     letter-spacing: var(--tracking-heading);
 }
+
 
 /* Reclaimed vertical space. Each of these strips was carrying padding
    sized for a comfortable density it never actually runs at. */
@@ -8359,6 +8341,7 @@ body {
     font-size: var(--font-size-xs);
 }
 
+
 /* A secondary utility strip should not carry the same visual weight as
    the scope bar above it. Muted, tight, and out of the way until wanted. */
 
@@ -8369,6 +8352,7 @@ body {
 :root .app-shell .dashboard-main {
     padding-top: 0;
 }
+
 
 /* The metric tiles. Reads as one continuous instrument rather than a row
    of detached chips: tabular figures so the columns align, and the label
@@ -8400,6 +8384,7 @@ body {
     letter-spacing: var(--tracking-heading);
 }
 
+
 /* Content rhythm. Section padding and heading margins were stacking -
    a 14px section pad, then a 10.5px heading margin, then a 10.5px
    control margin, all resolving to ~35px of nothing between two rows
@@ -8422,6 +8407,7 @@ body {
     padding-block: var(--space-1) var(--space-2);
 }
 
+
 /* Cards carry their own edge, so they do not also need a wide internal
    margin to look separate from the page. */
 
@@ -8432,6 +8418,7 @@ body {
 :root .app-shell .kpi-value {
     font-variant-numeric: var(--nums);
 }
+
 
 /* Section headings: sized down from display weight to editorial weight.
    At 30px every section shouted; at 20px the page has a hierarchy and
@@ -8500,6 +8487,7 @@ body {
     padding-block: var(--space-2);
 }
 
+
 /* Summary figures sat at display size for counts that rarely exceed two
    digits. At heading size they still lead the eye without turning a
    three-item summary into the tallest element on the page. */
@@ -8515,6 +8503,7 @@ body {
     font-variant-numeric: var(--nums);
     letter-spacing: var(--tracking-heading);
 }
+
 
 /* The second masthead. "FOCUS schedules" repeated what the h1 directly
    above it already said, at nearly the same size. Demoted to a section
@@ -8539,6 +8528,7 @@ body {
     letter-spacing: var(--tracking-overline);
     text-transform: uppercase;
 }
+
 
 /* Table density. Operational tables are scanned, not read - tighter rows
    put more of the estate on screen at once, which is the whole job. */
@@ -8579,10 +8569,7 @@ body {
     --color-ash-stroke: #434B56;
     --color-control-stroke: #5F6975;
     --glass-border: rgb(255 255 255 / .16);
-    --canvas-wash:
-        radial-gradient(1100px 580px at 14% -12%, rgb(79 168 245 / .16), transparent 60%),
-        radial-gradient(900px 520px at 90% 2%, rgb(46 210 224 / .09), transparent 58%),
-        linear-gradient(180deg, rgb(255 255 255 / .022), transparent 38%);
+    --canvas-wash: radial-gradient(1100px 580px at 14% -12%, rgb(79 168 245 / .16), transparent 60%), radial-gradient(900px 520px at 90% 2%, rgb(46 210 224 / .09), transparent 58%), linear-gradient(180deg, rgb(255 255 255 / .022), transparent 38%);
 }
 
 :root[data-theme='light'] {
@@ -8591,11 +8578,9 @@ body {
     --color-ash-stroke: #AEB9C7;
     --color-control-stroke: #8A96A6;
     --glass-border: rgb(16 40 70 / .22);
-    --canvas-wash:
-        radial-gradient(1100px 580px at 14% -12%, rgb(15 108 189 / .13), transparent 60%),
-        radial-gradient(900px 520px at 90% 2%, rgb(0 128 155 / .07), transparent 58%),
-        linear-gradient(180deg, rgb(16 40 70 / .03), transparent 34%);
+    --canvas-wash: radial-gradient(1100px 580px at 14% -12%, rgb(15 108 189 / .13), transparent 60%), radial-gradient(900px 520px at 90% 2%, rgb(0 128 155 / .07), transparent 58%), linear-gradient(180deg, rgb(16 40 70 / .03), transparent 34%);
 }
+
 
 /* The content frame now has to earn its place above the canvas: a
    defined edge, a tight contact shadow to anchor it, and a wide
@@ -8612,11 +8597,9 @@ body {
     position: relative;
     border: 0;
     border-radius: var(--radius-lg);
-    box-shadow:
-        inset 0 0 0 1px var(--glass-border),
-        0 1px 2px rgb(0 0 0 / .10),
-        0 12px 32px rgb(0 0 0 / .14);
+    box-shadow: inset 0 0 0 1px var(--glass-border), 0 1px 2px rgb(0 0 0 / .10), 0 12px 32px rgb(0 0 0 / .14);
 }
+
 
 /* A single hairline of light along the top edge. This is what stops a
    large flat surface reading as a hole cut in the page. */
@@ -8631,6 +8614,7 @@ body {
     pointer-events: none;
 }
 
+
 /* The nav rail is a different plane from the report it navigates, so
    it sits on the canvas tint rather than on the content surface. */
 
@@ -8638,6 +8622,7 @@ body {
     background: color-mix(in srgb, var(--color-obsidian-canvas) 40%, transparent);
     border-right: 1px solid var(--color-ash-stroke);
 }
+
 
 /* Cards read against the surface, not the canvas, so they need only a
    quiet edge - the separation is already carried by the frame. */
@@ -8661,6 +8646,7 @@ body {
    select. So headers here get small-caps treatment through spacing,
    weight and colour - never by shrinking the type.
    ================================================================ */
+
 
 /* Controls. A form control should read as an inset surface you can
    type into, not as a raised slab.
@@ -8688,6 +8674,7 @@ body {
     line-height: 1.4;
 }
 
+
 /* The native select arrow is the most obviously unstyled thing in the
    app. Replaced with a chevron matching the icon set. */
 
@@ -8700,26 +8687,38 @@ body {
     background-position: right var(--space-2) center;
 }
 
-:root .app-shell.app-shell :is(select, input):hover:not(:disabled) {
+:root .app-shell.app-shell :is(select,
+input):hover:not(:disabled) {
     border-color: var(--color-graphite-mid);
 }
 
-:root .app-shell :is(select, input, button, summary, [tabindex]):focus-visible {
+:root .app-shell :is(select,
+input,
+button,
+summary,
+[tabindex]):focus-visible {
     outline: 2px solid var(--color-focus);
     outline-offset: 1px;
 }
 
-:root .app-shell.app-shell :is(select, input):focus-visible {
+:root .app-shell.app-shell :is(select,
+input):focus-visible {
     border-color: var(--color-focus);
     box-shadow: 0 0 0 3px var(--color-accent-glow);
 }
+
 
 /* Tables. A header row should be a different kind of thing from the
    data under it. Same size - the rate panel asserts >=14px on
    .rate-table th - so the separation is carried by weight, tracking
    and colour instead of by shrinking the type. */
 
-:root .app-shell.app-shell :is(.report-table, .resource-table, .rate-table, .schedule-table, .anomaly-table, .pricing-table) thead th {
+:root .app-shell.app-shell :is(.report-table,
+.resource-table,
+.rate-table,
+.schedule-table,
+.anomaly-table,
+.pricing-table) thead th {
     font-size: var(--font-size-sm);
     font-weight: var(--weight-semi);
     letter-spacing: var(--tracking-overline);
@@ -8729,45 +8728,66 @@ body {
     white-space: nowrap;
 }
 
+
 /* Figures line up only if they are tabular and right-aligned; a cost
    table where the decimal points wander is the fastest way to look
    amateur. */
 
-:root .app-shell :is(.report-table, .resource-table, .rate-table, .schedule-table) :is(td, th) {
+:root .app-shell :is(.report-table,
+.resource-table,
+.rate-table,
+.schedule-table) :is(td,
+th) {
     font-variant-numeric: var(--nums);
 }
 
-:root .app-shell :is(.report-table, .resource-table, .rate-table, .schedule-table) tbody tr {
+:root .app-shell :is(.report-table,
+.resource-table,
+.rate-table,
+.schedule-table) tbody tr {
     transition: background-color var(--motion-duration) var(--ease-glass);
 }
 
-:root .app-shell.app-shell :is(.report-table, .resource-table, .rate-table, .schedule-table) tbody tr:hover {
+:root .app-shell.app-shell :is(.report-table,
+.resource-table,
+.rate-table,
+.schedule-table) tbody tr:hover {
     background: var(--color-surface-hover);
 }
+
 
 /* Buttons. One ladder: a filled primary, a bordered secondary, a bare
    tertiary - each answering hover with a small lift rather than a
    colour change, which is what makes a surface feel physical. */
 
-:root .app-shell :is(.primary-command, .scope-run-button, .dark-button, .outline-command, .ghost-button, .icon-command) {
-    transition:
-        background-color var(--motion-duration) var(--ease-glass),
-        border-color var(--motion-duration) var(--ease-glass),
-        box-shadow var(--motion-duration) var(--ease-glass),
-        transform var(--motion-duration) var(--ease-glass);
+:root .app-shell :is(.primary-command,
+.scope-run-button,
+.dark-button,
+.outline-command,
+.ghost-button,
+.icon-command) {
+    transition: background-color var(--motion-duration) var(--ease-glass), border-color var(--motion-duration) var(--ease-glass), box-shadow var(--motion-duration) var(--ease-glass), transform var(--motion-duration) var(--ease-glass);
 }
 
-:root .app-shell :is(.primary-command, .scope-run-button, .dark-button):hover:not(:disabled) {
+:root .app-shell :is(.primary-command,
+.scope-run-button,
+.dark-button):hover:not(:disabled) {
     transform: translateY(-1px);
     box-shadow: var(--shadow-md);
 }
 
-:root .app-shell :is(.outline-command, .ghost-button, .icon-command):hover:not(:disabled) {
+:root .app-shell :is(.outline-command,
+.ghost-button,
+.icon-command):hover:not(:disabled) {
     border-color: var(--color-graphite-mid);
     background: var(--color-surface-hover);
 }
 
-:root .app-shell :is(.primary-command, .scope-run-button, .dark-button, .outline-command, .icon-command):active:not(:disabled) {
+:root .app-shell :is(.primary-command,
+.scope-run-button,
+.dark-button,
+.outline-command,
+.icon-command):active:not(:disabled) {
     transform: translateY(0);
     box-shadow: var(--shadow-sm);
 }
@@ -8777,31 +8797,35 @@ body {
     cursor: not-allowed;
 }
 
+
 /* Nav rail. The active page is marked by an accent edge rather than by
    a filled block, so the rail stays quiet while you read the report. */
 
 :root .app-shell .left-nav-children button {
     border-radius: var(--radius-sm);
-    transition:
-        background-color var(--motion-duration) var(--ease-glass),
-        color var(--motion-duration) var(--ease-glass);
+    transition: background-color var(--motion-duration) var(--ease-glass), color var(--motion-duration) var(--ease-glass);
 }
 
 :root .app-shell .left-nav-children button:hover:not(.active) {
     background: var(--color-surface-hover);
 }
 
+
 /* Data cards lift off the surface, matching the frame's own language. */
 
-:root .app-shell :is(.kpi-card, .summary-tile, .commitment-actual-card) {
+:root .app-shell :is(.kpi-card,
+.summary-tile,
+.commitment-actual-card) {
     border-radius: var(--radius-md);
     transition: border-color var(--motion-duration) var(--ease-glass), box-shadow var(--motion-duration) var(--ease-glass);
 }
 
-:root .app-shell :is(.kpi-card, .commitment-actual-card):hover {
+:root .app-shell :is(.kpi-card,
+.commitment-actual-card):hover {
     border-color: var(--color-graphite-mid);
     box-shadow: var(--shadow-sm);
 }
+
 
 /* Scrollbars and selection: small surfaces, but default chrome on
    either is immediately recognisable as "nobody looked at this". */
@@ -8827,6 +8851,7 @@ body {
     background-clip: content-box;
 }
 
+
 /* ----------------------------------------------------------------
    Page grid
    ----------------------------------------------------------------
@@ -8843,9 +8868,12 @@ body {
    as well.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.app-header, .scope-ribbon, .saved-report-controls) {
+:root .app-shell.app-shell :is(.app-header,
+.scope-ribbon,
+.saved-report-controls) {
     padding-inline: var(--space-6);
 }
+
 
 /* The scope bar's two halves sit inside that gutter rather than
    spanning past it, so "Update report" lines up with "Sign out"
@@ -8859,6 +8887,7 @@ body {
     padding-left: 0;
 }
 
+
 /* The idle "awaiting report" state is deliberately, completely static
    upstream (.app-shell .report-awaiting * { transition: none }) - an
    empty state should not shimmer while it waits, and a test asserts
@@ -8868,10 +8897,12 @@ body {
    Re-asserted here above my own specificity rather than narrowing
    every rule above. */
 
-:root .app-shell.app-shell :is(.report-awaiting, .report-awaiting *) {
+:root .app-shell.app-shell :is(.report-awaiting,
+.report-awaiting *) {
     transition: none;
     animation: none;
 }
+
 
 /* Reduced motion is already handled globally and with !important in
    report-workspace.css, so this layer deliberately adds no second
@@ -8916,6 +8947,7 @@ body {
     padding-block: var(--space-1);
 }
 
+
 /* With that padding removed the band is 52px of content inside a 58px
    floor, so the floor drops to the touch-target minimum and the bar
    is sized by its label rather than by a number. */
@@ -8936,13 +8968,15 @@ body {
     padding-block: var(--space-2);
 }
 
+
 /* The figure cards. Their padding was competing with the number for
    the eye: the value should set the height of the card, so the box
    is tightened to the value and its caption and nothing more. An
    earlier rule in this file set the tile to space-1 and a later one
    reset it to space-2; this settles that conflict in one place. */
 
-:root .app-shell.app-shell :is(.kpi-card, .summary-tile) {
+:root .app-shell.app-shell :is(.kpi-card,
+.summary-tile) {
     padding: var(--space-1) var(--space-3);
 }
 
@@ -8972,32 +9006,41 @@ body {
    28px display step. No new sizes are introduced.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.executive-visual>header>span, .executive-visual>header>strong, .executive-visual>header>small) {
+:root .app-shell.app-shell :is(.executive-visual>header>span,
+.executive-visual>header>strong,
+.executive-visual>header>small) {
     font-size: var(--font-size-xs);
 }
 
 :root .app-shell.app-shell .donut-chart>span small,
 :root .app-shell.app-shell .spend-legend>span,
-:root .app-shell.app-shell :is(.monthly-column>strong, .monthly-column>span),
+:root .app-shell.app-shell :is(.monthly-column>strong,
+.monthly-column>span),
 :root .app-shell.app-shell .daily-line-chart-axis-labels span,
 :root .app-shell.app-shell .daily-trend-legend-item,
-:root .app-shell.app-shell :is(.treemap-breadcrumb button, .treemap-breadcrumb b),
+:root .app-shell.app-shell :is(.treemap-breadcrumb button,
+.treemap-breadcrumb b),
 :root .app-shell.app-shell .map-attribution {
     font-size: var(--font-size-xs);
 }
 
+
 /* Sized in em against a parent that was itself reduced, so it
    compounded down to 8.3px. Pinned to the scale instead. */
 
-:root .app-shell.app-shell .spend-legend :is(small, b, strong) {
+:root .app-shell.app-shell .spend-legend :is(small,
+b,
+strong) {
     font-size: var(--font-size-xs);
 }
+
 
 /* A sentence of prose, not a caption - it takes the body size. */
 
 :root .app-shell.app-shell .visual-empty {
     font-size: var(--font-size-sm);
 }
+
 
 /* The one display figure in these panels; 34px is not a step on the
    scale, 28px is. */
@@ -9043,6 +9086,7 @@ body {
     overflow: hidden;
 }
 
+
 /* One hairline between neighbours rather than a border per section,
    so the stack does not double up its edges. */
 
@@ -9084,6 +9128,7 @@ body {
     transform: rotate(90deg);
 }
 
+
 /* Title and caption share a column so the caption hangs under the
    title rather than competing with it on the same line. */
 
@@ -9107,6 +9152,7 @@ body {
     font-size: var(--font-size-xs);
 }
 
+
 /* The figure that decides whether the section is worth opening.
    Tabular so the column of them stays aligned down the stack. */
 
@@ -9128,6 +9174,7 @@ body {
     padding-top: var(--space-4);
 }
 
+
 /* Panels inside a section already sit within its padding, so they
    drop the outer margin that kept them clear of the old bands. */
 
@@ -9139,6 +9186,7 @@ body {
     margin-bottom: 0;
 }
 
+
 /* A single panel that fills a section was drawing its own border,
    background and radius inside the section's border, background
    and radius - a card in a card, which is most of what still read
@@ -9146,13 +9194,15 @@ body {
    child gives its up. The chart grid is exempt: those are several
    distinct visuals that genuinely are separate cards. */
 
-:root .app-shell.app-shell .report-section-body>:is(.executive-table-scroll, .hourly-cost-panel) {
+:root .app-shell.app-shell .report-section-body>:is(.executive-table-scroll,
+.hourly-cost-panel) {
     border: 0;
     border-radius: 0;
     background: transparent;
     box-shadow: none;
     padding-inline: 0;
 }
+
 
 /* The range applies to every section below it, so it is presented
    once, above the stack, rather than inside the first section that
@@ -9178,22 +9228,20 @@ body {
 }
 
 @media (max-width: 640px) {
-
     /* The caption is the first thing to go when the header has to
        share a line with a figure on a narrow screen. */
-    :root .app-shell.app-shell .report-section-heading small {
+     :root .app-shell.app-shell .report-section-heading small {
         display: none;
     }
-
-    :root .app-shell.app-shell .report-section-summary {
+     :root .app-shell.app-shell .report-section-summary {
         padding: var(--space-3);
         min-height: var(--touch-height);
     }
-
-    :root .app-shell.app-shell .report-section-body {
+     :root .app-shell.app-shell .report-section-body {
         padding-inline: var(--space-2);
     }
 }
+
 
 /* The two top-level disclosures - "Report details" and "Explore costs
    and findings" - now introduce a structured stack rather than a loose
@@ -9218,6 +9266,7 @@ body {
 :root .app-shell.app-shell .overview-details>summary::-webkit-details-marker {
     display: none;
 }
+
 
 /* Laying the summary out as a flex row drops the native disclosure
    marker, so the indicator is drawn back in - matching the rotating
@@ -9292,6 +9341,7 @@ body {
     min-height: var(--control-height);
 }
 
+
 /* The validation message is a sentence, not a field: it takes the
    whole row rather than being squeezed between two date inputs. */
 
@@ -9303,7 +9353,7 @@ body {
 }
 
 @media (max-width: 640px) {
-    :root .app-shell.app-shell .saved-report-controls .cost-range-controls {
+     :root .app-shell.app-shell .saved-report-controls .cost-range-controls {
         margin-inline-start: 0;
     }
 }
@@ -9330,21 +9380,41 @@ body {
    an appearance at all.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local'], textarea) {
+:root .app-shell.app-shell :is(select,
+input[type='text'],
+input[type='email'],
+input[type='search'],
+input[type='number'],
+input[type='date'],
+input[type='datetime-local'],
+textarea) {
     border-color: var(--color-control-stroke);
 }
 
-:root .app-shell.app-shell :is(.ghost-button, .outline-command, .icon-command, .time-range-selector button) {
+:root .app-shell.app-shell :is(.ghost-button,
+.outline-command,
+.icon-command,
+.time-range-selector button) {
     border-color: var(--color-control-stroke);
 }
+
 
 /* Table header rules and section separators are structure, not
    controls, so they take the structural stroke - but they do need
    to be visible, which at the old value they were not. */
 
-:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .schedule-table, .rate-table, .billing-table, .pricing-table, .anomaly-table) :is(th, td) {
+:root .app-shell.app-shell :is(.report-table,
+.resource-table,
+.data-table,
+.schedule-table,
+.rate-table,
+.billing-table,
+.pricing-table,
+.anomaly-table) :is(th,
+td) {
     border-color: var(--color-ash-stroke);
 }
+
 
 /* The header's Sign out is a .ghost-button, but the rule that gives
    that class an appearance was written scoped to a handful of report
@@ -9410,16 +9480,22 @@ body {
 }
 
 @media (pointer: coarse) {
-    :root {
+     :root {
         --control-sm: var(--touch-height);
         --control-md: var(--touch-height);
         --control-lg: var(--touch-height);
     }
 }
 
+
 /* --- Command buttons ------------------------------------------- */
 
-:root .app-shell.app-shell :is(.ghost-button, .outline-command, .dark-button, .primary-command, .scope-run-button, .icon-command) {
+:root .app-shell.app-shell :is(.ghost-button,
+.outline-command,
+.dark-button,
+.primary-command,
+.scope-run-button,
+.icon-command) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -9432,22 +9508,22 @@ body {
     line-height: 1.2;
     white-space: nowrap;
     cursor: pointer;
-    transition:
-        background-color var(--press-duration) var(--press-ease),
-        border-color var(--press-duration) var(--press-ease),
-        color var(--press-duration) var(--press-ease),
-        box-shadow var(--press-duration) var(--press-ease);
+    transition: background-color var(--press-duration) var(--press-ease), border-color var(--press-duration) var(--press-ease), color var(--press-duration) var(--press-ease), box-shadow var(--press-duration) var(--press-ease);
 }
+
 
 /* Page-level actions sit one step up the ladder and carry the
    heavier weight, so the primary action on a screen is obvious
    without resorting to colour alone. */
 
-:root .app-shell.app-shell :is(.primary-command, .scope-run-button, .dark-button) {
+:root .app-shell.app-shell :is(.primary-command,
+.scope-run-button,
+.dark-button) {
     min-height: var(--control-lg);
     padding-inline: var(--space-4);
     font-weight: var(--weight-semi);
 }
+
 
 /* Icon-only controls are square at their height rather than
    inheriting text padding, which is what made them look lopsided
@@ -9458,11 +9534,14 @@ body {
     padding-inline: 0;
 }
 
+
 /* The header toggles and the export controls are icon buttons too;
    they were sized by their glyph and padding rather than by the
    ladder, so they sat 4px proud of everything beside them. */
 
-:root .app-shell.app-shell :is(.theme-toggle, .focus-download-control, .report-download-control) {
+:root .app-shell.app-shell :is(.theme-toggle,
+.focus-download-control,
+.report-download-control) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -9470,16 +9549,16 @@ body {
     min-height: var(--control-md);
     padding: 0;
     border-radius: var(--control-radius);
-    transition:
-        background-color var(--press-duration) var(--press-ease),
-        border-color var(--press-duration) var(--press-ease),
-        color var(--press-duration) var(--press-ease);
+    transition: background-color var(--press-duration) var(--press-ease), border-color var(--press-duration) var(--press-ease), color var(--press-duration) var(--press-ease);
 }
 
-:root .app-shell.app-shell :is(.theme-toggle, .focus-download-control, .report-download-control):hover:not(:disabled) {
+:root .app-shell.app-shell :is(.theme-toggle,
+.focus-download-control,
+.report-download-control):hover:not(:disabled) {
     background: var(--color-surface-hover);
     border-color: var(--color-control-stroke);
 }
+
 
 /* Icons: one size and stroke across the product. Lucide defaults to
    a 2px stroke, which at 16px reads heavier than the 14px text it
@@ -9491,11 +9570,17 @@ body {
     vertical-align: middle;
 }
 
+
 /* Press feedback: a real depression rather than a lift. Lifting on
    press fights the physical metaphor - you are pushing the control
    away from you, not pulling it. */
 
-:root .app-shell.app-shell :is(.ghost-button, .outline-command, .dark-button, .primary-command, .scope-run-button, .icon-command):active:not(:disabled) {
+:root .app-shell.app-shell :is(.ghost-button,
+.outline-command,
+.dark-button,
+.primary-command,
+.scope-run-button,
+.icon-command):active:not(:disabled) {
     transform: translateY(1px);
 }
 
@@ -9505,18 +9590,24 @@ body {
     box-shadow: none;
 }
 
+
 /* --- Inputs ----------------------------------------------------- */
 
-:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local']) {
+:root .app-shell.app-shell :is(select,
+input[type='text'],
+input[type='email'],
+input[type='search'],
+input[type='number'],
+input[type='date'],
+input[type='datetime-local']) {
     min-height: var(--control-md);
     padding: 0 var(--space-3);
     border-radius: var(--control-radius);
     font-size: var(--font-size-sm);
     line-height: 1.2;
-    transition:
-        border-color var(--press-duration) var(--press-ease),
-        box-shadow var(--press-duration) var(--press-ease);
+    transition: border-color var(--press-duration) var(--press-ease), box-shadow var(--press-duration) var(--press-ease);
 }
+
 
 /* The native select arrow needs room; without it the caret sits on
    top of the longest option text. */
@@ -9525,25 +9616,32 @@ body {
     padding-inline-end: var(--space-8);
 }
 
+
 /* One focus treatment for every control: a ring outside the border
    rather than an outline that shifts layout, and the same accent in
    both themes. */
 
-:root .app-shell.app-shell :is(select, input, textarea):focus-visible {
+:root .app-shell.app-shell :is(select,
+input,
+textarea):focus-visible {
     border-color: var(--color-focus);
     box-shadow: 0 0 0 3px var(--color-accent-glow);
     outline: none;
 }
+
 
 /* Headings are given tabindex="-1" so navigation can move focus to
    them for screen-reader users. They are not keyboard-reachable
    controls, so they must not draw a focus ring - excluding negative
    tabindex keeps the ring on things you actually tab to. */
 
-:root .app-shell.app-shell :is(button, summary, [tabindex]:not([tabindex='-1'])):focus-visible {
+:root .app-shell.app-shell :is(button,
+summary,
+[tabindex]:not([tabindex='-1'])):focus-visible {
     outline: var(--focus-width) solid var(--color-focus);
     outline-offset: 2px;
 }
+
 
 /* Segmented controls - the range picker and the top workspace nav -
    read as one object with a selected cell, not as loose buttons. */
@@ -9600,7 +9698,9 @@ body {
    separate group headers from their children rather than to shout.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.left-nav-children button, .left-nav-group button, .left-nav-group-toggle) {
+:root .app-shell.app-shell :is(.left-nav-children button,
+.left-nav-group button,
+.left-nav-group-toggle) {
     display: flex;
     align-items: center;
     width: 100%;
@@ -9610,10 +9710,9 @@ body {
     font-size: var(--font-size-sm);
     font-weight: var(--weight-medium);
     text-align: start;
-    transition:
-        background-color var(--press-duration) var(--press-ease),
-        color var(--press-duration) var(--press-ease);
+    transition: background-color var(--press-duration) var(--press-ease), color var(--press-duration) var(--press-ease);
 }
+
 
 /* Group headers are the only overline in the rail: smaller, tracked
    out, and muted, so they read as labels rather than as options. */
@@ -9627,19 +9726,23 @@ body {
     letter-spacing: var(--tracking-overline);
 }
 
-:root .app-shell.app-shell :is(.left-nav-children button, .left-nav-group button):hover:not(.active) {
+:root .app-shell.app-shell :is(.left-nav-children button,
+.left-nav-group button):hover:not(.active) {
     background: var(--color-surface-hover);
     color: var(--color-bone);
 }
 
+
 /* One selected treatment, used everywhere a page is current. */
 
-:root .app-shell.app-shell :is(.left-nav-children button.active, .left-nav-group button.active) {
+:root .app-shell.app-shell :is(.left-nav-children button.active,
+.left-nav-group button.active) {
     background: var(--color-accent-subtle);
     color: var(--color-signal-orange);
     font-weight: var(--weight-semi);
     box-shadow: inset 2px 0 0 var(--color-signal-orange);
 }
+
 
 /* The top workspace nav is a segmented control, so it keeps its pill
    geometry but adopts the same selected colour language. */
@@ -9674,24 +9777,39 @@ body {
    the row and the control, not the container.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.panel, .kpi-card, .summary-tile, .executive-visual, .report-section-stack, .dashboard-frame, .commitment-actual-card) {
+:root .app-shell.app-shell :is(.panel,
+.kpi-card,
+.summary-tile,
+.executive-visual,
+.report-section-stack,
+.dashboard-frame,
+.commitment-actual-card) {
     border-radius: var(--radius-md);
 }
 
-:root .app-shell.app-shell :is(.kpi-card, .summary-tile, .executive-visual, .commitment-actual-card) {
+:root .app-shell.app-shell :is(.kpi-card,
+.summary-tile,
+.executive-visual,
+.commitment-actual-card) {
     box-shadow: none;
     transition: border-color var(--press-duration) var(--press-ease), background-color var(--press-duration) var(--press-ease);
 }
 
-:root .app-shell.app-shell :is(.kpi-card, .commitment-actual-card):hover {
+:root .app-shell.app-shell :is(.kpi-card,
+.commitment-actual-card):hover {
     transform: none;
     border-color: var(--color-control-stroke);
     box-shadow: none;
 }
 
+
 /* Overlays are the one place that genuinely needs to float. */
 
-:root .app-shell.app-shell :is(.remediation-dialog, .report-export-dialog, .custom-report-dialog, .focus-export-dialog, .storage-onboarding-dialog) {
+:root .app-shell.app-shell :is(.remediation-dialog,
+.report-export-dialog,
+.custom-report-dialog,
+.focus-export-dialog,
+.storage-onboarding-dialog) {
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
 }
@@ -9710,12 +9828,28 @@ body {
    without it, money in a table never quite lines up.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .schedule-table, .rate-table, .billing-table, .pricing-table, .anomaly-table, .executive-subscription-table, .executive-findings-table) {
+:root .app-shell.app-shell :is(.report-table,
+.resource-table,
+.data-table,
+.schedule-table,
+.rate-table,
+.billing-table,
+.pricing-table,
+.anomaly-table,
+.executive-subscription-table,
+.executive-findings-table) {
     width: 100%;
     border-collapse: collapse;
 }
 
-:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .schedule-table, .rate-table, .billing-table, .pricing-table, .anomaly-table) thead th {
+:root .app-shell.app-shell :is(.report-table,
+.resource-table,
+.data-table,
+.schedule-table,
+.rate-table,
+.billing-table,
+.pricing-table,
+.anomaly-table) thead th {
     padding: var(--space-2) var(--space-3);
     border-bottom: var(--border-width) solid var(--color-control-stroke);
     background: var(--color-surface);
@@ -9727,49 +9861,83 @@ body {
     white-space: nowrap;
 }
 
-:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .schedule-table, .rate-table, .billing-table, .pricing-table, .anomaly-table) :is(td, tbody th) {
+:root .app-shell.app-shell :is(.report-table,
+.resource-table,
+.data-table,
+.schedule-table,
+.rate-table,
+.billing-table,
+.pricing-table,
+.anomaly-table) :is(td,
+tbody th) {
     padding: var(--space-2) var(--space-3);
     border-bottom: var(--border-width) solid var(--color-ash-stroke);
     font-size: var(--font-size-sm);
     vertical-align: middle;
 }
 
+
 /* Money and counts are read by comparison down a column, so they get
    tabular figures and a right edge to compare against. */
 
-:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .schedule-table, .rate-table, .billing-table, .pricing-table, .anomaly-table) :is(td.num, th.num) {
+:root .app-shell.app-shell :is(.report-table,
+.resource-table,
+.data-table,
+.schedule-table,
+.rate-table,
+.billing-table,
+.pricing-table,
+.anomaly-table) :is(td.num,
+th.num) {
     text-align: end;
     font-variant-numeric: var(--nums);
 }
 
+
 /* The row is the unit of interest in a table, so it is the row that
    responds - not the cell, and not the whole card. */
 
-:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .billing-table, .anomaly-table) tbody tr {
+:root .app-shell.app-shell :is(.report-table,
+.resource-table,
+.data-table,
+.billing-table,
+.anomaly-table) tbody tr {
     transition: background-color var(--press-duration) var(--press-ease);
 }
 
-:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table, .billing-table, .anomaly-table) tbody tr:hover {
+:root .app-shell.app-shell :is(.report-table,
+.resource-table,
+.data-table,
+.billing-table,
+.anomaly-table) tbody tr:hover {
     background: var(--color-surface-hover);
 }
 
-:root .app-shell.app-shell :is(.report-table, .resource-table, .data-table) tbody tr:last-child :is(td, th) {
+:root .app-shell.app-shell :is(.report-table,
+.resource-table,
+.data-table) tbody tr:last-child :is(td,
+th) {
     border-bottom: 0;
 }
+
 
 /* Totals close a table, so they are separated by a heavier rule and
    set in the ink used for figures rather than for body copy. */
 
-:root .app-shell.app-shell .executive-total-row :is(td, th) {
+:root .app-shell.app-shell .executive-total-row :is(td,
+th) {
     border-top: var(--border-width) solid var(--color-control-stroke);
     color: var(--color-bone);
     font-weight: var(--weight-semi);
 }
 
+
 /* In a scrolling table the header has to stay with the data it
    labels, otherwise a long list loses its column meanings. */
 
-:root .app-shell.app-shell :is(.billing-table-scroll, .executive-table-scroll, .cost-detail-scroll) thead th {
+:root .app-shell.app-shell :is(.billing-table-scroll,
+.executive-table-scroll,
+.cost-detail-scroll) thead th {
     position: sticky;
     top: 0;
     z-index: 1;
@@ -9788,21 +9956,25 @@ body {
    tabular), note (caption, muted).
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.kpi-card, .summary-tile) {
+:root .app-shell.app-shell :is(.kpi-card,
+.summary-tile) {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
     justify-content: flex-start;
 }
 
-:root .app-shell.app-shell :is(.kpi-label, .summary-tile-label) {
+:root .app-shell.app-shell :is(.kpi-label,
+.summary-tile-label) {
     color: var(--color-graphite-mid);
     font-size: var(--font-size-xs);
     font-weight: var(--weight-medium);
     line-height: 1.3;
 }
 
-:root .app-shell.app-shell :is(.kpi-value, .summary-tile-value, .billing-metrics output) {
+:root .app-shell.app-shell :is(.kpi-value,
+.summary-tile-value,
+.billing-metrics output) {
     font-variant-numeric: var(--nums);
     font-weight: var(--weight-semi);
     letter-spacing: var(--tracking-heading-lg);
@@ -9814,6 +9986,7 @@ body {
     font-size: var(--font-size-xs);
     line-height: 1.4;
 }
+
 
 /* The category chips are metrics too, not buttons, so they follow
    the same ranking and stop competing with the command ladder. */
@@ -9853,7 +10026,8 @@ body {
    required to stay completely still.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.empty-state, .visual-empty) {
+:root .app-shell.app-shell :is(.empty-state,
+.visual-empty) {
     margin: 0;
     padding: var(--space-6) var(--space-4);
     color: var(--color-graphite-mid);
@@ -9862,7 +10036,8 @@ body {
     text-align: center;
 }
 
-:root .app-shell.app-shell :is([role='status'], [role='alert']) {
+:root .app-shell.app-shell :is([role='status'],
+[role='alert']) {
     font-size: var(--font-size-sm);
     line-height: 1.5;
 }
@@ -9872,17 +10047,17 @@ body {
 }
 
 @keyframes ui-skeleton-sweep {
-    from { background-position: 200% 0; }
-    to { background-position: -200% 0; }
+    from {
+        background-position: 200% 0;
+    }
+    to {
+        background-position: -200% 0;
+    }
 }
 
 :root .app-shell.app-shell .ui-skeleton {
     border-radius: var(--radius-sm);
-    background-image: linear-gradient(
-        90deg,
-        var(--color-skeleton) 0%,
-        var(--color-surface-hover) 50%,
-        var(--color-skeleton) 100%);
+    background-image: linear-gradient( 90deg, var(--color-skeleton) 0%, var(--color-surface-hover) 50%, var(--color-skeleton) 100%);
     background-size: 200% 100%;
     animation: ui-skeleton-sweep 1.6s linear infinite;
 }
@@ -9890,6 +10065,7 @@ body {
 :root .app-shell.app-shell .workspace-skeleton-grid>i {
     border-radius: var(--radius-md);
 }
+
 
 /* Progress and busy indicators share the control ladder's motion so
    the whole interface appears to run at one speed. */
@@ -9911,11 +10087,14 @@ body {
    front of the grid rather than among it.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.cost-chart-grid, .daily-line-chart-grid) {
+:root .app-shell.app-shell :is(.cost-chart-grid,
+.daily-line-chart-grid) {
     stroke: var(--color-ash-stroke);
 }
 
-:root .app-shell.app-shell :is(.cost-chart-legend, .daily-trend-legend, .spend-legend) {
+:root .app-shell.app-shell :is(.cost-chart-legend,
+.daily-trend-legend,
+.spend-legend) {
     color: var(--color-graphite-mid);
     font-size: var(--font-size-xs);
 }
@@ -9923,6 +10102,7 @@ body {
 :root .app-shell.app-shell .cost-chart-legend i {
     border-radius: 2px;
 }
+
 
 /* Data points are targets, so they answer the cursor. */
 
@@ -9933,6 +10113,7 @@ body {
 :root .app-shell.app-shell .cost-comparison-chart circle[role='button']:hover {
     r: 6;
 }
+
 
 /* Chart panels sit inside a section that already frames them, so
    their headers take the caption treatment used elsewhere rather
@@ -9975,7 +10156,8 @@ body {
    waiting screen should not shimmer. Re-asserted after the skeleton
    sweep above, which is broader than it. */
 
-:root .app-shell.app-shell :is(.report-awaiting, .report-awaiting *) {
+:root .app-shell.app-shell :is(.report-awaiting,
+.report-awaiting *) {
     transition: none;
     animation: none;
 }
@@ -10001,6 +10183,7 @@ body {
    scale, and interaction that shows where it is offered.
    ---------------------------------------------------------------- */
 
+
 /* One surface. The rail is a column inside the card, divided by a
    hairline, rather than a separate floating thing. */
 
@@ -10021,6 +10204,7 @@ body {
     background: transparent;
 }
 
+
 /* The badge now speaks the product's accent rather than a one-off
    green, and takes the radius used by every other small tile. */
 
@@ -10033,9 +10217,11 @@ body {
     color: var(--color-signal-orange);
 }
 
+
 /* Context labels and figures on the shared scale. */
 
-:root .app-shell.app-shell :is(.chat-context>span, .chat-context nav>span) {
+:root .app-shell.app-shell :is(.chat-context>span,
+.chat-context nav>span) {
     color: var(--color-graphite-mid);
     font-size: var(--font-size-xs);
     font-weight: var(--weight-semi);
@@ -10065,6 +10251,7 @@ body {
     font-variant-numeric: var(--nums);
 }
 
+
 /* The suggested questions are the main thing to do on an empty
    thread, so they are presented as cards you can obviously press,
    not as rows in a list. */
@@ -10087,10 +10274,7 @@ body {
     border-radius: var(--radius-sm);
     background: var(--color-surface);
     color: var(--color-bone);
-    transition:
-        background-color var(--press-duration) var(--press-ease),
-        border-color var(--press-duration) var(--press-ease),
-        transform var(--press-duration) var(--press-ease);
+    transition: background-color var(--press-duration) var(--press-ease), border-color var(--press-duration) var(--press-ease), transform var(--press-duration) var(--press-ease);
 }
 
 :root .app-shell.app-shell .chat-context nav button:last-child {
@@ -10123,6 +10307,7 @@ body {
     line-height: 1.45;
 }
 
+
 /* Thread: fills the card so the composer anchors to the bottom
    instead of floating wherever the content happens to end. */
 
@@ -10143,6 +10328,7 @@ body {
     padding: var(--space-5);
     overflow-y: auto;
 }
+
 
 /* An empty thread centres its invitation rather than leaving it in
    the corner of a large blank panel. */
@@ -10185,6 +10371,7 @@ body {
     font-size: var(--font-size-xs);
 }
 
+
 /* Composer: anchored, with the focus ring on the whole control so it
    reads as one field rather than a textarea with a button beside it. */
 
@@ -10221,9 +10408,7 @@ body {
     border-radius: var(--radius-sm);
     background: var(--color-signal-orange);
     color: var(--color-on-action);
-    transition:
-        background-color var(--press-duration) var(--press-ease),
-        transform var(--press-duration) var(--press-ease);
+    transition: background-color var(--press-duration) var(--press-ease), transform var(--press-duration) var(--press-ease);
 }
 
 :root .app-shell.app-shell .chat-composer button[type='submit']:hover:not(:disabled) {
@@ -10233,6 +10418,7 @@ body {
 :root .app-shell.app-shell .chat-composer button[type='submit']:active:not(:disabled) {
     transform: translateY(1px);
 }
+
 
 /* Messages: the avatar anchors the turn, the bubble carries it. */
 
@@ -10263,14 +10449,21 @@ body {
     line-height: 1.6;
 }
 
+
 /* The waiting indicator is the one place chat animates: three dots
    at a slow, even cadence. Long enough to read as thinking rather
    than as a glitch, and silenced under reduced motion by the global
    rule. */
 
 @keyframes chat-thinking-pulse {
-    0%, 80%, 100% { opacity: .25; }
-    40% { opacity: 1; }
+    0%,
+    80%,
+    100% {
+        opacity: .25;
+    }
+    40% {
+        opacity: 1;
+    }
 }
 
 :root .app-shell.app-shell .chat-thinking p i {
@@ -10283,8 +10476,14 @@ body {
     animation: chat-thinking-pulse 1.4s ease-in-out infinite;
 }
 
-:root .app-shell.app-shell .chat-thinking p i:nth-child(2) { animation-delay: .2s; }
-:root .app-shell.app-shell .chat-thinking p i:nth-child(3) { animation-delay: .4s; }
+:root .app-shell.app-shell .chat-thinking p i:nth-child(2) {
+    animation-delay: .2s;
+}
+
+:root .app-shell.app-shell .chat-thinking p i:nth-child(3) {
+    animation-delay: .4s;
+}
+
 
 /* Toolbar: the router chip is status, not a control, so it reads as
    a quiet badge rather than as something to press. */
@@ -10302,10 +10501,10 @@ body {
 }
 
 @media (max-width: 900px) {
-    :root .app-shell.app-shell .chat-layout {
+     :root .app-shell.app-shell .chat-layout {
         grid-template-columns: minmax(0, 1fr);
     }
-    :root .app-shell.app-shell .chat-context {
+     :root .app-shell.app-shell .chat-context {
         border-right: 0;
         border-bottom: var(--border-width) solid var(--color-ash-stroke);
     }
@@ -10346,6 +10545,7 @@ body {
     font-size: calc(100% * var(--ui-zoom));
 }
 
+
 /* Spacing follows the zoom through the multiplier it already uses,
    preserving the comfortable/compact density toggle on top of it. */
 
@@ -10356,6 +10556,7 @@ body {
 :root[data-density='compact'] {
     --ui-scale: calc(.875 * var(--ui-zoom));
 }
+
 
 /* Control geometry and the fixed layout widths. */
 
@@ -10370,11 +10571,12 @@ body {
     --nav-mobile-height: calc(280px * var(--ui-zoom));
 }
 
+
 /* The touch floor is restored wherever a finger is the pointer, so
    zooming the interface out never shrinks a tap target. */
 
 @media (pointer: coarse) {
-    :root {
+     :root {
         --control-sm: var(--touch-height);
         --control-md: var(--touch-height);
         --control-lg: var(--touch-height);
@@ -10387,7 +10589,7 @@ body {
    ----------------------------------------------------------------
    The lockup was previously a synthetic mark: four clipped dollar
    glyphs in the Microsoft quadrant colours, standing in for a logo
-   the product did not have. It now uses the real CloudLens mark.
+    the product did not have. It now uses the configured product mark.
 
    The supplied artwork is a wordmark on a dark ground, which cannot
    be dropped into the header as-is - "Cloud" is set in white and
@@ -10403,6 +10605,7 @@ body {
    only place the product name is defined.
    ---------------------------------------------------------------- */
 
+
 /* Sized to the header band rather than to the type beside it. At 22px the
    mark read as an afterthought next to the wordmark; at 32 it holds the
    corner and its cloud/dollar detail is actually legible. The ui-zoom
@@ -10416,16 +10619,19 @@ body {
     object-fit: contain;
 }
 
+
 /* The gradient must name its colours outright. Using currentColor here is a
    trap: background-clip:text requires color:transparent, and currentColor then
    resolves to that same transparent value - which silently erased the first
    half of the name. */
+
 
 /* Sized against the mark, not the body text. The wordmark had stayed at body
    size while the mark grew to 32px, so the lockup read as an icon with a
    caption rather than as one piece of branding. At the display step the
    cap height sits at roughly two-thirds of the mark, which is the usual
    balance for a horizontal lockup. */
+
 
 /* The mark runs cyan through blue into violet, so the wordmark ends on the
    same violet rather than on the flat accent - the two halves of the lockup
@@ -10439,16 +10645,12 @@ body {
     letter-spacing: var(--tracking-heading-lg);
     line-height: 1.1;
     text-transform: none;
-    background: linear-gradient(
-        100deg,
-        var(--color-bone) 0%,
-        var(--color-bone) 50%,
-        var(--color-signal-orange) 72%,
-        var(--color-category-ai) 100%);
+    background: linear-gradient( 100deg, var(--color-bone) 0%, var(--color-bone) 50%, var(--color-signal-orange) 72%, var(--color-category-ai) 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
 }
+
 
 /* The rule between mark and name tracks the taller of the two so it reads
    as a divider rather than a tick. */
@@ -10456,6 +10658,7 @@ body {
 :root .app-shell.app-shell .brand-divider {
     height: calc(28px * var(--ui-zoom));
 }
+
 
 /* The sign-in showcase sits on a light panel in both themes, so it keeps the
    solid ink it already had rather than the theme-following gradient. */
@@ -10465,16 +10668,18 @@ body {
     color: inherit;
 }
 
+
 /* Windows High Contrast turns off background-clip painting, which
    would leave the name invisible; the fallback restores solid ink. */
 
 @media (forced-colors: active) {
-    :root .app-shell.app-shell .brand-product,
+     :root .app-shell.app-shell .brand-product,
     .signin-screen .brand-product {
         background: none;
         color: CanvasText;
     }
 }
+
 
 /* Programmatic focus targets never draw a ring.
 
@@ -10521,6 +10726,7 @@ body {
     background: var(--color-obsidian-canvas);
 }
 
+
 /* One very soft orb, anchored off-canvas so no edge is visible. It gives the
    page depth; a circle you can actually see the boundary of would just look
    like a stray shape. */
@@ -10544,6 +10750,7 @@ body {
     position: relative;
     z-index: 1;
 }
+
 
 /* --- Left: the case for the product ---------------------------- */
 
@@ -10605,6 +10812,7 @@ body {
     gap: var(--space-4);
 }
 
+
 /* The icon sits in a tinted tile rather than loose against the
    page, which is what stops the list reading as a bulleted block. */
 
@@ -10638,6 +10846,7 @@ body {
     color: var(--color-graphite-mid);
     font-size: var(--font-size-sm);
 }
+
 
 /* --- Right: the card ------------------------------------------- */
 
@@ -10714,6 +10923,7 @@ body {
     font-size: var(--font-size-md);
 }
 
+
 /* A rule with the word set into it, rather than a word floating
    between two rules. */
 
@@ -10750,9 +10960,7 @@ body {
     font-size: var(--font-size-md);
     font-weight: var(--weight-medium);
     cursor: pointer;
-    transition:
-        background-color var(--press-duration) var(--press-ease),
-        border-color var(--press-duration) var(--press-ease);
+    transition: background-color var(--press-duration) var(--press-ease), border-color var(--press-duration) var(--press-ease);
 }
 
 :root .signin-production .signin-microsoft:hover {
@@ -10780,6 +10988,7 @@ body {
     text-transform: uppercase;
 }
 
+
 /* The toggle is set to static elsewhere for the stacked sign-in layout, which
    here made it a grid item - it took the first column and pushed the showcase
    and card one cell to the right. Lifted back out of flow. */
@@ -10792,33 +11001,33 @@ body {
 }
 
 @media (max-width: 1100px) {
-    :root .signin-screen.signin-production {
+     :root .signin-screen.signin-production {
         grid-template-columns: minmax(0, 1fr);
         gap: var(--space-8);
         padding: var(--space-6);
         align-content: start;
     }
-    :root .signin-production .signin-showcase,
-    :root .signin-production .signin-panel {
+     :root .signin-production .signin-showcase,
+     :root .signin-production .signin-panel {
         margin-inline: 0;
         max-width: none;
     }
-    :root .signin-production .signin-strapline {
+     :root .signin-production .signin-strapline {
         align-self: flex-start;
     }
 }
 
 @media (max-width: 640px) {
-    :root .signin-screen.signin-production {
+     :root .signin-screen.signin-production {
         padding: var(--space-5) var(--space-4);
     }
-    :root .signin-production .signin-card-v2 {
+     :root .signin-production .signin-card-v2 {
         padding: var(--space-5);
     }
     /* The feature list is supporting copy; on a phone the card is
        the only thing that matters, so the list steps aside. */
-    :root .signin-production .signin-feature-list,
-    :root .signin-production .signin-trust {
+     :root .signin-production .signin-feature-list,
+     :root .signin-production .signin-trust {
         display: none;
     }
 }
@@ -10839,12 +11048,14 @@ body {
    promoting it would flatten that distinction.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.cost-analysis-details, .cost-daily-values)>summary {
+:root .app-shell.app-shell :is(.cost-analysis-details,
+.cost-daily-values)>summary {
     font-size: var(--font-size-lg);
     font-weight: var(--weight-semi);
     letter-spacing: var(--tracking-heading);
     color: var(--color-bone);
 }
+
 
 /* The caption beside the title stays a caption. */
 
@@ -10853,6 +11064,7 @@ body {
     font-weight: 400;
     letter-spacing: normal;
 }
+
 
 /* The daily figures are a plain <details>, so they get the same
    pressable summary treatment as the other sections rather than a
@@ -10978,12 +11190,17 @@ body {
     padding: calc(20px * var(--ui-zoom)) calc(28px * var(--ui-zoom)) calc(28px * var(--ui-zoom));
 }
 
+
 /* Blocks inside a section have already been framed by the section, so
    they drop their own frame, ground and internal heading padding.
    This is where most of the old clutter came from - a card, inside a
    card, inside a panel. */
 
-:root .app-shell.app-shell .dashboard-section-body :is(.cost-window-overview, .anomaly-overview, .cost-budget-context, .cost-daily-values, .executive-report>*) {
+:root .app-shell.app-shell .dashboard-section-body :is(.cost-window-overview,
+.anomaly-overview,
+.cost-budget-context,
+.cost-daily-values,
+.executive-report>*) {
     margin: 0;
     padding: 0;
     border: 0;
@@ -10991,11 +11208,13 @@ body {
     box-shadow: none;
 }
 
-:root .app-shell.app-shell .dashboard-section-body>:is(.cost-window-overview, .anomaly-overview) {
+:root .app-shell.app-shell .dashboard-section-body>:is(.cost-window-overview,
+.anomaly-overview) {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
 }
+
 
 /* The export control sits at the trailing edge of its own row now that
    the section owns the title. */
@@ -11005,11 +11224,13 @@ body {
     justify-content: flex-end;
 }
 
+
 /* Budget context opened with its own heading, which repeated the section
    title immediately above it. The heading goes; its refresh control stays,
    moved to the trailing edge as a bare action row. */
 
-:root .app-shell.app-shell .dashboard-section-body .cost-budget-context>.cost-section-heading :is(h2, h3) {
+:root .app-shell.app-shell .dashboard-section-body .cost-budget-context>.cost-section-heading :is(h2,
+h3) {
     display: none;
 }
 
@@ -11018,6 +11239,7 @@ body {
     margin: 0;
     min-height: 0;
 }
+
 
 /* Inside Insights, the disclosure is a peer of the anomaly block, so
    it is separated by space rather than by a rule. */
@@ -11030,6 +11252,7 @@ body {
     padding-top: var(--space-5);
     background: transparent;
 }
+
 
 /* Report details is a footnote to the overview, not a peer of it. */
 
@@ -11044,18 +11267,17 @@ body {
 }
 
 @media (max-width: 640px) {
-    :root .app-shell.app-shell .executive-report {
+     :root .app-shell.app-shell .executive-report {
         gap: var(--space-5);
     }
-    :root .app-shell.app-shell .dashboard-section-header {
+     :root .app-shell.app-shell .dashboard-section-header {
         padding: var(--space-4) var(--space-4) 0;
     }
-    :root .app-shell.app-shell .dashboard-section-body {
+     :root .app-shell.app-shell .dashboard-section-body {
         gap: var(--space-4);
         padding: var(--space-4);
     }
 }
-
 
 
 /* ==========================================================================
@@ -11111,6 +11333,8 @@ body {
 :root .center-screen:not(.signin-screen) .ghost-button:active {
     transform: translateY(1px);
 }
+
+
 /* ==========================================================================
    14. Sign-in — matched to the supplied design
    Three zones instead of two: the case for the product, a vector stage, and
@@ -11125,6 +11349,7 @@ body {
    screens rather than drifting apart to the far edges.
    ========================================================================== */
 
+
 /* The type scale is rem-based, so it resolves against the ROOT font size.
    Layer 12 set --ui-zoom on the sign-in element itself and claimed the page
    was exempt from the 80% interface zoom, but a custom property on a
@@ -11134,6 +11359,7 @@ body {
    Setting the knob at the root while the sign-in screen is mounted is what
    actually exempts it. The sign-in screen replaces the whole app, so nothing
    else is affected, and browsers without :has() simply keep the old 80%. */
+
 :root:has(.signin-production) {
     --ui-zoom: 1;
 }
@@ -11149,6 +11375,7 @@ body {
     padding-block: clamp(var(--space-5), 3.5vw, var(--space-10));
     padding-inline: max(clamp(var(--space-5), 4vw, var(--space-12)), calc((100% - 96rem) / 2));
 }
+
 
 /* --- Centre: the vector stage ---------------------------------- */
 
@@ -11169,9 +11396,11 @@ body {
     height: auto;
 }
 
+
 /* The design's ground carries one large, soft blue-violet bloom in the
    bottom-right corner. The generic accent orb is too faint to read on the
    pale light ground, so this restates it at the drawn strength. */
+
 :root .signin-screen.signin-production::after {
     content: '';
     position: absolute;
@@ -11179,13 +11408,12 @@ body {
     bottom: -52vh;
     width: 76vw;
     height: 76vw;
-    background:
-        radial-gradient(closest-side circle at 50% 50%, rgb(120 132 226 / .30), transparent 100%),
-        radial-gradient(closest-side circle at 38% 38%, rgb(86 150 240 / .26), transparent 100%);
+    background: radial-gradient(closest-side circle at 50% 50%, rgb(120 132 226 / .30), transparent 100%), radial-gradient(closest-side circle at 38% 38%, rgb(86 150 240 / .26), transparent 100%);
     opacity: .7;
     pointer-events: none;
     z-index: 0;
 }
+
 
 /* --- Card: wider, to the design's proportions ------------------ */
 
@@ -11195,12 +11423,14 @@ body {
     padding: var(--space-8) var(--space-6);
 }
 
+
 /* Entra is now the only way in, so this button carries the whole screen.
 
    It keeps a plain light/dark surface rather than becoming a blue gradient:
    "Sign in with Microsoft" is a branded credential control, and Microsoft's
    guidance is a white or dark button bearing the logo. The weight it needs
    comes from size, elevation and motion instead of from colour. */
+
 :root .signin-production .signin-microsoft {
     min-height: 3.25rem;
     margin-top: var(--space-2);
@@ -11222,9 +11452,11 @@ body {
     box-shadow: var(--shadow-sm);
 }
 
+
 /* The arrow sits beside the label as one centred group, and eases outward on
    hover to signal that this leaves the page. Pushing it to the trailing edge
    split the control into two unrelated halves. */
+
 :root .signin-production .signin-microsoft-arrow {
     color: var(--color-graphite-mid);
     transition: transform var(--motion-duration);
@@ -11234,9 +11466,11 @@ body {
     transform: translateX(3px);
 }
 
+
 /* Reassurance directly under the only control, where it answers the question
    the button raises: what happens to my credentials. Left-aligned with the
    rest of the card copy, as drawn. */
+
 :root .signin-production .signin-secure {
     display: flex;
     align-items: center;
@@ -11251,6 +11485,7 @@ body {
     flex: none;
     color: var(--color-focus);
 }
+
 
 /* --- Feature tiles: the design's are notably larger ------------ */
 
@@ -11268,7 +11503,10 @@ body {
 
 
 /* --- Stage: the supplied artwork ------------------------------- */
+
+
 /* --- Stage: the supplied artwork ------------------------------- */
+
 
 /* Sized by aspect-ratio rather than by an intrinsic image: as a background
    there is no natural height to lay out from. Both variants are exported at
@@ -11276,6 +11514,7 @@ body {
 
    The art is an opaque rectangle, so its own ground would otherwise read as a
    pasted block. A mask feathers all four edges into the page instead. */
+
 :root .signin-production .signin-stage-art {
     width: 100%;
     max-width: 30rem;
@@ -11288,9 +11527,11 @@ body {
     mask-image: radial-gradient(ellipse 80% 78% at 50% 50%, #000 34%, transparent 88%);
 }
 
+
 /* A true dark render, not the light art dimmed. Dimming the light version
    left it grey and washed, because its glass panels are lit from a white
    ground that does not exist on this theme. */
+
 :root[data-theme='dark'] .signin-production .signin-stage-art {
     background-image: url('/signin-stage-dark.jpg');
 }
@@ -11306,9 +11547,11 @@ body {
     gap: var(--space-4);
 }
 
+
 /* Sizes are in px, not rem: rem here still resolves against the root font
    size, which the 80% interface zoom has already reduced, so rem values
    came out a fifth smaller than the design calls for. */
+
 :root .signin-production .signin-showcase .brand-mark {
     width: 54px;
     height: 47px;
@@ -11319,11 +11562,13 @@ body {
     letter-spacing: -.01em;
 }
 
+
 /* The design sets the headline on exactly two lines, breaking before
    "Azure spend." Making the accent span a block guarantees that break at
    every width instead of leaving it to the column measure, which stranded
    "your" on its own line. The full stop moved inside the span so it cannot
    wrap onto a third line by itself. */
+
 :root .signin-production .signin-headline {
     max-width: none;
 }
@@ -11332,12 +11577,8 @@ body {
     display: block;
 }
 
+
 /* --- Card: field affordance and a gradient primary ------------- */
-
-
-
-
-
 
 
 /* --- Trust line: the design pairs it with a progress cue -------- */
@@ -11369,6 +11610,7 @@ body {
     opacity: .38;
 }
 
+
 /* --- Strapline: two lines, as drawn ---------------------------- */
 
 :root .signin-production .signin-strapline {
@@ -11378,16 +11620,18 @@ body {
     gap: 2px;
 }
 
+
 /* --- Responsive: the stage is decorative, so it goes first ----- */
 
 @media (max-width: 1280px) {
-    :root .signin-screen.signin-production {
+     :root .signin-screen.signin-production {
         grid-template-columns: minmax(0, 1.05fr) minmax(21rem, .95fr);
     }
-    :root .signin-production .signin-stage {
+     :root .signin-production .signin-stage {
         display: none;
     }
 }
+
 
 /* ==========================================================================
    15. Sign-in ground
@@ -11405,34 +11649,29 @@ body {
 
 :root .signin-screen.signin-production {
     background-color: #F4F8FD;
-    background-image:
-        radial-gradient(ellipse 60% 48% at 82% 92%, rgb(195 218 252 / .85), transparent 100%),
-        radial-gradient(ellipse 52% 40% at 6% 104%, rgb(222 234 250 / .9), transparent 100%),
-        radial-gradient(ellipse 90% 60% at 50% -12%, rgb(255 255 255 / .95), transparent 100%);
+    background-image: radial-gradient(ellipse 60% 48% at 82% 92%, rgb(195 218 252 / .85), transparent 100%), radial-gradient(ellipse 52% 40% at 6% 104%, rgb(222 234 250 / .9), transparent 100%), radial-gradient(ellipse 90% 60% at 50% -12%, rgb(255 255 255 / .95), transparent 100%);
 }
 
 :root[data-theme='dark'] .signin-screen.signin-production {
     background-color: #060E1B;
-    background-image:
-        radial-gradient(ellipse 34% 40% at -2% -6%, rgb(97 134 186 / .55), transparent 100%),
-        radial-gradient(ellipse 70% 42% at 46% -14%, rgb(4 36 85 / .85), transparent 100%),
-        radial-gradient(ellipse 46% 52% at 104% 96%, rgb(3 20 47 / .95), transparent 100%);
+    background-image: radial-gradient(ellipse 34% 40% at -2% -6%, rgb(97 134 186 / .55), transparent 100%), radial-gradient(ellipse 70% 42% at 46% -14%, rgb(4 36 85 / .85), transparent 100%), radial-gradient(ellipse 46% 52% at 104% 96%, rgb(3 20 47 / .95), transparent 100%);
 }
+
 
 /* Layer 12 painted a generic accent orb and layer 14 a blue-violet bloom.
    Both now fight the sampled ground above, so the decorative pseudo-elements
    are retired rather than left to muddy it. */
+
 :root .signin-screen.signin-production::before,
 :root .signin-screen.signin-production::after {
     content: none;
 }
 
+
 /* The card is the only lit surface on the dark ground, so it carries a faint
    blue rim and a cool cast, as drawn. */
+
 :root[data-theme='dark'] .signin-production .signin-card-v2 {
     border-color: rgb(79 168 245 / .38);
-    box-shadow:
-        0 0 0 1px rgb(79 168 245 / .10),
-        0 18px 48px rgb(0 0 0 / .55),
-        0 0 36px rgb(38 110 200 / .16);
+    box-shadow: 0 0 0 1px rgb(79 168 245 / .10), 0 18px 48px rgb(0 0 0 / .55), 0 0 36px rgb(38 110 200 / .16);
 }
