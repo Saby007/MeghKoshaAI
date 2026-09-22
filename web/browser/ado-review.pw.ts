@@ -615,6 +615,9 @@ test('subscription and schedule loading states stay distinct from empty and popu
     await route.fulfill({ json: [] });
   });
   await page.goto('/');
+  const favicon = page.locator('link[rel="icon"]');
+  await expect(favicon).toHaveAttribute('href', /\.(?:png|svg)$/);
+  expect(await favicon.evaluate(async (link: HTMLLinkElement) => (await fetch(link.href)).ok)).toBe(true);
   await expect(page.getByLabel('Loading subscriptions')).toBeVisible();
   await expect(page.locator('.scope-ribbon')).toHaveAttribute('aria-busy', 'true');
   releaseSubscriptions();
@@ -631,14 +634,23 @@ test('subscription and schedule loading states stay distinct from empty and popu
     await route.fulfill({ json: [{
       subscriptionId: '616dc9b8-b4aa-415f-8dcb-71bc462916c5', displayName: 'Synthetic subscription', state: 'active', recurrence: 'Monthly', scheduleStartAt: '2026-10-05T03:00:00Z', nextRunAt: '2026-10-05T03:00:00Z', availability: 'available',
       readAccess: true, costAccess: true, windowMonths: 6,
-      latestRun: { runId: 'synthetic-run', subscriptionId: '616dc9b8-b4aa-415f-8dcb-71bc462916c5', period: '2026-08', status: 'succeeded', startedAt: '2026-09-10T06:00:00Z', completedAt: '2026-09-10T06:02:00Z', durationSeconds: 120, error: null },
+      latestRun: { runId: 'synthetic-run', subscriptionId: '616dc9b8-b4aa-415f-8dcb-71bc462916c5', period: '2026-03 to 2026-08', status: 'running', startedAt: '2026-09-10T06:00:00Z', completedAt: null, durationSeconds: null, error: null, completedMonths: 2, windowMonths: 6, months: [
+        { period: '2026-03', status: 'succeeded' }, { period: '2026-04', status: 'succeeded' },
+        { period: '2026-05', status: 'queued' }, { period: '2026-06', status: 'pending' },
+        { period: '2026-07', status: 'pending' }, { period: '2026-08', status: 'pending' },
+      ] },
     }] });
   });
   await page.getByRole('button', { name: 'Schedules', exact: true }).click();
   await expect(page.getByText('Loading FOCUS exports...', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Run all', exact: true })).toBeDisabled();
   releaseSchedules();
-  await expect(page.getByText('2026-08 exported', { exact: true })).toBeVisible();
+  await expect(page.getByText('2026-03 to 2026-08 in progress', { exact: true })).toBeVisible();
+  const monthProgress = page.getByRole('list', { name: '2026-03 to 2026-08 monthly export status' });
+  await expect(monthProgress).toBeVisible();
+  for (const label of ['Mar Done', 'Apr Done', 'May Queued', 'Jun Pending', 'Jul Pending', 'Aug Pending']) {
+    await expect(monthProgress.getByRole('listitem', { name: label })).toBeVisible();
+  }
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {

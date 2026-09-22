@@ -203,6 +203,24 @@ describe('Open Schedules', () => {
     expect(container.textContent).not.toContain('2026-08 exported');
   });
 
+  it('shows the status of each month in the six-month refresh', async () => {
+    vi.mocked(listCostSchedules).mockResolvedValue([{ ...schedule, latestRun: {
+      runId: 'run', subscriptionId: schedule.subscriptionId, period: '2026-03 to 2026-08', status: 'running',
+      startedAt: '2026-09-22T06:43:51Z', completedAt: null, durationSeconds: null, error: null,
+      completedMonths: 2, windowMonths: 6, months: [
+        { period: '2026-03', status: 'succeeded' }, { period: '2026-04', status: 'succeeded' },
+        { period: '2026-05', status: 'queued' }, { period: '2026-06', status: 'pending' },
+        { period: '2026-07', status: 'pending' }, { period: '2026-08', status: 'pending' },
+      ],
+    } }]);
+    await act(async () => root.render(<ScheduleManager />));
+    const progress = container.querySelector('[aria-label="2026-03 to 2026-08 monthly export status"]');
+    expect(progress).not.toBeNull();
+    expect([...progress!.querySelectorAll('li')].map(item => item.getAttribute('aria-label'))).toEqual([
+      'Mar Done', 'Apr Done', 'May Queued', 'Jun Pending', 'Jul Pending', 'Aug Pending',
+    ]);
+  });
+
   it('distinguishes pending, failed and empty execution history', async () => {
     const history = deferred<ScheduleRun[]>();
     vi.mocked(listCostSchedules).mockResolvedValue([schedule]);

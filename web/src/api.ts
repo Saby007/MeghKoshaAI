@@ -19,6 +19,8 @@ import type {
 export type PrioritizedFinding = { category: string; priority: string; narrative: string };
 export type CostAgentOutput = { executive_summary: string; prioritized_findings: PrioritizedFinding[] } | null;
 export type ScheduleState = 'active' | 'paused' | 'not_scheduled' | 'unknown';
+export type ScheduleMonthStatus = 'pending' | 'submitting' | 'queued' | 'running' | 'succeeded' | 'failed';
+export type ScheduleMonth = { period: string; status: ScheduleMonthStatus };
 export type ScheduleRun = {
   runId: string;
   subscriptionId: string;
@@ -30,6 +32,7 @@ export type ScheduleRun = {
   error: string | null;
   completedMonths?: number;
   windowMonths?: 6;
+  months?: ScheduleMonth[];
 };
 export type CostSchedule = {
   subscriptionId: string;
@@ -336,6 +339,10 @@ export async function listCostSchedules(signal?: AbortSignal): Promise<CostSched
   const schedules = await apiRequest<CostSchedule[]>('/api/schedules', { signal, cache: 'no-store' });
   if (!Array.isArray(schedules) || schedules.some((item) => !item || typeof item.subscriptionId !== 'string'
     || typeof item.displayName !== 'string' || typeof item.readAccess !== 'boolean' || typeof item.costAccess !== 'boolean'
+    || (item.latestRun?.months !== undefined && (item.latestRun.months.length !== 6
+      || new Set(item.latestRun.months.map((month) => month.period)).size !== 6
+      || item.latestRun.months.some((month) => !/^\d{4}-(0[1-9]|1[0-2])$/.test(month.period)
+        || !['pending', 'submitting', 'queued', 'running', 'succeeded', 'failed'].includes(month.status))))
     || item.windowMonths !== 6 || ((item.readAccess !== true || item.costAccess !== true)
       && (item.state !== 'unknown' || item.availability !== 'access_unavailable'
         || typeof item.statusMessage !== 'string' || !item.statusMessage.trim()

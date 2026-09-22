@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+  <title id="title">MeghKoshaAI</title>
+  <desc id="description">A cloud-shaped vault with an M monogram.</desc>
+  <defs>
+    <linearGradient id="cloud" x1="36" y1="48" x2="219" y2="207" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#39D9F9"/>
+      <stop offset="0.52" stop-color="#147AD6"/>
+      <stop offset="1" stop-color="#7457E8"/>
+    </linearGradient>
+    <linearGradient id="vault" x1="83" y1="101" x2="174" y2="184" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4C7"/>
+      <stop offset="1" stop-color="#F5B82E"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#cloud)" d="M57 202C25 202 0 177 0 146c0-27 19-50 46-55 9-42 45-73 89-73 42 0 78 28 89 67 19 3 32 20 32 40 0 23-19 42-43 42h-13c-6 21-25 35-48 35H57Z"/>
+  <path fill="#07131F" fill-opacity="0.9" d="m58 174 24-82 46 49 46-49 24 82h-34l-11-42-25 29-25-29-11 42H58Z"/>
+  <path fill="url(#vault)" d="M128 151a17 17 0 0 1 9 31v18h-18v-18a17 17 0 0 1 9-31Z"/>
+  <path fill="#FFF" fill-opacity="0.72" d="M47 95c14-34 45-58 81-61 5 0 7 7 2 9-29 9-53 29-65 56-3 7-21 3-18-4Z"/>
+</svg>

@@ -111,6 +111,9 @@ it('preserves an explicitly unavailable access row without granting schedule acc
 it.each([
   { state: 'active' }, { availability: 'available' }, { statusMessage: '' },
   { latestRun: { status: 'succeeded' } }, { readAccess: undefined },
+  { latestRun: { months: [{ period: '2026-03', status: 'succeeded' }] } },
+  { latestRun: { months: Array.from({ length: 6 }, () => ({ period: '2026-03', status: 'succeeded' })) } },
+  { latestRun: { months: Array.from({ length: 6 }, (_, index) => ({ period: `2026-0${index + 3}`, status: 'invented' })) } },
 ])('rejects unsafe unverified row data: %o', async (overrides) => {
   const row = { subscriptionId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', displayName: 'Unverified',
     readAccess: false, costAccess: false, windowMonths: 6, state: 'unknown', availability: 'access_unavailable',

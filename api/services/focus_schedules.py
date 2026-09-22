@@ -377,6 +377,7 @@ def _cycle_view(subscription_id: str, cycle: RefreshCycle | None):
             "completedAt": _utc(cycle.completed_at) if cycle.completed_at else None,
             "durationSeconds": int((cycle.completed_at - cycle.started_at).total_seconds()) if cycle.completed_at else None,
             "completedMonths": sum(item.status == "succeeded" for item in cycle.months), "windowMonths": 6,
+            "months": [{"period": f"{item.start:%Y-%m}", "status": item.status} for item in cycle.months],
             "error": cycle.error}
 
 

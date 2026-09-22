@@ -25,6 +25,7 @@ import {
   setCostScheduleState,
   type CostSchedule,
   type FocusExportConfiguration,
+  type ScheduleMonthStatus,
   type ScheduleRun,
 } from '../api';
 import { redirectApiIdentity } from '../apiIdentity';
@@ -70,6 +71,32 @@ function runLabel(run: ScheduleRun | null): string {
   if (run.status === 'failed') return `${run.period} failed`;
   if (run.status === 'succeeded') return `${run.period} exported`;
   return 'Execution status unknown';
+}
+
+const monthStatusLabel: Record<ScheduleMonthStatus, string> = {
+  pending: 'Pending',
+  submitting: 'Sending',
+  queued: 'Queued',
+  running: 'Active',
+  succeeded: 'Done',
+  failed: 'Failed',
+};
+
+function MonthProgress({ run, mobile = false }: { run: ScheduleRun | null; mobile?: boolean }) {
+  if (!run?.months?.length) return null;
+  return (
+    <ol className={`month-progress ${mobile ? 'mobile-month-progress' : 'desktop-month-progress'}`} aria-label={`${run.period} monthly export status`}>
+      {run.months.map((month) => {
+        const label = new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' })
+          .format(new Date(`${month.period}-01T00:00:00Z`));
+        return (
+          <li className={month.status} key={month.period} aria-label={`${label} ${monthStatusLabel[month.status]}`}>
+            <span>{label}</span><strong>{monthStatusLabel[month.status]}</strong>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
 export function ScheduleManager() {
@@ -413,10 +440,10 @@ export function ScheduleManager() {
                 const isExpanded = expandedId === schedule.subscriptionId;
                 return [
                   <tr key={schedule.subscriptionId}>
-                    <td><strong>{schedule.displayName}</strong><code>{schedule.subscriptionId}</code></td>
+                    <td><strong>{schedule.displayName}</strong><code>{schedule.subscriptionId}</code><MonthProgress run={schedule.latestRun} mobile /></td>
                     <td><span className={`schedule-state ${schedule.state}`}><i />{schedule.state === 'unknown' ? 'Unknown' : schedule.state.replace('_', ' ')}</span></td>
                     <td>{schedule.state === 'unknown' ? 'Unavailable' : schedule.nextRunAt ? formatDate(schedule.nextRunAt) : schedule.state === 'paused' ? 'Paused' : schedule.state === 'active' ? 'Unavailable' : 'Not scheduled'}</td>
-                    <td>{schedule.availability && schedule.availability !== 'available' ? <><span>{schedule.availability === 'access_unavailable' ? 'Access unavailable' : schedule.availability === 'configuration_unavailable' ? 'Scheduler setup incomplete' : schedule.availability === 'history_unavailable' ? 'Execution history unavailable' : 'Export status unavailable'}</span><small>{schedule.statusMessage}</small></> : <><span className={`run-state ${schedule.latestRun?.status ?? 'pending'}`}>{schedule.state === 'not_scheduled' ? 'Export configured' : runLabel(schedule.latestRun)}</span><small>{schedule.latestRun ? `${formatDate(schedule.latestRun.completedAt || schedule.latestRun.startedAt)} · ${formatDuration(schedule.latestRun.durationSeconds)}` : schedule.state === 'not_scheduled' ? '' : 'No native execution record'}</small></>}</td>
+                    <td>{schedule.availability && schedule.availability !== 'available' ? <><span>{schedule.availability === 'access_unavailable' ? 'Access unavailable' : schedule.availability === 'configuration_unavailable' ? 'Scheduler setup incomplete' : schedule.availability === 'history_unavailable' ? 'Execution history unavailable' : 'Export status unavailable'}</span><small>{schedule.statusMessage}</small></> : <><span className={`run-state ${schedule.latestRun?.status ?? 'pending'}`}>{schedule.state === 'not_scheduled' ? 'Export configured' : runLabel(schedule.latestRun)}</span><small>{schedule.latestRun ? `${formatDate(schedule.latestRun.completedAt || schedule.latestRun.startedAt)} · ${formatDuration(schedule.latestRun.durationSeconds)}` : schedule.state === 'not_scheduled' ? '' : 'No native execution record'}</small><MonthProgress run={schedule.latestRun} /></>}</td>
                     <td><div className="schedule-actions">
                       <button type="button" onClick={() => void openExportConfiguration(schedule)} disabled={loading || !!loadError || busyId !== null || exportRetryAfter > 0 || schedule.readAccess !== true || schedule.costAccess !== true} title="Configure FOCUS export" aria-label={`Configure export for ${schedule.displayName}`} aria-expanded={exportEditingId === schedule.subscriptionId}><Settings2 size={16} /></button>
                       <button type="button" onClick={() => void toggleHistory(schedule)} disabled={loading || !!loadError || schedule.readAccess !== true || schedule.costAccess !== true || schedule.state === 'not_scheduled' || schedule.state === 'unknown'} title="Execution history" aria-expanded={isExpanded} aria-label={`Execution history for ${schedule.displayName}`}><History size={16} />{isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>

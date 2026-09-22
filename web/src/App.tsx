@@ -92,12 +92,7 @@ function AssessmentProgress({ phase, updating }: { phase: Exclude<AssessmentPhas
 function BrandLockup({ onLight = false }: { onLight?: boolean }) {
   return (
     <span className={`brand-lockup ${onLight ? 'on-light' : ''}`} aria-label={BRAND_NAME}>
-      <span className="brand-dollar-mark" aria-hidden="true">
-        <i>$</i>
-        <i>$</i>
-        <i>$</i>
-        <i>$</i>
-      </span>
+      <img className="brand-mark" src={`${import.meta.env.BASE_URL}brand-mark.svg`} alt="" aria-hidden="true" width={28} height={28} />
       <span className="brand-divider" aria-hidden="true" />
       <span className="brand-product">{BRAND_NAME}</span>
     </span>

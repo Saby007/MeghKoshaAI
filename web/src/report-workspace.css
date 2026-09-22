@@ -1900,6 +1900,64 @@
     container-type: inline-size;
 }
 
+.app-shell .month-progress {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(3.25rem, 1fr));
+    gap: var(--border-width);
+    min-width: 23rem;
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-shell .month-progress li {
+    display: grid;
+    gap: var(--border-width);
+    padding-top: var(--space-1);
+    border-top: var(--focus-width) solid var(--color-ash-stroke);
+    color: var(--color-graphite-mid);
+    font-size: var(--font-size-xs);
+    line-height: 1.2;
+}
+
+.app-shell .month-progress li strong {
+    color: inherit;
+    font-size: inherit;
+    font-weight: 600;
+}
+
+.app-shell .month-progress li.succeeded {
+    border-color: var(--color-metric-green);
+    color: var(--color-metric-green);
+}
+
+.app-shell .month-progress li:is(.queued, .running, .submitting) {
+    border-color: var(--color-focus);
+    color: var(--color-focus);
+}
+
+.app-shell .month-progress li.failed {
+    border-color: var(--color-error);
+    color: var(--color-error);
+}
+
+.app-shell .mobile-month-progress {
+    display: none;
+}
+
+@media (max-width: 640px) {
+    .app-shell .desktop-month-progress {
+        display: none;
+    }
+    .app-shell .mobile-month-progress {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        min-width: 0;
+        width: 100%;
+        margin-top: var(--space-3);
+    }
+}
+
 .app-shell .schedule-editor {
     position: sticky;
     left: 12px;

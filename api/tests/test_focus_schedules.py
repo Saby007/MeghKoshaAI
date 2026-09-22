@@ -413,6 +413,10 @@ def test_each_cycle_executes_all_six_months_and_resumes_without_duplicates(store
         view = await focus_schedules.load(SUB)
         assert view["latestRun"]["status"] == "succeeded"
         assert view["latestRun"]["completedMonths"] == 6
+        assert view["latestRun"]["months"] == [
+            {"period": period, "status": "succeeded"}
+            for period in ("2030-03", "2030-04", "2030-05", "2030-06", "2030-07", "2030-08")
+        ]
         assert view["nextRunAt"] == "2030-10-05T03:00:00Z"
         assert (await focus_schedules.advance(SUBSCRIPTION, now=now))["status"] == "not_due"
         await focus_schedules.advance(SUBSCRIPTION, now=datetime(2030, 10, 5, 4, tzinfo=timezone.utc))
