@@ -17,6 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 	PYTHONPATH=/opt/python
 COPY --from=dependencies /opt/python /opt/python
 COPY --chown=65532:65532 main.py ./
+COPY --chown=65532:65532 brand.py ./
 COPY --chown=65532:65532 agents ./agents
 COPY --chown=65532:65532 anomalies ./anomalies
 COPY --chown=65532:65532 findings ./findings

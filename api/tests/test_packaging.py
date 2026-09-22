@@ -23,6 +23,7 @@ def test_api_container_has_an_explicit_nonroot_source_only_contract():
     assert "EXPOSE 8000" in lines
     assert "ENTRYPOINT []" in lines
     assert not any(line.startswith("COPY . ") for line in lines)
+    assert "COPY --chown=65532:65532 brand.py ./" in lines
     assert any("--constraint constraints.txt" in line for line in lines)
     command = json.loads(next(line.removeprefix("CMD ") for line in lines if line.startswith("CMD ")))
     assert command[:4] == ["/usr/bin/python", "-m", "uvicorn", "main:app"]
