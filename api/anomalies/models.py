@@ -1,4 +1,4 @@
-"""Typed contracts for deterministic MeghKoshaAI cost anomaly detection."""
+"""Typed contracts for deterministic cost anomaly detection."""
 
 from __future__ import annotations
 

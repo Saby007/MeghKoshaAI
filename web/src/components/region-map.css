@@ -1,0 +1,9 @@
+.map-land-image {
+    filter: invert(1);
+    opacity: 0.18;
+}
+
+:root[data-theme='light'] .map-land-image {
+    filter: none;
+    opacity: 0.16;
+}

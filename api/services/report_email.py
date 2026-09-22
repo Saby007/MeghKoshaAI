@@ -17,6 +17,7 @@ from uuid import uuid4
 from azure.communication.email import EmailClient
 from azure.storage.blob import ContentSettings
 
+from brand import BRAND_NAME
 from reports.models import ReportSnapshot
 from services import runtime_identity
 from services.report_snapshots import get_container_client
@@ -73,7 +74,8 @@ def _message(snapshot: ReportSnapshot, report_type: str, recipient: str) -> dict
     label = _REPORT_LABELS[report_type]
     metadata = snapshot.report.report_metadata
     download_url = _download_url(snapshot.snapshot_id, report_type)
-    subject = f"MeghKoshaAI {label} - {metadata.period}"
+    subject = f"{BRAND_NAME} {label} - {metadata.period}"
+    safe_brand = html.escape(BRAND_NAME)
     safe_label = html.escape(label)
     safe_period = html.escape(metadata.period)
     safe_url = html.escape(download_url, quote=True)
@@ -89,7 +91,7 @@ def _message(snapshot: ReportSnapshot, report_type: str, recipient: str) -> dict
             "subject": subject,
             "plainText": plain_text,
             "html": (
-                "<h1>MeghKoshaAI report ready</h1>"
+                f"<h1>{safe_brand} report ready</h1>"
                 f"<p>Your <strong>{safe_label}</strong> report for {safe_period} is ready.</p>"
                 f'<p><a href="{safe_url}">Download the exact completed snapshot</a></p>'
                 "<p>Microsoft Entra sign-in is required. This link does not grant report access.</p>"

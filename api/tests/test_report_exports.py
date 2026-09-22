@@ -4,6 +4,7 @@ from datetime import date
 from openpyxl import load_workbook
 from pypdf import PdfReader
 
+from brand import BRAND_NAME
 from reports.builder import build_full_report
 from reports.cost_details import build_cost_detail_export, build_cost_details
 from anomalies.models import DailyCostRecord
@@ -73,7 +74,7 @@ def test_executive_pdf_is_one_page_with_snapshot_provenance():
     reader = PdfReader(BytesIO(artifact.content))
     assert len(reader.pages) == 1
     text = reader.pages[0].extract_text()
-    assert "MeghKoshaAI Executive Cost Assessment" in text
+    assert f"{BRAND_NAME} Executive Cost Assessment" in text
     assert "MONTHLY SPEND" in text.upper()
     assert "Snapshot" in text
 

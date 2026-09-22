@@ -13,6 +13,7 @@ os.environ.setdefault("AZURE_TENANT_ID", "11111111-1111-1111-1111-111111111111")
 
 import main
 from anomalies.models import AnomalySummary
+from brand import BRAND_NAME
 from reports.models import RateOptimizationResponse, RateOptimizationScenario
 from services import exchange_rates
 from services import report_snapshots
@@ -252,7 +253,7 @@ def test_anomaly_endpoint_loads_complete_history_and_serializes_result(monkeypat
         assert currency == "USD"
         return AnomalySummary(
             algorithmVersion="test-v1",
-            label="MeghKoshaAI detection",
+            label=f"{BRAND_NAME} detection",
             status="ready",
             statusMessage="Ready",
             historyStart="2026-06-01",
@@ -271,7 +272,7 @@ def test_anomaly_endpoint_loads_complete_history_and_serializes_result(monkeypat
     response = client.post("/api/anomalies", json={"subscriptionIds": ["sub-1"]})
 
     assert response.status_code == 200
-    assert response.json()["label"] == "MeghKoshaAI detection"
+    assert response.json()["label"] == f"{BRAND_NAME} detection"
     assert response.json()["completeDays"] == 61
 
 

@@ -9,6 +9,8 @@ from xml.etree import ElementTree
 
 import httpx
 
+from brand import BRAND_NAME
+
 logger = logging.getLogger(__name__)
 
 ECB_DAILY_RATES_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
@@ -70,7 +72,7 @@ async def _download_rate_table(client: httpx.AsyncClient, now: datetime) -> Rate
         try:
             response = await client.get(
                 ECB_DAILY_RATES_URL,
-                headers={"Accept": "application/xml", "User-Agent": "MeghKoshaAI/1.0"},
+                headers={"Accept": "application/xml", "User-Agent": f"{BRAND_NAME}/1.0"},
             )
             response.raise_for_status()
             return _parse_rate_table(response.text, now)

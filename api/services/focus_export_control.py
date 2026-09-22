@@ -9,6 +9,7 @@ from uuid import UUID
 
 import httpx
 
+from brand import BRAND_NAME
 from services import arm_client
 
 EXPORT_NAME = "focus-closed-month-meghkoshaai"
@@ -92,7 +93,7 @@ def _new_properties(subscription_id: str, schedule_start: str, status: str) -> d
                 "rootFolderPath": f"focus/{normalize_subscription_id(subscription_id)}",
             }
         },
-        "exportDescription": "Closed-period FOCUS cost export for MeghKoshaAI reporting.",
+        "exportDescription": f"Closed-period FOCUS cost export for {BRAND_NAME} reporting.",
         "format": "Csv",
         "partitionData": True,
         "schedule": {

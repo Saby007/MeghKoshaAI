@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, Inbox, LayoutDashboard, LoaderCircle, Mail, Menu, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
+import worldMapUrl from '@svg-maps/world/world.svg?url';
 import {
   downloadCustomReport,
   downloadReportArtifact,
@@ -56,6 +57,7 @@ import { matchesCostFilter, presetCostWindow, type CostDimension, type CostFilte
 import { BudgetContext, BudgetDailyChart, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
 import { ServiceRetirements } from './ServiceRetirements';
 import { BRAND_NAME } from '../brand';
+import './region-map.css';
 
 const percent = (n: number) => `${(n * 100).toFixed(1)}%`;
 const reportDate = (value: string) => new Date(`${value}T00:00:00Z`).toLocaleDateString(undefined, {
@@ -2252,10 +2254,6 @@ const REGION_POINTS: Record<string, [number, number]> = {
   japaneast: [900, 300], koreacentral: [850, 290], australiaeast: [880, 505],
 };
 const normalizedRegion = (region: string) => region.toLowerCase().replaceAll(' ', '').replaceAll('-', '');
-type WorldMapData = {
-  viewBox: string;
-  locations: { id: string; name: string; path: string }[];
-};
 const displayRegion = (region: string) => ({
   westus: 'West US', westus2: 'West US 2', westus3: 'West US 3', centralus: 'Central US',
   northcentralus: 'North Central US', southcentralus: 'South Central US', eastus: 'East US', eastus2: 'East US 2',
@@ -2268,14 +2266,6 @@ const displayRegion = (region: string) => ({
 }[normalizedRegion(region)] ?? region);
 
 function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
-  const [worldMap, setWorldMap] = useState<WorldMapData | null>(null);
-  useEffect(() => {
-    let active = true;
-    import('@svg-maps/world').then(({ default: map }) => {
-      if (active) setWorldMap(map as WorldMapData);
-    });
-    return () => { active = false; };
-  }, []);
   const plotted = report.regionSpend.filter((item) => REGION_POINTS[normalizedRegion(item.region)] && item.monthlySpend > 0);
   const maximum = Math.max(...plotted.map((item) => item.monthlySpend), 0);
   const nonGeographic = report.regionSpend.filter((item) => !REGION_POINTS[normalizedRegion(item.region)] && item.monthlySpend > 0);
@@ -2286,13 +2276,8 @@ function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMon
         <strong>{plotted.length} mapped{nonGeographic.length > 0 ? ` · ${nonGeographic.length} global/unassigned` : ''}</strong>
       </header>
       <div className="region-panel-body">
-        {worldMap ? (
-          <svg className="region-map" viewBox={worldMap.viewBox} role="img" aria-label="Azure region spend world map">
-            <g className="map-land">
-              {worldMap.locations.map((location) => (
-                <path d={location.path} key={location.id}><title>{location.name}</title></path>
-              ))}
-            </g>
+        <svg className="region-map" viewBox="0 0 1010 666" role="img" aria-label="Azure region spend world map">
+            <image className="map-land-image" href={worldMapUrl} width="1010" height="666" />
             {plotted.map((item) => {
               const [x, y] = REGION_POINTS[normalizedRegion(item.region)];
               const intensity = maximum > 0 ? item.monthlySpend / maximum : 0;
@@ -2309,8 +2294,7 @@ function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMon
                 </circle>
               );
             })}
-          </svg>
-        ) : <div className="region-map-loading" aria-label="Loading world map" />}
+        </svg>
         <div className="region-ranking">
           {report.regionSpend.slice(0, 6).map((item) => (
             <span key={item.region}><b>{displayRegion(item.region)}</b><i><em style={{ width: `${Math.max(2, item.pctOfTotal * 100)}%` }} /></i><strong>{formatMoney(item.monthlySpend)}</strong></span>
@@ -3258,7 +3242,7 @@ function CostAnomaliesTab({
       <div className="anomaly-heading">
         <div>
           <h2 className="section-title">Cost Anomalies</h2>
-          <p className="section-subtitle">MeghKoshaAI detection over complete daily FOCUS EffectiveCost history.</p>
+          <p className="section-subtitle">{BRAND_NAME} detection over complete daily FOCUS EffectiveCost history.</p>
         </div>
         <button className="rate-refresh" type="button" disabled={loading} onClick={refresh}>
           <RefreshCw size={15} aria-hidden="true" /> Refresh

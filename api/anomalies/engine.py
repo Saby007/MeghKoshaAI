@@ -8,6 +8,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
+from brand import BRAND_NAME
+
 from .models import (
     AnomalyContributor,
     AnomalySummary,
@@ -30,6 +32,7 @@ _AI_SERVICES = frozenset({
     "azure ai search", "azure cognitive search", "azure ai foundry", "microsoft foundry",
 })
 _AI_PROVIDERS = ("microsoft.cognitiveservices", "microsoft.machinelearningservices", "microsoft.search")
+DETECTION_LABEL = f"{BRAND_NAME} detection"
 
 
 def _is_ai_charge(record: DailyCostRecord) -> bool:
@@ -288,7 +291,7 @@ def detect_anomalies(records: list[DailyCostRecord], currency: str) -> AnomalySu
     if not records:
         return AnomalySummary(
             algorithm_version=ALGORITHM_VERSION,
-            label="MeghKoshaAI detection",
+            label=DETECTION_LABEL,
             status="insufficient_history",
             status_message="No complete daily FOCUS history is available.",
             history_start="",
@@ -314,7 +317,7 @@ def detect_anomalies(records: list[DailyCostRecord], currency: str) -> AnomalySu
         )
         return AnomalySummary(
             algorithm_version=ALGORITHM_VERSION,
-            label="MeghKoshaAI detection",
+            label=DETECTION_LABEL,
             status="insufficient_history",
             status_message=detail,
             history_start=str(start),
@@ -346,7 +349,7 @@ def detect_anomalies(records: list[DailyCostRecord], currency: str) -> AnomalySu
     )
     return AnomalySummary(
         algorithm_version=ALGORITHM_VERSION,
-        label="MeghKoshaAI detection",
+        label=DETECTION_LABEL,
         status="ready",
         status_message="Deterministic detection over complete daily FOCUS EffectiveCost history.",
         history_start=str(start),

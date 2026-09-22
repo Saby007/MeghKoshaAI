@@ -15,6 +15,7 @@ from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
+from brand import BRAND_NAME
 from reports.models import FinOpsActionState, ReportSnapshot
 
 CUSTOM_REPORT_MODULES = {
@@ -60,7 +61,7 @@ def build_executive_pdf(snapshot: ReportSnapshot) -> ReportArtifact:
 
     pdf.setFillColor(dark)
     pdf.setFont("Helvetica-Bold", 18)
-    pdf.drawString(42, height - 48, "MeghKoshaAI Executive Cost Assessment")
+    pdf.drawString(42, height - 48, f"{BRAND_NAME} Executive Cost Assessment")
     pdf.setFillColor(orange)
     pdf.rect(42, height - 61, 62, 3, fill=1, stroke=0)
     pdf.setFillColor(muted)
@@ -151,7 +152,7 @@ def build_executive_pdf(snapshot: ReportSnapshot) -> ReportArtifact:
     pdf.save()
     return ReportArtifact(
         content=output.getvalue(),
-        file_name=f"MeghKoshaAI-Executive-{metadata.period or snapshot.snapshot_id}.pdf",
+        file_name=f"{BRAND_NAME}-Executive-{metadata.period or snapshot.snapshot_id}.pdf",
         media_type="application/pdf",
     )
 
@@ -315,10 +316,10 @@ def build_full_xlsx(snapshot: ReportSnapshot, subscription_id: str | None = None
                     cell.number_format = '#,##0.00;[Red](#,##0.00);-'
     output = BytesIO()
     workbook.save(output)
-    file_name = f"MeghKoshaAI-Full-Assessment-{metadata.period or snapshot.snapshot_id}.xlsx"
+    file_name = f"{BRAND_NAME}-Full-Assessment-{metadata.period or snapshot.snapshot_id}.xlsx"
     if subscription_row is not None:
         safe_name = re.sub(r"[^A-Za-z0-9_-]+", "-", subscription_row.subscription_name).strip("-") or subscription_row.subscription_id
-        file_name = f"MeghKoshaAI-Full-Assessment-{safe_name}-{metadata.period or snapshot.snapshot_id}.xlsx"
+        file_name = f"{BRAND_NAME}-Full-Assessment-{safe_name}-{metadata.period or snapshot.snapshot_id}.xlsx"
     return ReportArtifact(
         content=output.getvalue(),
         file_name=file_name,
@@ -369,7 +370,7 @@ def build_chargeback_xlsx(snapshot: ReportSnapshot) -> ReportArtifact:
     workbook.save(output)
     return ReportArtifact(
         content=output.getvalue(),
-        file_name=f"MeghKoshaAI-Chargeback-{metadata.period or snapshot.snapshot_id}.xlsx",
+        file_name=f"{BRAND_NAME}-Chargeback-{metadata.period or snapshot.snapshot_id}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
@@ -415,7 +416,7 @@ def build_compliance_xlsx(snapshot: ReportSnapshot) -> ReportArtifact:
     workbook.save(output)
     return ReportArtifact(
         content=output.getvalue(),
-        file_name=f"MeghKoshaAI-Compliance-{metadata.period or snapshot.snapshot_id}.xlsx",
+        file_name=f"{BRAND_NAME}-Compliance-{metadata.period or snapshot.snapshot_id}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
@@ -514,7 +515,7 @@ def build_custom_xlsx(snapshots: list[ReportSnapshot], modules: list[str]) -> Re
     period_label = first_period if first_period == last_period else f"{first_period}-to-{last_period}"
     return ReportArtifact(
         content=output.getvalue(),
-        file_name=f"MeghKoshaAI-Custom-{period_label}.xlsx",
+        file_name=f"{BRAND_NAME}-Custom-{period_label}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
@@ -578,6 +579,6 @@ def build_finops_monthly_xlsx(
     workbook.save(output)
     return ReportArtifact(
         content=output.getvalue(),
-        file_name=f"MeghKoshaAI-FinOps-Monthly-{metadata.period or current.snapshot_id}.xlsx",
+        file_name=f"{BRAND_NAME}-FinOps-Monthly-{metadata.period or current.snapshot_id}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )

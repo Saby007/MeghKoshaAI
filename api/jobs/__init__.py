@@ -1,1 +1,1 @@
-"""Scheduled background jobs for MeghKoshaAI."""
+"""Scheduled background jobs for the cost assessment service."""

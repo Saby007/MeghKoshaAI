@@ -1,0 +1,7 @@
+:root {
+    font-size: 100%;
+}
+
+:root .app-shell.app-shell .rate-optimization-panel :is( .rate-table th, .commitment-coverage-panel > header > span, .commitment-coverage-panel > header > small, .commitment-trend-panel > header > span, .commitment-trend-panel > header > small, .monthly-column > strong, .monthly-column > span) {
+    font-size: var(--font-size-sm);
+}

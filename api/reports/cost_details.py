@@ -5,6 +5,7 @@ import json
 from datetime import date, timedelta
 from decimal import Decimal
 
+from brand import BRAND_NAME
 from services.focus_history_reader import FocusHistoryData
 
 from .models import CostDetailRow, CostDetailSummary, ReportSnapshot
@@ -200,4 +201,4 @@ def build_cost_detail_export(
         ])
     output = BytesIO()
     workbook.save(output)
-    return ReportArtifact(output.getvalue(), f"MeghKoshaAI-Cost-Detail-{start_date}-{end_date}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    return ReportArtifact(output.getvalue(), f"{BRAND_NAME}-Cost-Detail-{start_date}-{end_date}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from openpyxl import Workbook
 from pydantic import BaseModel, ConfigDict, Field
 
+from brand import BRAND_NAME
 from reports.exports import ReportArtifact, _sheet
 from reports.models import ReportSnapshot
 from services import arm_client
@@ -146,4 +147,4 @@ def export_retirements(summary: RetirementSummary) -> ReportArtifact:
     _sheet(workbook, "Source status", ["Subscription ID", "Available", "Status"], [[item.subscription_id, item.available, item.message] for item in summary.sources])
     output = BytesIO()
     workbook.save(output)
-    return ReportArtifact(output.getvalue(), "MeghKoshaAI-Service-Retirements.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    return ReportArtifact(output.getvalue(), f"{BRAND_NAME}-Service-Retirements.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
