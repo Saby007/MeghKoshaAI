@@ -1051,6 +1051,42 @@ test('ADO period comparisons, resource detail, budgets and downloads work across
   expect(errors).toEqual([]);
 });
 
+test('30-day cost axes name every day without causing page overflow', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.route('**/api/report**', (route) => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/latest') ? { ...snapshotFixture, report: detailReportFixture } : detailReportFixture }));
+  await page.goto('/');
+  await expect(page.locator('#report-page-heading')).toHaveText('Executive Summary');
+  await expect(page.getByLabel('Cost window start')).toHaveValue('2026-08-09');
+  await expect(page.getByLabel('Cost window end')).toHaveValue('2026-09-07');
+  const expectedLabels = Array.from({ length: 30 }, (_, index) => new Date(Date.UTC(2026, 7, 9 + index)).toISOString().slice(5, 10));
+
+  for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      const chart = page.getByRole('region', { name: 'Subscription cost comparison chart' });
+      const labels = chart.locator('svg text').filter({ hasText: /^\d{2}-\d{2}$/ });
+      await expect(labels).toHaveText(expectedLabels);
+      expect(await chart.locator('svg').evaluate((svg) => {
+        const frame = svg.getBoundingClientRect();
+        const dateLabels = [...svg.querySelectorAll('text')].filter((label) => /^\d{2}-\d{2}$/.test(label.textContent ?? ''));
+        return dateLabels.every((label) => {
+          const bounds = label.getBoundingClientRect();
+          return bounds.left >= frame.left - 1 && bounds.right <= frame.right + 1 && bounds.top >= frame.top - 1 && bounds.bottom <= frame.bottom + 1;
+        });
+      })).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      if (viewport.width === 390) {
+        expect(await labels.evaluateAll((nodes) => nodes.every((node) => node.getAttribute('transform')?.startsWith('rotate(-60')))).toBe(true);
+        expect(await chart.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+      }
+      await page.screenshot({ path: testInfo.outputPath(`${viewport.width}-${theme}-30-day-axis.png`), fullPage: true, animations: 'disabled' });
+    }
+  }
+  expect(errors).toEqual([]);
+});
+
 test('AI billing alerts expose spike and drop evidence in both themes and on mobile', async ({ page }, testInfo) => {
   const base = anomalyFixture.anomalies[0];
   const aiAnomalies = [

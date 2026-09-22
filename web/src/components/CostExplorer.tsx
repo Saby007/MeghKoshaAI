@@ -5,6 +5,7 @@ import type { CostDetailSummary, FullReport } from '../report/models';
 import { compareCostGroups, costCoverage, costWindowDates, dailySubscriptionCosts, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import './cost-explorer.css';
 import { BudgetContext, type BudgetState } from './BudgetContext';
+import { DayAxis, dayAxis } from './TrendChart';
 
 type Formatter = (value: number) => string;
 export type SelectedDay = { date: string; previousDate: string; subscriptionId: string };
@@ -136,8 +137,10 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
   const maximum = values.reduce((result, value) => Math.max(result, value), 1);
   const minimum = values.reduce((result, value) => Math.min(result, value), 0);
   const chartRef = useRef<HTMLDivElement>(null);
-  const width = useChartWidth(chartRef);
-  const height = CHART_HEIGHT;
+  const measured = useChartWidth(chartRef);
+  const axis = dayAxis(dates, measured, 82, 24, Math.max(1, dates.length - 1));
+  const width = axis.width;
+  const height = CHART_HEIGHT + axis.extraHeight;
   const xFor = (index: number) => 82 + index * (width - 106) / Math.max(1, dates.length - 1);
   const yFor = (value: number) => 254 - (value - minimum) / (maximum - minimum) * 224;
   function pathFor(points: { current: number | null; previous: number | null }[], field: 'current' | 'previous') {
@@ -153,13 +156,13 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
   return <>
     <div className="cost-chart-legend">{series.map((item, index) => <span key={item.subscriptionId}><i style={{ background: COLORS[index % COLORS.length] }} />{item.subscriptionName}</span>)}<span>Solid: selected period</span><span>Dotted: preceding period</span></div>
     <div className="cost-chart-scroll" ref={chartRef} tabIndex={0} role="region" aria-label="Subscription cost comparison chart">
-      <svg viewBox={`0 0 ${width} ${height}`} className="cost-comparison-chart" role="group" aria-label="Current and previous subscription cost">
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: `${width}px`, minWidth: `${width}px` }} className="cost-comparison-chart" role="group" aria-label="Current and previous subscription cost">
         {[0, 1, 2, 3, 4].map((tick) => { const value = minimum + (maximum - minimum) * tick / 4; return <g key={tick}><line x1={82} x2={width - 24} y1={yFor(value)} y2={yFor(value)} className="cost-chart-grid" /><text x={72} y={yFor(value)} textAnchor="end" dominantBaseline="middle">{formatMoney(value)}</text></g>; })}
         {series.map((item, index) => <g key={item.subscriptionId} style={{ color: COLORS[index % COLORS.length] }}>
           <path d={pathFor(item.days, 'previous')} className="cost-chart-previous" /><path d={pathFor(item.days, 'current')} className="cost-chart-current" />
           {item.days.map((day, slot) => day.current === null ? null : <circle key={day.date} cx={xFor(slot)} cy={yFor(day.current)} r={4} fill="currentColor" role={onSelectDay ? 'button' : undefined} tabIndex={onSelectDay ? 0 : undefined} data-cost-date={day.date} aria-label={`${item.subscriptionName}, ${day.date}, ${formatMoney(day.current)}`} onClick={() => onSelectDay?.(day.date, day.previousDate, item.subscriptionId)} onKeyDown={(event) => { if (onSelectDay && ['Enter', ' '].includes(event.key)) { event.preventDefault(); onSelectDay(day.date, day.previousDate, item.subscriptionId); } }}><title>{day.date}: {formatMoney(day.current)}; {day.previousDate}: {money(day.previous, formatMoney)}</title></circle>)}
         </g>)}
-        {dates.filter((_, index) => index === 0 || index === dates.length - 1 || index % Math.max(1, Math.ceil(dates.length / 6)) === 0).map((day) => <text key={day} x={xFor(dates.indexOf(day))} y={284} textAnchor="middle">{day.slice(5)}</text>)}
+        <DayAxis dates={dates} xFor={xFor} y={axis.rotated ? 270 : 284} rotated={axis.rotated} />
       </svg>
     </div>
     {showDailyValues && <DailySubscriptionValues details={details} window={window} filters={filters} formatMoney={formatMoney} onSelectDay={onSelectDay} />}

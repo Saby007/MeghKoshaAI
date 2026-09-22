@@ -16,6 +16,46 @@ const SERIES_COLORS = [
 const CHART_HEIGHT = 260;
 const CHART_MIN_WIDTH = 640;
 
+/* Every day carries a label, so the axis - not the plot - decides how wide the
+   chart has to be.
+
+   Two constants set that. AXIS_LABEL_WIDTH is what "MM-DD" occupies at
+   --font-size-xs with a gap either side; below it, horizontal labels collide,
+   so they tilt. AXIS_SLOT_MIN is the pitch a tilted label needs: at -60 degrees
+   consecutive labels clear each other once slot * sin(60) exceeds the line
+   height, which is ~15px here. When even that does not fit in the measured
+   box the chart grows past it and the surrounding container scrolls, because
+   dropping a day to save horizontal space is the one thing that is not on
+   offer. */
+const AXIS_LABEL_WIDTH = 38;
+const AXIS_SLOT_MIN = 18;
+const AXIS_ROTATED_HEIGHT = 34;
+
+/* Tilted labels descend below the axis, so the frame has to grow to hold them
+   - otherwise they are simply clipped by the viewBox, which is the same as not
+   drawing them. */
+export function dayAxis(dates: string[], measured: number, padLeft: number, padRight: number, divisor: number) {
+  const width = Math.max(measured, padLeft + padRight + dates.length * AXIS_SLOT_MIN);
+  const pitch = (width - padLeft - padRight) / Math.max(1, divisor);
+  const rotated = pitch < AXIS_LABEL_WIDTH;
+  return { width, rotated, extraHeight: rotated ? AXIS_ROTATED_HEIGHT : 0 };
+}
+
+export function DayAxis({ dates, xFor, y, rotated }: {
+  dates: string[]; xFor: (index: number) => number; y: number; rotated: boolean;
+}) {
+  return (
+    <>
+      {dates.map((date, index) => {
+        const x = xFor(index);
+        return rotated
+          ? <text key={date} x={x} y={y} textAnchor="end" transform={`rotate(-60 ${x.toFixed(2)} ${y})`}>{date.slice(5)}</text>
+          : <text key={date} x={x} y={y} textAnchor="middle">{date.slice(5)}</text>;
+      })}
+    </>
+  );
+}
+
 /* Charts are authored in user units and stretched to the container, and a
    viewBox scales uniformly - so a fixed viewBox magnifies the labels inside
    it. Tracking the measured width keeps the scale at exactly 1 and the axis
@@ -58,12 +98,14 @@ export function DailyTrendChart({
   ariaLabel?: string;
 }) {
   const frame = useRef<HTMLDivElement>(null);
-  const width = useChartWidth(frame);
-  const height = CHART_HEIGHT;
+  const measured = useChartWidth(frame);
   const padLeft = 78;
   const padRight = 20;
   const padTop = 16;
-  const baseline = height - 40;
+  const axis = dayAxis(dates, measured, padLeft, padRight, Math.max(1, dates.length - 1));
+  const width = axis.width;
+  const height = CHART_HEIGHT + axis.extraHeight;
+  const baseline = CHART_HEIGHT - 40;
 
   const values = series.flatMap((item) => item.points.filter((value): value is number => value !== null));
   const maximum = values.reduce((peak, value) => Math.max(peak, value), 0) || 1;
@@ -87,7 +129,6 @@ export function DailyTrendChart({
   }
 
   const ticks = [0, 1, 2, 3, 4].map((step) => maximum * step / 4);
-  const labelStep = Math.max(1, Math.ceil(dates.length / 8));
 
   return (
     <div className="trend-chart">
@@ -97,7 +138,7 @@ export function DailyTrendChart({
         ))}
       </div>
       <div className="cost-chart-scroll" ref={frame} tabIndex={0} role="region" aria-label={ariaLabel}>
-        <svg viewBox={`0 0 ${width} ${height}`} className="cost-comparison-chart" role="img" aria-label={ariaLabel}>
+        <svg viewBox={`0 0 ${width} ${height}`} style={{ width: `${width}px`, minWidth: `${width}px` }} className="cost-comparison-chart" role="img" aria-label={ariaLabel}>
           {ticks.map((value) => (
             <g key={value}>
               <line x1={padLeft} x2={width - padRight} y1={yFor(value)} y2={yFor(value)} className="cost-chart-grid" />
@@ -112,11 +153,7 @@ export function DailyTrendChart({
               style={{ color: SERIES_COLORS[index % SERIES_COLORS.length] }}
             />
           ))}
-          {dates.map((date, index) => (
-            index % labelStep === 0 || index === dates.length - 1
-              ? <text key={date} x={xFor(index)} y={height - 14} textAnchor="middle">{date.slice(5)}</text>
-              : null
-          ))}
+          <DayAxis dates={dates} xFor={xFor} y={baseline + (axis.rotated ? 16 : 26)} rotated={axis.rotated} />
         </svg>
       </div>
     </div>
@@ -160,12 +197,14 @@ export function DailyBarChart({
   reference?: { value: number; label: string } | null;
 }) {
   const frame = useRef<HTMLDivElement>(null);
-  const width = useChartWidth(frame);
-  const height = CHART_HEIGHT;
+  const measured = useChartWidth(frame);
   const padLeft = 78;
   const padRight = 20;
   const padTop = 16;
-  const baseline = height - 40;
+  const axis = dayAxis(dates, measured, padLeft, padRight, dates.length);
+  const width = axis.width;
+  const height = CHART_HEIGHT + axis.extraHeight;
+  const baseline = CHART_HEIGHT - 40;
 
   const present = values.filter((value): value is number => value !== null);
   /* The reference line is part of the picture, so it has to fit inside the
@@ -183,7 +222,6 @@ export function DailyBarChart({
   }
 
   const ticks = [0, 1, 2, 3, 4].map((step) => maximum * step / 4);
-  const labelStep = Math.max(1, Math.ceil(dates.length / 8));
 
   return (
     <div className="trend-chart">
@@ -194,7 +232,7 @@ export function DailyBarChart({
       </div>
       <div className="cost-chart-scroll" ref={frame} tabIndex={0} role="region" aria-label={ariaLabel}>
         <div className="cost-bar-plot" style={{ width: `${width}px`, height: `${height}px` }}>
-          <svg viewBox={`0 0 ${width} ${height}`} className="cost-comparison-chart" role="img" aria-label={ariaLabel}>
+          <svg viewBox={`0 0 ${width} ${height}`} style={{ width: `${width}px`, minWidth: `${width}px` }} className="cost-comparison-chart" role="img" aria-label={ariaLabel}>
             {ticks.map((value) => (
               <g key={value}>
                 <line x1={padLeft} x2={width - padRight} y1={yFor(value)} y2={yFor(value)} className="cost-chart-grid" />
@@ -228,11 +266,7 @@ export function DailyBarChart({
                 className="cost-chart-reference"
               />
             )}
-            {dates.map((date, index) => (
-              index % labelStep === 0 || index === dates.length - 1
-                ? <text key={date} x={xFor(index)} y={height - 14} textAnchor="middle">{date.slice(5)}</text>
-                : null
-            ))}
+            <DayAxis dates={dates} xFor={xFor} y={baseline + (axis.rotated ? 16 : 26)} rotated={axis.rotated} />
           </svg>
           {onSelectDate && (
             <div className="cost-bar-hits" aria-label={`${ariaLabel} by day`}>
