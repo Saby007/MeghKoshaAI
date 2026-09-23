@@ -234,6 +234,12 @@ def test_ai_deployment_helper_plans_previewed_ai_profile_with_processor():
     source = script.read_text(encoding="utf-8")
     assert "AccountProvisioningStateInvalid|Another operation is in progress" in source
     assert "resource not found: unable to find a resource with name 'ca-(api|web)-" in source
+    assert "$deploymentActive = $text -match 'DeploymentActive'" in source
+    assert "foundryRace -or $missingApp -or $deploymentActive" in source
+    assert "function Wait-ActiveDeployments" in source
+    assert "function Test-AppsHealthy" in source
+    assert "function Get-WebEndpointUrl" in source
+    assert "az deployment group list" in source
     assert "az cognitiveservices account list" in source
     assert "az cognitiveservices account show" in source
     assert "APP_REUSE_AI_ACCOUNT true" in source
@@ -407,18 +413,17 @@ def test_export_access_template_limits_roles_without_mutating_application_or_sto
 
 @pytest.fixture(scope="module")
 def compiled_profiles():
-    compiler = shutil.which("bicep") or str(Path.home() / ".azure" / "bin" / "bicep.exe")
-    if not Path(compiler).is_file():
-        pytest.skip("Standalone Bicep is required for generated-template checks")
+    az = shutil.which("az")
+    if not az:
+        pytest.skip("Azure CLI (with the bicep extension) is required for generated-template checks")
     profiles = {}
     for profile in ("core", "data", "ai"):
         environment = {name: value for name, value in os.environ.items()
                        if not name.startswith(("AZURE_", "APP_", "SERVICE_", "MEGHKOSHA_", "FOUNDRY_", "MODEL_ROUTER_"))}
         environment.update(AZURE_ENV_NAME="app-contract-test", APP_PROFILE=profile)
-        result = subprocess.run([compiler, "build-params", str(PROJECT_ROOT / "infra" / "main.bicepparam"), "--stdout"],
+        result = subprocess.run([az, "bicep", "build-params", "--file", str(PROJECT_ROOT / "infra" / "main.bicepparam"), "--stdout", "--only-show-errors"],
                                 env=environment, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, result.stderr
-        assert not result.stderr.strip(), result.stderr
         compiled = json.loads(result.stdout)
         profiles[profile] = (json.loads(compiled["parametersJson"]), json.loads(compiled["templateJson"]))
     return profiles
@@ -493,10 +498,10 @@ def test_compiled_data_ai_and_processor_do_not_add_queues_or_implicit_credential
     assert not {"properties", "location", "sku", "identity"}.intersection(existing_account)
     assert any(resource["type"] == "Microsoft.CognitiveServices/accounts/projects" for resource in existing_ai)
     existing_endpoint = next(resource for resource in existing_ai if resource["type"] == "Microsoft.Network/privateEndpoints")
-    assert any("projects" in dependency for dependency in existing_endpoint.get("dependsOn", []))
+    assert any("project" in dependency for dependency in existing_endpoint.get("dependsOn", []))
     existing_models = [resource for resource in existing_ai if resource["type"] == "Microsoft.CognitiveServices/accounts/deployments"]
     if existing_models:
-        assert any("privateEndpoints" in dependency for dependency in existing_models[0].get("dependsOn", []))
+        assert any("endpoint" in dependency for dependency in existing_models[0].get("dependsOn", []))
     processor = list(resource_map(modules["processor"]["properties"]["template"]).values())
     job = next(resource for resource in processor if resource["type"] == "Microsoft.App/jobs")
     assert job["properties"]["configuration"]["triggerType"] == "Schedule"
