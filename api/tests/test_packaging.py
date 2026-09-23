@@ -199,6 +199,56 @@ def test_approved_model_router_enables_chat_without_hosted_agent_narration():
     assert settings["aiRuntimeEnabled"] is False
 
 
+def test_ai_deployment_helper_plans_previewed_ai_profile_with_processor():
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("PowerShell 7.4 or later is required for deployment-helper checks")
+    script = PROJECT_ROOT / "scripts" / "deploy-ai.ps1"
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(script),
+         "-EnvironmentName", "fresh-ai", "-Location", "centralindia", "-PlanOnly"],
+        capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    assert plan["environment"] == "fresh-ai"
+    assert plan["preview"] is True
+    assert plan["enableProcessor"] is True
+    assert plan["maxAttempts"] == 3
+    assert plan["settings"] == {
+        "AZURE_LOCATION": "centralindia",
+        "APP_PROFILE": "ai",
+        "APP_EXPORT_TRUSTED_SERVICES": "true",
+        "APP_MODEL_DEPLOYMENTS": '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":100}]',
+        "MODEL_ROUTER_DEPLOYMENT_NAME": "model-router",
+        "APP_ENABLE_CHAT_RUNTIME": "true",
+        "APP_AI_VALIDATED": "true",
+        "APP_ENABLE_AI_RUNTIME": "false",
+        "APP_RESTORE_AI_ACCOUNT": "false",
+    }
+    source = script.read_text(encoding="utf-8")
+    assert "AccountProvisioningStateInvalid|Another operation is in progress" in source
+    assert "resource not found: unable to find a resource with name 'ca-(api|web)-" in source
+    assert "azd down" not in source
+    assert "--purge" not in source
+
+
+def test_ai_deployment_helper_plan_supports_explicit_opt_outs():
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("PowerShell 7.4 or later is required for deployment-helper checks")
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(PROJECT_ROOT / "scripts" / "deploy-ai.ps1"),
+         "-EnvironmentName", "fresh-ai", "-SkipPreview", "-SkipProcessor", "-MaxAttempts", "5", "-PlanOnly"],
+        capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    assert plan["preview"] is False
+    assert plan["enableProcessor"] is False
+    assert plan["maxAttempts"] == 5
+
+
 def test_first_publish_allows_no_existing_digests_but_requires_approved_environment_registry():
     result = run_input_validation({"APP_ALLOW_AZURE_CHANGES": "true",
                                    "AZURE_CONTAINER_REGISTRY_ENDPOINT": "testapp.azurecr.io"}, "Publish")

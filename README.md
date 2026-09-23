@@ -106,14 +106,14 @@ The app has three top-level views — **Report**, **Chat**, and **Schedules** �
 
 Two other top-level views round out the app:
 
-- **Chat** — ask follow-up questions about the current report in natural language (requires the optional AI runtime).
+- **Chat** — ask follow-up questions about the current report in natural language (enabled by the `ai` profile and `APP_ENABLE_CHAT_RUNTIME=true`).
 - **Schedules** — see per-subscription export/schedule status, trigger the automatic setup described above, and pause, resume, or manually run a subscription's monthly cycle.
 
 ## Deploying to Azure
 
-There are two ways to deploy: a true one-command path with the Azure Developer CLI, or a portal-button path that's inherently two steps (ARM/Bicep templates can only reference already-built container images — they can't build code from a repo by themselves).
+There are two ways to deploy: the recommended Azure Developer CLI workflow, or a portal-button path (ARM/Bicep templates can only reference already-built container images — they cannot build code from a repository by themselves).
 
-### Option A — one command, no Docker required
+### Option A — Azure Developer CLI, no Docker required
 
 Requires [git](https://git-scm.com/), the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/), and the [Azure CLI](https://learn.microsoft.com/cli/azure/) installed locally. Clone the repo first — `azd` reads `azure.yaml`/`infra/`/`api/`/`web/` from your local copy, it doesn't deploy directly from GitHub:
 
@@ -121,22 +121,18 @@ Requires [git](https://git-scm.com/), the [Azure Developer CLI](https://learn.mi
 git clone https://github.com/Saby007/MeghKoshaAI.git
 cd MeghKoshaAI
 azd auth login
-azd env new my-environment
-azd env set AZURE_LOCATION <region>
+pwsh ./scripts/deploy-ai.ps1 -EnvironmentName my-environment -Location centralindia
 ```
 
-Choose the deployment profile before the first `azd up`. For data/export features without Foundry chat:
+The helper previews before deploying, configures the recommended `ai` profile, deploys the app-local Model Router, builds remotely in ACR, retries only the known Foundry-readiness and first-image-handoff conditions, enables the six-month processor after the API image exists, and verifies `/api/health`. Use `-SkipProcessor` only when schedules are intentionally out of scope.
 
-```powershell
-azd env set APP_PROFILE data
-azd env set APP_EXPORT_TRUSTED_SERVICES true
-```
-
-For a new deployment with its own Foundry project and grounded Model Router chat, use the `ai` profile instead:
+The equivalent settings applied by the helper are:
 
 ```powershell
 $modelRouter = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":100}]'
 
+azd env new my-environment
+azd env set AZURE_LOCATION centralindia
 azd env set APP_PROFILE ai
 azd env set APP_EXPORT_TRUSTED_SERVICES true
 azd env set APP_MODEL_DEPLOYMENTS $modelRouter
@@ -144,20 +140,27 @@ azd env set MODEL_ROUTER_DEPLOYMENT_NAME model-router
 azd env set APP_ENABLE_CHAT_RUNTIME true
 azd env set APP_AI_VALIDATED true
 azd env set APP_ENABLE_AI_RUNTIME false
-```
-
-`APP_ENABLE_AI_RUNTIME=false` keeps the separate hosted-agent Executive Summary narrator disabled. Chat still uses the app-local Model Router, while deterministic API/FOCUS code remains responsible for rankings, amounts, and other quantitative facts.
-
-Preview the selected environment, then deploy:
-
-```powershell
 azd provision --preview
 azd up
 ```
 
+Set every value above before the first `azd up`. `APP_PROFILE=ai` includes the data/export infrastructure and adds the deployment's own private Foundry project and Model Router. `APP_ENABLE_AI_RUNTIME=false` keeps the separate hosted-agent Executive Summary narrator disabled; Chat still uses Model Router, while deterministic API/FOCUS code remains responsible for rankings, amounts, and other quantitative facts.
+
 `azd up` provisions the infrastructure, including the app-specific `cost-agent-project` and `model-router` deployment for the `ai` profile, builds both container images **remotely in Azure Container Registry** (no local Docker or Podman needed — [azd's `remoteBuild` option](https://learn.microsoft.com/azure/developer/azure-developer-cli/azd-schema#docker) is enabled in this repo's [azure.yaml](azure.yaml)), pushes them, and deploys the running app.
 
-> **On a brand-new environment, run `azd up` twice.** [main.bicep](infra/main.bicep) only creates the `ca-api-*`/`ca-web-*` Container Apps once real image names exist. On the very first pass nothing has been built yet, so `azd up` provisions the foundation only (network, storage, ACR, Container Apps environment, Foundry, private endpoints), then builds and pushes the images — but the `deploy-api`/`deploy-web` steps still fail with `resource not found: unable to find a resource with name 'ca-api-...'`, because those Container Apps don't exist yet. That's expected, not a bug: just run `azd up` again. The second pass sees the images that were just pushed and creates + deploys the actual containers.
+> **A brand-new environment can require repeated `azd up` runs. Do not delete the environment between retries.** The first pass provisions the foundation and builds the images; [main.bicep](infra/main.bicep) creates `ca-api-*`/`ca-web-*` only after those image names exist. A first pass can therefore end with `resource not found: ca-api-*`; rerun the same `azd up` so the persisted images create the apps. Azure AI Services can also briefly report `RequestConflict` or `AccountProvisioningStateInvalid` while the new account is `Accepted`. Once the account reaches `Succeeded`, rerun the same command; already-created resources and the Model Router are reused idempotently.
+
+If deploying with raw `azd up` instead of the helper, verify image handoff after a failed or partial first pass:
+
+```powershell
+azd env get-value SERVICE_API_IMAGE_NAME
+azd env get-value SERVICE_WEB_IMAGE_NAME
+azd up
+```
+
+If either image key is not set yet, rerun `azd up`; remote packaging will populate it. Do not create a second environment, delete the resource group, or set `APP_RESTORE_AI_ACCOUNT=true` for the transient `Accepted` state.
+
+If you intentionally want exports without Foundry chat, set `APP_PROFILE=data` and omit the five Model Router/chat settings. That is an opt-out path, not the recommended MeghKoshaAI/CloudLens deployment.
 
 For both `data` and `ai`, keep `APP_EXPORT_TRUSTED_SERVICES=true` — [modules/data.bicep](infra/modules/data.bicep) otherwise leaves the storage account's `networkAcls.bypass` at `'None'`, which blocks Cost Management's export-creation call (it always shows **Export status unavailable**, regardless of subscription type or RBAC grants, until this is set).
 
@@ -165,7 +168,7 @@ For both `data` and `ai`, keep `APP_EXPORT_TRUSTED_SERVICES=true` — [modules/d
 
 > The export storage account is plain Blob storage (`isHnsEnabled: false`), not ADLS Gen2 — this matches every prior environment (Dev, Phase1) that has reliably created FOCUS exports. An earlier revision of this repo briefly enabled the hierarchical namespace and fully disabled `publicNetworkAccess`; that combination is untested with Cost Management's export-creation call and is not required by Microsoft's own documented firewall setup (`networkAcls.defaultAction: Deny` + `bypass: AzureServices` is sufficient). Note that in tenants with central governance policies (for example `StorageAccount_PublicNetwork_Modify`), `publicNetworkAccess` may still end up `Disabled` regardless of `APP_EXPORT_TRUSTED_SERVICES` — that's expected and fine; the `AzureServices` bypass is what actually matters, not the `publicNetworkAccess` value itself.
 
-To also enable the scheduled six-month FOCUS worker, point the processor at the **same image `azd` already built for the `api` service** — don't invent a separate image name, since nothing will have pushed one. Do this only **after** your first successful `azd up` run: `SERVICE_API_IMAGE_NAME` doesn't exist until `azd` has built and pushed it, so setting `SERVICE_PROCESSOR_IMAGE_NAME` from it any earlier fails with `invalid key=value format` (the `get-value` call has nothing to return yet):
+The helper enables the scheduled six-month FOCUS worker automatically once `SERVICE_API_IMAGE_NAME` exists. When using raw `azd up`, point the processor at the **same image `azd` built for the API service** after the first image publication:
 
 ```powershell
 azd env set APP_ENABLE_PROCESSOR true
