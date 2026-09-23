@@ -61,8 +61,11 @@ function Wait-FoundryAccount {
         $resourceGroup = "rg-$EnvironmentName"
     }
     for ($attempt = 1; $attempt -le 40; $attempt++) {
-        $states = @(& az resource list --resource-group $resourceGroup --resource-type Microsoft.CognitiveServices/accounts --query '[].properties.provisioningState' --output tsv 2>$null)
-        if ($LASTEXITCODE -eq 0 -and $states.Count -gt 0) {
+        $accountNames = @(& az cognitiveservices account list --resource-group $resourceGroup --query '[].name' --output tsv 2>$null)
+        $states = @($accountNames | ForEach-Object {
+            & az cognitiveservices account show --resource-group $resourceGroup --name $_ --query properties.provisioningState --output tsv 2>$null
+        })
+        if ($accountNames.Count -gt 0 -and $states.Count -eq $accountNames.Count) {
             if ($states -contains 'Failed') { throw 'The Foundry account entered a failed provisioning state.' }
             if (@($states | Where-Object { $_ -ne 'Succeeded' }).Count -eq 0) { return }
         }

@@ -229,6 +229,9 @@ def test_ai_deployment_helper_plans_previewed_ai_profile_with_processor():
     source = script.read_text(encoding="utf-8")
     assert "AccountProvisioningStateInvalid|Another operation is in progress" in source
     assert "resource not found: unable to find a resource with name 'ca-(api|web)-" in source
+    assert "az cognitiveservices account list" in source
+    assert "az cognitiveservices account show" in source
+    assert "az resource list" not in source
     assert "azd down" not in source
     assert "--purge" not in source
 
