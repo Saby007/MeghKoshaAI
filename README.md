@@ -148,7 +148,16 @@ Set every value above before the first `azd up`. `APP_PROFILE=ai` includes the d
 
 `azd up` provisions the infrastructure, including the app-specific `cost-agent-project` and `model-router` deployment for the `ai` profile, builds both container images **remotely in Azure Container Registry** (no local Docker or Podman needed — [azd's `remoteBuild` option](https://learn.microsoft.com/azure/developer/azure-developer-cli/azd-schema#docker) is enabled in this repo's [azure.yaml](azure.yaml)), pushes them, and deploys the running app.
 
-> **A brand-new environment can require repeated `azd up` runs. Do not delete the environment between retries.** The first pass provisions the foundation and builds the images; [main.bicep](infra/main.bicep) creates `ca-api-*`/`ca-web-*` only after those image names exist. A first pass can therefore end with `resource not found: ca-api-*`; rerun the same `azd up` so the persisted images create the apps. Azure AI Services can also briefly report `RequestConflict` or `AccountProvisioningStateInvalid` while the new account is `Accepted`. Once the account reaches `Succeeded`, rerun the same command; already-created resources and the Model Router are reused idempotently.
+> **A brand-new environment can require repeated `azd up` runs. Do not delete the environment between retries.** These are all transient and self-resolve with a plain rerun of `azd up` — the helper detects and retries all four automatically; if you're running raw `azd up`, just rerun the same command after seeing any of them:
+>
+> | Error you see | Cause | What a rerun does |
+> | --- | --- | --- |
+> | `resource not found: unable to find a resource with name 'ca-api-...'`/`'ca-web-...'` | The first pass provisions infrastructure and builds images in parallel; [main.bicep](infra/main.bicep) creates `ca-api-*`/`ca-web-*` only after those image names exist, and provisioning usually finishes before the remote image build does. | The image names are now persisted in `azd env`, so this time Bicep creates the apps. |
+> | `RequestConflict`/`AccountProvisioningStateInvalid` (`Accepted`) | The new AI Foundry account briefly stays `Accepted` while Azure finishes provisioning it. | Once it reaches `Succeeded`, already-created resources and the Model Router are reused idempotently. |
+> | `... cannot be saved, because this would overwrite an existing deployment which is still active` (`DeploymentActive`) | ARM keeps executing the previous `azd up`'s deployment graph even after its CLI process reported an error; retrying immediately can collide with that still-finishing deployment. | Wait roughly a minute for the prior deployment to finish, then rerun. |
+> | `unable to pull image using Managed identity ... for registry ...` (usually on `Container App Job`) | The AcrPull role assignment for the processor's managed identity is granted in ARM immediately, but the registry's own data-plane authorization cache can lag behind by up to ~2 minutes. | Wait roughly 1–2 minutes for the role assignment to propagate, then rerun. |
+>
+> None of these require deleting the environment, the resource group, or setting `APP_RESTORE_AI_ACCOUNT=true` — that flag is unrelated (see the Troubleshooting section below) and setting it here makes things worse, not better.
 
 If deploying with raw `azd up` instead of the helper, verify image handoff after a failed or partial first pass:
 
@@ -158,7 +167,7 @@ azd env get-value SERVICE_WEB_IMAGE_NAME
 azd up
 ```
 
-If either image key is not set yet, rerun `azd up`; remote packaging will populate it. Do not create a second environment, delete the resource group, or set `APP_RESTORE_AI_ACCOUNT=true` for the transient `Accepted` state.
+If either image key is not set yet, rerun `azd up`; remote packaging will populate it.
 
 If you intentionally want exports without Foundry chat, set `APP_PROFILE=data` and omit the five Model Router/chat settings. That is an opt-out path, not the recommended MeghKoshaAI/CloudLens deployment.
 
