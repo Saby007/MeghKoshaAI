@@ -145,6 +145,7 @@ def test_each_profile_defaults_to_no_applications_processor_ai_runtime_or_export
     assert not settings["applicationImagesSupplied"]
     assert not settings["processorEnabled"]
     assert not settings["aiRuntimeEnabled"]
+    assert not settings["chatRuntimeEnabled"]
     assert not settings["nativeExportNetworkException"]
     assert settings["cloudPreflightStillRequired"]
 
@@ -166,6 +167,7 @@ def test_azure_operations_are_blocked_without_explicit_approval(operation):
     ({"APP_EXPORT_TRUSTED_SERVICES": "true"}, "not part of the core stage"),
     ({"APP_ENABLE_PROCESSOR": "true"}, "requires the data"),
     ({"APP_ENABLE_AI_RUNTIME": "true"}, "AI runtime requires"),
+    ({"APP_ENABLE_CHAT_RUNTIME": "true"}, "Foundry chat requires"),
     ({"APP_MODEL_DEPLOYMENTS": "{}"}, "must be a JSON array"),
     ({"APP_PROFILE": "ai", "APP_MODEL_DEPLOYMENTS": '[{"name":"test"}]'}, "missing modelFormat"),
 ])
@@ -173,6 +175,28 @@ def test_invalid_or_unimplemented_configuration_fails_before_cloud_calls(overrid
     result = run_input_validation(overrides)
     assert result.returncode != 0
     assert message in result.stderr
+
+
+def test_approved_model_router_enables_chat_without_hosted_agent_narration():
+    result = run_input_validation({
+        "APP_PROFILE": "ai",
+        "APP_MODEL_DEPLOYMENTS": json.dumps([{
+            "name": "model-router",
+            "modelFormat": "OpenAI",
+            "modelName": "model-router",
+            "modelVersion": "2025-11-18",
+            "sku": "GlobalStandard",
+            "capacity": 100,
+        }]),
+        "APP_ENABLE_CHAT_RUNTIME": "true",
+        "APP_AI_VALIDATED": "true",
+        "MODEL_ROUTER_DEPLOYMENT_NAME": "model-router",
+    })
+
+    assert result.returncode == 0, result.stderr
+    settings = json.loads(result.stdout)
+    assert settings["chatRuntimeEnabled"] is True
+    assert settings["aiRuntimeEnabled"] is False
 
 
 def test_first_publish_allows_no_existing_digests_but_requires_approved_environment_registry():
@@ -321,7 +345,7 @@ def test_compiled_stage_defaults_are_explicit_and_safe(compiled_profiles):
         assert values["apiImage"] == values["webImage"] == ""
         assert values["apiClientId"] == values["webClientId"] == ""
         assert values["modelDeployments"] == []
-        assert not any(values[name] for name in ("enableProcessor", "enableAiRuntime", "allowNativeExportTrustedServices"))
+        assert not any(values[name] for name in ("enableProcessor", "enableAiRuntime", "enableChatRuntime", "allowNativeExportTrustedServices"))
         modules = resource_map(template)
         assert "condition" not in modules["core"]
         assert modules["data"]["condition"] == "[variables('dataEnabled')]"
@@ -344,6 +368,8 @@ def test_compiled_core_and_apps_enforce_identity_and_ingress_boundaries(compiled
     assert environment["properties"]["appLogsConfiguration"] == {"destination": "azure-monitor"}
     assert "sharedKey" not in json.dumps(core)
     apps = list(resource_map(modules["apps"]["properties"]["template"]).values())
+    api_environment = modules["apps"]["properties"]["parameters"]["apiEnvironment"]["value"]
+    assert next(item for item in api_environment if item["name"] == "FOUNDRY_CHAT_ENABLED")["value"] == "[string(and(and(variables('aiEnabled'), parameters('enableChatRuntime')), not(empty(parameters('modelRouterDeploymentName')))))]"
     api = next(resource for resource in apps if "ca-api-" in resource["name"])
     web = next(resource for resource in apps if "ca-web-" in resource["name"])
     assert api["properties"]["configuration"]["ingress"]["external"] is False
@@ -376,6 +402,28 @@ def test_compiled_data_ai_and_processor_do_not_add_queues_or_implicit_credential
     job = next(resource for resource in processor if resource["type"] == "Microsoft.App/jobs")
     assert job["properties"]["configuration"]["triggerType"] == "Schedule"
     assert job["properties"]["configuration"]["scheduleTriggerConfig"]["parallelism"] == 1
+
+
+def test_operational_model_router_template_only_targets_the_existing_account_child():
+    compiler = shutil.which("bicep") or str(Path.home() / ".azure" / "bin" / "bicep.exe")
+    if not Path(compiler).is_file():
+        pytest.skip("Standalone Bicep is required for generated-template checks")
+    result = subprocess.run(
+        [compiler, "build", str(PROJECT_ROOT / "infra" / "model-router.bicep"), "--stdout"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    template = json.loads(result.stdout)
+    resources = list(resource_map(template).values())
+    assert len(resources) == 1
+    deployment = resources[0]
+    assert deployment["type"] == "Microsoft.CognitiveServices/accounts/deployments"
+    assert deployment["name"] == "[format('{0}/{1}', parameters('accountName'), 'model-router')]"
+    assert deployment["sku"] == {"name": "GlobalStandard", "capacity": 100}
+    assert deployment["properties"]["model"] == {
+        "format": "OpenAI", "name": "model-router", "version": "2025-11-18",
+    }
+    assert deployment["properties"]["versionUpgradeOption"] == "NoAutoUpgrade"
     all_text = json.dumps(template)
     for forbidden in ("Microsoft.ServiceBus/", "queueServices/queues", "Microsoft.DocumentDB/", "Microsoft.Synapse/", "Microsoft.Kusto/"):
         assert forbidden not in all_text

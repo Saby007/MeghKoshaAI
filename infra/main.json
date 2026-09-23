@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "6955016999994117765"
+      "templateHash": "5729993167995311533"
     }
   },
   "definitions": {
@@ -136,6 +136,13 @@
         "description": "Keep false until the scheduled processor implementation is validated end to end."
       }
     },
+    "restoreAiAccount": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Only set true when redeploying the same environment name after azd down without --purge left a soft-deleted AI Foundry account behind."
+      }
+    },
     "processorImage": {
       "type": "string",
       "defaultValue": ""
@@ -162,6 +169,13 @@
       "defaultValue": false,
       "metadata": {
         "description": "Keep false until the Foundry agent and model invocation are verified end to end."
+      }
+    },
+    "enableChatRuntime": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Enable grounded chat through the app-local Model Router without enabling the separate hosted-agent narrator."
       }
     },
     "agentName": {
@@ -531,7 +545,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "14939464888166122771"
+              "templateHash": "7007577972180877994"
             }
           },
           "parameters": {
@@ -573,8 +587,7 @@
           },
           "variables": {
             "storageServices": [
-              "blob",
-              "dfs"
+              "blob"
             ]
           },
           "resources": [
@@ -589,7 +602,7 @@
                 "name": "[parameters('storageSku')]"
               },
               "properties": {
-                "isHnsEnabled": true,
+                "isHnsEnabled": false,
                 "supportsHttpsTrafficOnly": true,
                 "minimumTlsVersion": "TLS1_2",
                 "allowBlobPublicAccess": false,
@@ -750,6 +763,20 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]",
                 "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), 'export-storage-setup'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), parameters('apiPrincipalId'), 'storage-account-contributor')]",
+              "properties": {
+                "principalId": "[parameters('apiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '17d1049b-9a84-46fb-8f53-869881c3d3ab')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]"
               ]
             },
             {
@@ -935,6 +962,9 @@
           },
           "modelDeployments": {
             "value": "[parameters('modelDeployments')]"
+          },
+          "restoreAiAccount": {
+            "value": "[parameters('restoreAiAccount')]"
           }
         },
         "template": {
@@ -945,7 +975,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "4840993795825141349"
+              "templateHash": "12767500926871824975"
             }
           },
           "definitions": {
@@ -1020,6 +1050,13 @@
               "metadata": {
                 "description": "Empty until specific models, versions, deployment SKUs and quota are approved."
               }
+            },
+            "restoreAiAccount": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Only set true when redeploying the same environment name after azd down without --purge left a soft-deleted account behind; a genuinely new environment has nothing to restore."
+              }
             }
           },
           "variables": {
@@ -1050,7 +1087,8 @@
                 "publicNetworkAccess": "Disabled",
                 "networkAcls": {
                   "defaultAction": "Deny"
-                }
+                },
+                "restore": "[parameters('restoreAiAccount')]"
               }
             },
             "project": {
@@ -1295,6 +1333,10 @@
               {
                 "name": "MEGHKOSHA_AI_ENABLED",
                 "value": "[string(and(variables('aiEnabled'), parameters('enableAiRuntime')))]"
+              },
+              {
+                "name": "FOUNDRY_CHAT_ENABLED",
+                "value": "[string(and(and(variables('aiEnabled'), parameters('enableChatRuntime')), not(empty(parameters('modelRouterDeploymentName')))))]"
               },
               {
                 "name": "AI_PROJECT_ENDPOINT",
@@ -1923,6 +1965,7 @@
         "processorDeployed": "[variables('deployProcessor')]",
         "aiInfrastructureDeployed": "[variables('aiEnabled')]",
         "aiRuntimeEnabled": "[and(variables('aiEnabled'), parameters('enableAiRuntime'))]",
+        "chatRuntimeEnabled": "[and(and(variables('aiEnabled'), parameters('enableChatRuntime')), not(empty(parameters('modelRouterDeploymentName'))))]",
         "nativeExportIngressException": "[and(variables('dataEnabled'), parameters('allowNativeExportTrustedServices'))]",
         "liveValidationRequired": true
       }

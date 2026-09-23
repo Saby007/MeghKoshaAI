@@ -40,6 +40,8 @@ param foundryProjectName string = 'cost-agent-project'
 param modelDeployments ModelDeployment[] = []
 @description('Keep false until the Foundry agent and model invocation are verified end to end.')
 param enableAiRuntime bool = false
+@description('Enable grounded chat through the app-local Model Router without enabling the separate hosted-agent narrator.')
+param enableChatRuntime bool = false
 param agentName string = 'cost-agent'
 param modelRouterDeploymentName string = ''
 
@@ -130,6 +132,7 @@ module apps './modules/apps.bicep' = if (deployApplications) {
       { name: 'APP_PROFILE', value: profile }
       { name: 'APP_SCHEDULER_ENABLED', value: string(deployProcessor) }
       { name: 'MEGHKOSHA_AI_ENABLED', value: string(aiEnabled && enableAiRuntime) }
+      { name: 'FOUNDRY_CHAT_ENABLED', value: string(aiEnabled && enableChatRuntime && !empty(modelRouterDeploymentName)) }
       { name: 'AI_PROJECT_ENDPOINT', value: aiEnabled ? ai!.outputs.projectEndpoint : '' }
       { name: 'AI_SERVICES_ENDPOINT', value: aiEnabled ? ai!.outputs.endpoint : '' }
       { name: 'AGENT_NAME', value: agentName }
@@ -193,6 +196,7 @@ output APP_DEPLOYMENT_STATE object = {
   processorDeployed: deployProcessor
   aiInfrastructureDeployed: aiEnabled
   aiRuntimeEnabled: aiEnabled && enableAiRuntime
+  chatRuntimeEnabled: aiEnabled && enableChatRuntime && !empty(modelRouterDeploymentName)
   nativeExportIngressException: dataEnabled && allowNativeExportTrustedServices
   liveValidationRequired: true
 }

@@ -87,7 +87,7 @@ Each profile is a superset of the previous one. Application containers only depl
 
 **Report generation.** The API streams each month's compressed FOCUS CSV directly from ADLS, validates its schema and row shape against the delivery manifest, and reconciles it with a live resource inventory, Azure Advisor recommendations, and (where enabled) Azure Monitor metrics before rendering the dashboards below.
 
-**AI narration (optional).** When the `ai` profile and `APP_ENABLE_AI_RUNTIME` are both explicitly turned on, a Foundry-hosted agent turns the reconciled findings into the Executive Summary narrative and answers questions in the **Chat** tab. With AI disabled, every dashboard still works from the reconciled data alone — the app never blocks on a model being available.
+**Foundry AI (optional).** The `ai` profile provisions a private Foundry account/project. `APP_ENABLE_CHAT_RUNTIME=true` uses that app's own approved `model-router` deployment to narrate grounded Chat answers from deterministic API and FOCUS evidence; amounts and rankings remain application-computed. The separate `APP_ENABLE_AI_RUNTIME` switch controls only the hosted-agent Executive Summary narrator. Either path can fall back without blocking the dashboard.
 
 **No silent write access.** The app's managed identities only ever hold Reader and Cost Management Contributor roles that you grant explicitly (see below). It has no ability to modify budgets, resources, or IAM outside of the one disclosed, narrowly-scoped side effect of creating its own cost export.
 

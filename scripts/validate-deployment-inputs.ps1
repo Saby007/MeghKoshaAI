@@ -114,25 +114,36 @@ $models = ConvertFrom-Json -InputObject (Get-Setting 'APP_MODEL_DEPLOYMENTS' '[]
 if ($models -isnot [System.Collections.IList]) { throw 'APP_MODEL_DEPLOYMENTS must be a JSON array.' }
 if ($models.Count -and $profile -ne 'ai') { throw 'Model deployments require the ai stage.' }
 $modelNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$modelRouterNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($model in $models) {
     if ($model -isnot [System.Collections.IDictionary]) { throw 'Each model must be an object.' }
     foreach ($field in @('name', 'modelFormat', 'modelName', 'modelVersion', 'sku', 'capacity')) {
         if (-not $model.Contains($field)) { throw "Model deployment is missing $field." }
     }
     if ($model.Count -ne 6) { throw 'A model deployment contains unsupported fields.' }
-    if ($model.modelName -eq 'model-router') {
-        throw 'Model Router provisioning requires the approved routing subset and policy integration; it is not enabled by this generic model schema.'
-    }
     if (-not $modelNames.Add([string]$model.name) -or $model.name -cnotmatch '^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$') { throw 'Model deployment names must be valid and unique.' }
     if ($model.sku -cnotin @('Standard', 'GlobalStandard', 'DataZoneStandard') -or
         $model.capacity -isnot [long] -and $model.capacity -isnot [int] -or $model.capacity -lt 1) { throw 'Model SKU or capacity is invalid.' }
     foreach ($field in @('modelFormat', 'modelName', 'modelVersion')) {
         if ($model[$field] -isnot [string] -or [string]::IsNullOrWhiteSpace($model[$field])) { throw "Model $field must be specified." }
     }
+    if ($model.modelName -eq 'model-router') {
+        if ($model.modelFormat -ne 'OpenAI' -or $model.modelVersion -ne '2025-11-18' -or
+            $model.sku -ne 'GlobalStandard' -or $model.capacity -ne 100) {
+            throw 'Model Router must use the approved OpenAI 2025-11-18 GlobalStandard deployment at capacity 100.'
+        }
+        [void] $modelRouterNames.Add([string]$model.name)
+    }
 }
 $aiRuntime = Get-BooleanSetting 'APP_ENABLE_AI_RUNTIME'
 if ($aiRuntime -and ($profile -ne 'ai' -or -not $models.Count -or -not (Get-BooleanSetting 'APP_AI_VALIDATED'))) {
         throw 'AI runtime requires the ai stage, configured models and explicit validation (APP_AI_VALIDATED=true).'
+}
+$chatRuntime = Get-BooleanSetting 'APP_ENABLE_CHAT_RUNTIME'
+$modelRouterDeploymentName = Get-Setting 'MODEL_ROUTER_DEPLOYMENT_NAME'
+if ($chatRuntime -and ($profile -ne 'ai' -or -not (Get-BooleanSetting 'APP_AI_VALIDATED') -or
+    [string]::IsNullOrWhiteSpace($modelRouterDeploymentName) -or -not $modelRouterNames.Contains($modelRouterDeploymentName))) {
+        throw 'Foundry chat requires the ai stage, explicit validation and MODEL_ROUTER_DEPLOYMENT_NAME matching an approved model-router deployment.'
 }
 
 [pscustomobject]@{
@@ -142,6 +153,7 @@ if ($aiRuntime -and ($profile -ne 'ai' -or -not $models.Count -or -not (Get-Bool
     applicationImagesSupplied = $applications
     processorEnabled = $processor
     aiRuntimeEnabled = $aiRuntime
+    chatRuntimeEnabled = $chatRuntime
     nativeExportNetworkException = $trustedExports
     cloudPreflightStillRequired = $true
 } | ConvertTo-Json -Compress

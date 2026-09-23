@@ -174,7 +174,8 @@ def test_model_router_response_exposes_selected_model_and_usage(monkeypatch):
 
     monkeypatch.setenv("AI_SERVICES_ENDPOINT", "https://example.openai.azure.com")
     monkeypatch.setenv("MODEL_ROUTER_DEPLOYMENT_NAME", "finops-model-router")
-    monkeypatch.setenv("MEGHKOSHA_AI_ENABLED", "true")
+    monkeypatch.setenv("FOUNDRY_CHAT_ENABLED", "true")
+    monkeypatch.setenv("MEGHKOSHA_AI_ENABLED", "false")
     monkeypatch.setenv("AZURE_CLIENT_ID", "55555555-5555-5555-5555-555555555555")
     monkeypatch.setattr(chat_model, "_create_chat_client", FakeClient)
 
@@ -187,7 +188,8 @@ def test_model_router_response_exposes_selected_model_and_usage(monkeypatch):
 
 
 def test_disabled_ai_does_not_use_configured_router(monkeypatch):
-    monkeypatch.setenv("MEGHKOSHA_AI_ENABLED", "false")
+    monkeypatch.setenv("FOUNDRY_CHAT_ENABLED", "false")
+    monkeypatch.setenv("MEGHKOSHA_AI_ENABLED", "true")
     monkeypatch.setenv("AI_SERVICES_ENDPOINT", "https://example.openai.azure.com")
     monkeypatch.setenv("MODEL_ROUTER_DEPLOYMENT_NAME", "finops-model-router")
 

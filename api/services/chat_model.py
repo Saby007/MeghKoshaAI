@@ -131,13 +131,20 @@ def _create_chat_client(**kwargs):
     return OpenAIChatCompletionClient(**kwargs)
 
 
+def _chat_enabled() -> bool:
+    value = os.environ.get("FOUNDRY_CHAT_ENABLED")
+    if value is None:
+        value = os.environ.get("MEGHKOSHA_AI_ENABLED", "false")
+    return value.strip().lower() == "true"
+
+
 async def narrate_with_model_router(
     question: str,
     report: FullReport,
     verified: ChatAnswer,
     history: list[ChatTurn],
 ) -> ChatAnswer:
-    if os.environ.get("MEGHKOSHA_AI_ENABLED", "false").strip().lower() != "true":
+    if not _chat_enabled():
         return _fallback(verified)
     endpoint = os.environ.get("AI_SERVICES_ENDPOINT", "").strip()
     deployment = os.environ.get("MODEL_ROUTER_DEPLOYMENT_NAME", "").strip()
