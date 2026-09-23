@@ -24,5 +24,6 @@ param modelDeployments = json(readEnvironmentVariable('APP_MODEL_DEPLOYMENTS', '
 param enableAiRuntime = bool(readEnvironmentVariable('APP_ENABLE_AI_RUNTIME', 'false'))
 param enableChatRuntime = bool(readEnvironmentVariable('APP_ENABLE_CHAT_RUNTIME', 'false'))
 param restoreAiAccount = bool(readEnvironmentVariable('APP_RESTORE_AI_ACCOUNT', 'false'))
+param reuseAiAccount = bool(readEnvironmentVariable('APP_REUSE_AI_ACCOUNT', 'false'))
 param agentName = readEnvironmentVariable('AGENT_NAME', 'cost-agent')
 param modelRouterDeploymentName = readEnvironmentVariable('MODEL_ROUTER_DEPLOYMENT_NAME', '')

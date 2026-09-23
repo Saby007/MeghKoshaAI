@@ -24,6 +24,7 @@ $settings = [ordered]@{
     APP_AI_VALIDATED = 'true'
     APP_ENABLE_AI_RUNTIME = 'false'
     APP_RESTORE_AI_ACCOUNT = 'false'
+    APP_REUSE_AI_ACCOUNT = 'false'
 }
 
 if ($PlanOnly) {
@@ -55,6 +56,16 @@ if ($environmentExists) {
 foreach ($entry in $settings.GetEnumerator()) {
     & azd env set --environment $EnvironmentName $entry.Key $entry.Value
     if ($LASTEXITCODE -ne 0) { throw "Unable to set $($entry.Key) in azd environment '$EnvironmentName'." }
+}
+
+$resourceGroup = & azd env get-value --environment $EnvironmentName AZURE_RESOURCE_GROUP 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($resourceGroup)) {
+    $resourceGroup = "rg-$EnvironmentName"
+}
+$existingAccounts = @(& az cognitiveservices account list --resource-group $resourceGroup --query '[].name' --output tsv 2>$null)
+if ($LASTEXITCODE -eq 0 -and $existingAccounts.Count -gt 0) {
+    & azd env set --environment $EnvironmentName APP_REUSE_AI_ACCOUNT true | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to enable existing Foundry account reuse.' }
 }
 
 if (-not $SkipPreview) {
@@ -115,12 +126,16 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
     if ($foundryRace) {
         Write-Warning 'Foundry account creation is still settling. Waiting for Succeeded before retrying.'
         Wait-FoundryAccount
+        & azd env set --environment $EnvironmentName APP_REUSE_AI_ACCOUNT true | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Unable to switch the retry to the existing Foundry account.' }
     } else {
         Write-Warning 'Images were published after infrastructure planning. Retrying so Bicep can create the Container Apps.'
     }
     Sync-ProcessorImage
 }
 if (-not $completed) { throw 'Deployment did not complete.' }
+& azd env set --environment $EnvironmentName APP_REUSE_AI_ACCOUNT true | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Unable to persist existing Foundry account reuse for future deployments.' }
 
 $url = & azd env get-value --environment $EnvironmentName SERVICE_WEB_ENDPOINT_URL 2>$null
 if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($url)) {

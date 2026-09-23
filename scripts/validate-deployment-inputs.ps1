@@ -140,6 +140,14 @@ if ($aiRuntime -and ($profile -ne 'ai' -or -not $models.Count -or -not (Get-Bool
         throw 'AI runtime requires the ai stage, configured models and explicit validation (APP_AI_VALIDATED=true).'
 }
 $chatRuntime = Get-BooleanSetting 'APP_ENABLE_CHAT_RUNTIME'
+$restoreAiAccount = Get-BooleanSetting 'APP_RESTORE_AI_ACCOUNT'
+$reuseAiAccount = Get-BooleanSetting 'APP_REUSE_AI_ACCOUNT'
+if ($restoreAiAccount -and $reuseAiAccount) {
+    throw 'Foundry account restore and reuse cannot both be enabled.'
+}
+if ($reuseAiAccount -and $profile -ne 'ai') {
+    throw 'Foundry account reuse requires the ai stage.'
+}
 $modelRouterDeploymentName = Get-Setting 'MODEL_ROUTER_DEPLOYMENT_NAME'
 if ($chatRuntime -and ($profile -ne 'ai' -or -not (Get-BooleanSetting 'APP_AI_VALIDATED') -or
     [string]::IsNullOrWhiteSpace($modelRouterDeploymentName) -or -not $modelRouterNames.Contains($modelRouterDeploymentName))) {
@@ -154,6 +162,8 @@ if ($chatRuntime -and ($profile -ne 'ai' -or -not (Get-BooleanSetting 'APP_AI_VA
     processorEnabled = $processor
     aiRuntimeEnabled = $aiRuntime
     chatRuntimeEnabled = $chatRuntime
+    aiAccountRestored = $restoreAiAccount
+    aiAccountReused = $reuseAiAccount
     nativeExportNetworkException = $trustedExports
     cloudPreflightStillRequired = $true
 } | ConvertTo-Json -Compress

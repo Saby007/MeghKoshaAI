@@ -146,6 +146,8 @@ def test_each_profile_defaults_to_no_applications_processor_ai_runtime_or_export
     assert not settings["processorEnabled"]
     assert not settings["aiRuntimeEnabled"]
     assert not settings["chatRuntimeEnabled"]
+    assert not settings["aiAccountRestored"]
+    assert not settings["aiAccountReused"]
     assert not settings["nativeExportNetworkException"]
     assert settings["cloudPreflightStillRequired"]
 
@@ -168,6 +170,8 @@ def test_azure_operations_are_blocked_without_explicit_approval(operation):
     ({"APP_ENABLE_PROCESSOR": "true"}, "requires the data"),
     ({"APP_ENABLE_AI_RUNTIME": "true"}, "AI runtime requires"),
     ({"APP_ENABLE_CHAT_RUNTIME": "true"}, "Foundry chat requires"),
+    ({"APP_REUSE_AI_ACCOUNT": "true"}, "Foundry account reuse requires"),
+    ({"APP_PROFILE": "ai", "APP_RESTORE_AI_ACCOUNT": "true", "APP_REUSE_AI_ACCOUNT": "true"}, "restore and reuse cannot both"),
     ({"APP_MODEL_DEPLOYMENTS": "{}"}, "must be a JSON array"),
     ({"APP_PROFILE": "ai", "APP_MODEL_DEPLOYMENTS": '[{"name":"test"}]'}, "missing modelFormat"),
 ])
@@ -225,12 +229,14 @@ def test_ai_deployment_helper_plans_previewed_ai_profile_with_processor():
         "APP_AI_VALIDATED": "true",
         "APP_ENABLE_AI_RUNTIME": "false",
         "APP_RESTORE_AI_ACCOUNT": "false",
+        "APP_REUSE_AI_ACCOUNT": "false",
     }
     source = script.read_text(encoding="utf-8")
     assert "AccountProvisioningStateInvalid|Another operation is in progress" in source
     assert "resource not found: unable to find a resource with name 'ca-(api|web)-" in source
     assert "az cognitiveservices account list" in source
     assert "az cognitiveservices account show" in source
+    assert "APP_REUSE_AI_ACCOUNT true" in source
     assert "az resource list" not in source
     assert "azd env list --output json" in source
     assert "azd env select $EnvironmentName 2>$null" not in source
@@ -427,11 +433,12 @@ def test_compiled_stage_defaults_are_explicit_and_safe(compiled_profiles):
         assert values["apiImage"] == values["webImage"] == ""
         assert values["apiClientId"] == values["webClientId"] == ""
         assert values["modelDeployments"] == []
-        assert not any(values[name] for name in ("enableProcessor", "enableAiRuntime", "enableChatRuntime", "allowNativeExportTrustedServices"))
+        assert not any(values[name] for name in ("enableProcessor", "enableAiRuntime", "enableChatRuntime", "reuseAiAccount", "allowNativeExportTrustedServices"))
         modules = resource_map(template)
         assert "condition" not in modules["core"]
         assert modules["data"]["condition"] == "[variables('dataEnabled')]"
-        assert modules["ai"]["condition"] == "[variables('aiEnabled')]"
+        assert modules["ai"]["condition"] == "[and(variables('aiEnabled'), not(parameters('reuseAiAccount')))]"
+        assert modules["existingAi"]["condition"] == "[and(variables('aiEnabled'), parameters('reuseAiAccount'))]"
         assert modules["apps"]["condition"] == "[variables('deployApplications')]"
         assert modules["processor"]["condition"] == "[variables('deployProcessor')]"
         assert template["variables"]["dataEnabled"] == "[contains(createArray('data', 'ai'), parameters('profile'))]"
@@ -480,6 +487,11 @@ def test_compiled_data_ai_and_processor_do_not_add_queues_or_implicit_credential
     assert account["properties"]["publicNetworkAccess"] == "Disabled"
     endpoint = next(resource for resource in ai if resource["type"] == "Microsoft.Network/privateEndpoints")
     assert endpoint["location"] == "[parameters('networkLocation')]"
+    existing_ai = list(resource_map(modules["existingAi"]["properties"]["template"]).values())
+    existing_account = next(resource for resource in existing_ai if resource["type"] == "Microsoft.CognitiveServices/accounts")
+    assert existing_account["existing"] is True
+    assert not {"properties", "location", "sku", "identity"}.intersection(existing_account)
+    assert any(resource["type"] == "Microsoft.CognitiveServices/accounts/projects" for resource in existing_ai)
     processor = list(resource_map(modules["processor"]["properties"]["template"]).values())
     job = next(resource for resource in processor if resource["type"] == "Microsoft.App/jobs")
     assert job["properties"]["configuration"]["triggerType"] == "Schedule"

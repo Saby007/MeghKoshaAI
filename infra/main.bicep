@@ -32,6 +32,8 @@ param allowNativeExportTrustedServices bool = false
 param enableProcessor bool = false
 @description('Only set true when redeploying the same environment name after azd down without --purge left a soft-deleted AI Foundry account behind.')
 param restoreAiAccount bool = false
+@description('Reuse an already-created Foundry account and deploy only its project, model, RBAC and private endpoint children.')
+param reuseAiAccount bool = false
 param processorImage string = ''
 param processorSchedule string = '*/15 * * * *'
 @minLength(2)
@@ -92,7 +94,7 @@ module data './modules/data.bicep' = if (dataEnabled) {
   }
 }
 
-module ai './modules/ai.bicep' = if (aiEnabled) {
+module ai './modules/ai.bicep' = if (aiEnabled && !reuseAiAccount) {
   name: 'app-ai'
   scope: group
   params: {
@@ -108,6 +110,25 @@ module ai './modules/ai.bicep' = if (aiEnabled) {
     restoreAiAccount: restoreAiAccount
   }
 }
+
+module existingAi './modules/ai-existing.bicep' = if (aiEnabled && reuseAiAccount) {
+  name: 'app-ai-existing'
+  scope: group
+  params: {
+    resourceToken: resourceToken
+    foundryLocation: foundryLocation
+    networkLocation: location
+    tags: tags
+    networkId: core.outputs.networkId
+    privateEndpointSubnetId: core.outputs.privateEndpointSubnetId
+    apiPrincipalId: core.outputs.apiIdentity.principalId
+    projectName: foundryProjectName
+    modelDeployments: modelDeployments
+  }
+}
+
+var aiEndpoint = !aiEnabled ? '' : reuseAiAccount ? existingAi!.outputs.endpoint : ai!.outputs.endpoint
+var aiProjectEndpoint = !aiEnabled ? '' : reuseAiAccount ? existingAi!.outputs.projectEndpoint : ai!.outputs.projectEndpoint
 
 var webOrigin = 'https://ca-web-${resourceToken}.${core.outputs.environmentDomain}'
 
@@ -133,8 +154,8 @@ module apps './modules/apps.bicep' = if (deployApplications) {
       { name: 'APP_SCHEDULER_ENABLED', value: string(deployProcessor) }
       { name: 'MEGHKOSHA_AI_ENABLED', value: string(aiEnabled && enableAiRuntime) }
       { name: 'FOUNDRY_CHAT_ENABLED', value: string(aiEnabled && enableChatRuntime && !empty(modelRouterDeploymentName)) }
-      { name: 'AI_PROJECT_ENDPOINT', value: aiEnabled ? ai!.outputs.projectEndpoint : '' }
-      { name: 'AI_SERVICES_ENDPOINT', value: aiEnabled ? ai!.outputs.endpoint : '' }
+      { name: 'AI_PROJECT_ENDPOINT', value: aiProjectEndpoint }
+      { name: 'AI_SERVICES_ENDPOINT', value: aiEndpoint }
       { name: 'AGENT_NAME', value: agentName }
       { name: 'MODEL_ROUTER_DEPLOYMENT_NAME', value: modelRouterDeploymentName }
       { name: 'COST_EXPORT_STORAGE_URL', value: dataEnabled ? data!.outputs.storageUrl : '' }
@@ -187,7 +208,7 @@ output MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID string = core.outputs.oboIdent
 output MEGHKOSHA_OBO_MANAGED_IDENTITY_PRINCIPAL_ID string = core.outputs.oboIdentity.principalId
 output COST_EXPORT_NAME string = exportName
 output COST_EXPORT_STORAGE_RESOURCE_ID string = dataEnabled ? data!.outputs.storageResourceId : ''
-output AI_PROJECT_ENDPOINT string = aiEnabled ? ai!.outputs.projectEndpoint : ''
+output AI_PROJECT_ENDPOINT string = aiProjectEndpoint
 output APP_DEPLOYMENT_STATE object = {
   profile: profile
   applicationsDeployed: deployApplications
@@ -195,6 +216,7 @@ output APP_DEPLOYMENT_STATE object = {
   dataInfrastructureDeployed: dataEnabled
   processorDeployed: deployProcessor
   aiInfrastructureDeployed: aiEnabled
+  aiAccountReused: aiEnabled && reuseAiAccount
   aiRuntimeEnabled: aiEnabled && enableAiRuntime
   chatRuntimeEnabled: aiEnabled && enableChatRuntime && !empty(modelRouterDeploymentName)
   nativeExportIngressException: dataEnabled && allowNativeExportTrustedServices

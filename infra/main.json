@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "5729993167995311533"
+      "templateHash": "3698553124785667292"
     }
   },
   "definitions": {
@@ -141,6 +141,13 @@
       "defaultValue": false,
       "metadata": {
         "description": "Only set true when redeploying the same environment name after azd down without --purge left a soft-deleted AI Foundry account behind."
+      }
+    },
+    "reuseAiAccount": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Reuse an already-created Foundry account and deploy only its project, model, RBAC and private endpoint children."
       }
     },
     "processorImage": {
@@ -925,7 +932,7 @@
       ]
     },
     "ai": {
-      "condition": "[variables('aiEnabled')]",
+      "condition": "[and(variables('aiEnabled'), not(parameters('reuseAiAccount')))]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "app-ai",
@@ -1269,6 +1276,305 @@
         "group"
       ]
     },
+    "existingAi": {
+      "condition": "[and(variables('aiEnabled'), parameters('reuseAiAccount'))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "app-ai-existing",
+      "resourceGroup": "[if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "resourceToken": {
+            "value": "[variables('resourceToken')]"
+          },
+          "foundryLocation": {
+            "value": "[parameters('foundryLocation')]"
+          },
+          "networkLocation": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "networkId": {
+            "value": "[reference('core').outputs.networkId.value]"
+          },
+          "privateEndpointSubnetId": {
+            "value": "[reference('core').outputs.privateEndpointSubnetId.value]"
+          },
+          "apiPrincipalId": {
+            "value": "[reference('core').outputs.apiIdentity.value.principalId]"
+          },
+          "projectName": {
+            "value": "[parameters('foundryProjectName')]"
+          },
+          "modelDeployments": {
+            "value": "[parameters('modelDeployments')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "languageVersion": "2.0",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "4657634702621488231"
+            }
+          },
+          "definitions": {
+            "ModelDeployment": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "modelFormat": {
+                  "type": "string"
+                },
+                "modelName": {
+                  "type": "string"
+                },
+                "modelVersion": {
+                  "type": "string"
+                },
+                "sku": {
+                  "type": "string",
+                  "allowedValues": [
+                    "DataZoneStandard",
+                    "GlobalStandard",
+                    "Standard"
+                  ]
+                },
+                "capacity": {
+                  "type": "int"
+                }
+              }
+            }
+          },
+          "parameters": {
+            "resourceToken": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 20
+            },
+            "foundryLocation": {
+              "type": "string"
+            },
+            "networkLocation": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            },
+            "networkId": {
+              "type": "string"
+            },
+            "privateEndpointSubnetId": {
+              "type": "string"
+            },
+            "apiPrincipalId": {
+              "type": "string"
+            },
+            "projectName": {
+              "type": "string",
+              "defaultValue": "cost-agent-project",
+              "minLength": 2,
+              "maxLength": 32
+            },
+            "modelDeployments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ModelDeployment"
+              },
+              "defaultValue": []
+            }
+          },
+          "variables": {
+            "privateZoneNames": [
+              "privatelink.cognitiveservices.azure.com",
+              "privatelink.openai.azure.com",
+              "privatelink.services.ai.azure.com"
+            ]
+          },
+          "resources": {
+            "account": {
+              "existing": true,
+              "type": "Microsoft.CognitiveServices/accounts",
+              "apiVersion": "2025-06-01",
+              "name": "[format('ai-{0}', parameters('resourceToken'))]"
+            },
+            "project": {
+              "type": "Microsoft.CognitiveServices/accounts/projects",
+              "apiVersion": "2025-06-01",
+              "name": "[format('{0}/{1}', format('ai-{0}', parameters('resourceToken')), parameters('projectName'))]",
+              "location": "[parameters('foundryLocation')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "displayName": "Cost Assessment AI",
+                "description": "Scoped cost evidence narration; agent initialization is a separate approved stage."
+              }
+            },
+            "models": {
+              "copy": {
+                "name": "models",
+                "count": "[length(parameters('modelDeployments'))]"
+              },
+              "type": "Microsoft.CognitiveServices/accounts/deployments",
+              "apiVersion": "2024-10-01",
+              "name": "[format('{0}/{1}', format('ai-{0}', parameters('resourceToken')), parameters('modelDeployments')[copyIndex()].name)]",
+              "sku": {
+                "name": "[parameters('modelDeployments')[copyIndex()].sku]",
+                "capacity": "[parameters('modelDeployments')[copyIndex()].capacity]"
+              },
+              "properties": {
+                "model": {
+                  "format": "[parameters('modelDeployments')[copyIndex()].modelFormat]",
+                  "name": "[parameters('modelDeployments')[copyIndex()].modelName]",
+                  "version": "[parameters('modelDeployments')[copyIndex()].modelVersion]"
+                },
+                "versionUpgradeOption": "NoAutoUpgrade"
+              }
+            },
+            "projectReader": {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts/projects', format('ai-{0}', parameters('resourceToken')), parameters('projectName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts/projects', format('ai-{0}', parameters('resourceToken')), parameters('projectName')), parameters('apiPrincipalId'), 'foundry-user')]",
+              "properties": {
+                "principalId": "[parameters('apiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d')]"
+              },
+              "dependsOn": [
+                "project"
+              ]
+            },
+            "modelCaller": {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', format('ai-{0}', parameters('resourceToken')))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', format('ai-{0}', parameters('resourceToken'))), parameters('apiPrincipalId'), 'openai-user')]",
+              "properties": {
+                "principalId": "[parameters('apiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')]"
+              }
+            },
+            "privateZones": {
+              "copy": {
+                "name": "privateZones",
+                "count": "[length(variables('privateZoneNames'))]"
+              },
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "[variables('privateZoneNames')[copyIndex()]]",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            "zoneLinks": {
+              "copy": {
+                "name": "zoneLinks",
+                "count": "[length(variables('privateZoneNames'))]"
+              },
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', variables('privateZoneNames')[copyIndex()], format('link-{0}', parameters('resourceToken')))]",
+              "location": "global",
+              "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                  "id": "[parameters('networkId')]"
+                }
+              },
+              "dependsOn": [
+                "[format('privateZones[{0}]', copyIndex())]"
+              ]
+            },
+            "endpoint": {
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2024-05-01",
+              "name": "[format('pe-ai-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('networkLocation')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('privateEndpointSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "account",
+                    "properties": {
+                      "privateLinkServiceId": "[resourceId('Microsoft.CognitiveServices/accounts', format('ai-{0}', parameters('resourceToken')))]",
+                      "groupIds": [
+                        "account"
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "zoneGroup": {
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2024-05-01",
+              "name": "[format('{0}/{1}', format('pe-ai-{0}', parameters('resourceToken')), 'default')]",
+              "properties": {
+                "copy": [
+                  {
+                    "name": "privateDnsZoneConfigs",
+                    "count": "[length(variables('privateZoneNames'))]",
+                    "input": {
+                      "name": "[format('zone-{0}', copyIndex('privateDnsZoneConfigs'))]",
+                      "properties": {
+                        "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', variables('privateZoneNames')[copyIndex('privateDnsZoneConfigs')])]"
+                      }
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "endpoint",
+                "privateZones"
+              ]
+            }
+          },
+          "outputs": {
+            "accountName": {
+              "type": "string",
+              "value": "[format('ai-{0}', parameters('resourceToken'))]"
+            },
+            "accountId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.CognitiveServices/accounts', format('ai-{0}', parameters('resourceToken')))]"
+            },
+            "endpoint": {
+              "type": "string",
+              "value": "[reference('account').endpoint]"
+            },
+            "projectEndpoint": {
+              "type": "string",
+              "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', format('ai-{0}', parameters('resourceToken')), parameters('projectName'))]"
+            },
+            "projectId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.CognitiveServices/accounts/projects', format('ai-{0}', parameters('resourceToken')), parameters('projectName'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "core",
+        "group"
+      ]
+    },
     "apps": {
       "condition": "[variables('deployApplications')]",
       "type": "Microsoft.Resources/deployments",
@@ -1340,11 +1646,11 @@
               },
               {
                 "name": "AI_PROJECT_ENDPOINT",
-                "value": "[if(variables('aiEnabled'), reference('ai').outputs.projectEndpoint.value, '')]"
+                "value": "[if(not(variables('aiEnabled')), '', if(parameters('reuseAiAccount'), reference('existingAi').outputs.projectEndpoint.value, reference('ai').outputs.projectEndpoint.value))]"
               },
               {
                 "name": "AI_SERVICES_ENDPOINT",
-                "value": "[if(variables('aiEnabled'), reference('ai').outputs.endpoint.value, '')]"
+                "value": "[if(not(variables('aiEnabled')), '', if(parameters('reuseAiAccount'), reference('existingAi').outputs.endpoint.value, reference('ai').outputs.endpoint.value))]"
               },
               {
                 "name": "AGENT_NAME",
@@ -1654,6 +1960,7 @@
         "ai",
         "core",
         "data",
+        "existingAi",
         "group"
       ]
     },
@@ -1953,7 +2260,7 @@
     },
     "AI_PROJECT_ENDPOINT": {
       "type": "string",
-      "value": "[if(variables('aiEnabled'), reference('ai').outputs.projectEndpoint.value, '')]"
+      "value": "[if(not(variables('aiEnabled')), '', if(parameters('reuseAiAccount'), reference('existingAi').outputs.projectEndpoint.value, reference('ai').outputs.projectEndpoint.value))]"
     },
     "APP_DEPLOYMENT_STATE": {
       "type": "object",
@@ -1964,6 +2271,7 @@
         "dataInfrastructureDeployed": "[variables('dataEnabled')]",
         "processorDeployed": "[variables('deployProcessor')]",
         "aiInfrastructureDeployed": "[variables('aiEnabled')]",
+        "aiAccountReused": "[and(variables('aiEnabled'), parameters('reuseAiAccount'))]",
         "aiRuntimeEnabled": "[and(variables('aiEnabled'), parameters('enableAiRuntime'))]",
         "chatRuntimeEnabled": "[and(and(variables('aiEnabled'), parameters('enableChatRuntime')), not(empty(parameters('modelRouterDeploymentName'))))]",
         "nativeExportIngressException": "[and(variables('dataEnabled'), parameters('allowNativeExportTrustedServices'))]",
