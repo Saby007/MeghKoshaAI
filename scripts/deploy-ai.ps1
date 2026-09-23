@@ -42,7 +42,10 @@ if (-not (Get-Command az -ErrorAction SilentlyContinue)) { throw 'Azure CLI (az)
 
 $environments = @(& azd env list --output json | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0) { throw 'Unable to list azd environments.' }
-if ($environments.Name -contains $EnvironmentName) {
+$environmentExists = @($environments | Where-Object {
+    $_ -ne $null -and $_.PSObject.Properties['Name'] -ne $null -and $_.Name -eq $EnvironmentName
+}).Count -gt 0
+if ($environmentExists) {
     & azd env select $EnvironmentName | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Unable to select azd environment '$EnvironmentName'." }
 } else {

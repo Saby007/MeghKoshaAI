@@ -254,6 +254,33 @@ def test_ai_deployment_helper_plan_supports_explicit_opt_outs():
     assert plan["maxAttempts"] == 5
 
 
+def test_ai_deployment_helper_environment_inventory_handles_empty_list():
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("PowerShell 7.4 or later is required for deployment-helper checks")
+    expression = """
+Set-StrictMode -Version Latest
+$EnvironmentName = 'fresh-ai'
+function Test-Inventory([string] $Json) {
+    $environments = @($Json | ConvertFrom-Json)
+    @($environments | Where-Object {
+        $_ -ne $null -and $_.PSObject.Properties['Name'] -ne $null -and $_.Name -eq $EnvironmentName
+    }).Count -gt 0
+}
+@{
+    empty = Test-Inventory '[]'
+    present = Test-Inventory '[{"Name":"fresh-ai"}]'
+    other = Test-Inventory '[{"Name":"other"}]'
+} | ConvertTo-Json -Compress
+"""
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-Command", expression],
+        capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"empty": False, "present": True, "other": False}
+
+
 def test_first_publish_allows_no_existing_digests_but_requires_approved_environment_registry():
     result = run_input_validation({"APP_ALLOW_AZURE_CHANGES": "true",
                                    "AZURE_CONTAINER_REGISTRY_ENDPOINT": "testapp.azurecr.io"}, "Publish")
