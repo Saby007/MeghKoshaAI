@@ -49,6 +49,7 @@ resource models 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = 
     }
     versionUpgradeOption: 'NoAutoUpgrade'
   }
+  dependsOn: [endpoint]
 }]
 
 resource projectReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -109,6 +110,7 @@ resource endpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
       }
     ]
   }
+  dependsOn: [project]
 }
 
 resource zoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {

@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "3698553124785667292"
+      "templateHash": "17186321338134873976"
     }
   },
   "definitions": {
@@ -1324,7 +1324,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "4657634702621488231"
+              "templateHash": "14819564761138330879"
             }
           },
           "definitions": {
@@ -1442,7 +1442,10 @@
                   "version": "[parameters('modelDeployments')[copyIndex()].modelVersion]"
                 },
                 "versionUpgradeOption": "NoAutoUpgrade"
-              }
+              },
+              "dependsOn": [
+                "endpoint"
+              ]
             },
             "projectReader": {
               "type": "Microsoft.Authorization/roleAssignments",
@@ -1520,7 +1523,10 @@
                     }
                   }
                 ]
-              }
+              },
+              "dependsOn": [
+                "project"
+              ]
             },
             "zoneGroup": {
               "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",

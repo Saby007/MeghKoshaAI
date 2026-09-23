@@ -492,6 +492,11 @@ def test_compiled_data_ai_and_processor_do_not_add_queues_or_implicit_credential
     assert existing_account["existing"] is True
     assert not {"properties", "location", "sku", "identity"}.intersection(existing_account)
     assert any(resource["type"] == "Microsoft.CognitiveServices/accounts/projects" for resource in existing_ai)
+    existing_endpoint = next(resource for resource in existing_ai if resource["type"] == "Microsoft.Network/privateEndpoints")
+    assert any("projects" in dependency for dependency in existing_endpoint.get("dependsOn", []))
+    existing_models = [resource for resource in existing_ai if resource["type"] == "Microsoft.CognitiveServices/accounts/deployments"]
+    if existing_models:
+        assert any("privateEndpoints" in dependency for dependency in existing_models[0].get("dependsOn", []))
     processor = list(resource_map(modules["processor"]["properties"]["template"]).values())
     job = next(resource for resource in processor if resource["type"] == "Microsoft.App/jobs")
     assert job["properties"]["configuration"]["triggerType"] == "Schedule"
