@@ -227,6 +227,7 @@ test('only Run Report starts an assessment, including after reload, and navigati
 });
 
 test('light theme text retains readable contrast', async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
   await runReport(page);
   const ratios = await page.evaluate(() => {
@@ -897,6 +898,18 @@ test('populated resource evidence and page search stay usable across viewports',
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
       await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await selectReportPage(page, 'Stale Resources');
+      await expect(page.getByRole('group', { name: 'Stale resource filters' })).toBeVisible();
+      await expect(page.locator('.stale-resource-table')).toContainText('finance-archive-evidence-disk');
+      await page.getByLabel('Find stale resource').fill('no matching resource');
+      await expect(page.getByText('No resources match these filters', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+      await expect(page.locator('.stale-resource-table')).toContainText('finance-archive-evidence-disk');
+      await page.getByLabel('Stale resource impact').selectOption('potential_savings');
+      await expect(page.getByRole('status').filter({ hasText: 'Showing 1 of 1 flagged resources.' })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`${width}-${theme}-stale-resource-filters.png`), fullPage: true, animations: 'disabled' });
+      await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
       await selectReportPage(page, 'Storage Optimization');
       const finding = page.getByRole('button', { name: /Unattached disks/ });
       if (await finding.getAttribute('aria-expanded') === 'false') await finding.click();

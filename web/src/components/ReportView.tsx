@@ -3400,14 +3400,38 @@ function StaleResourcesTab({
   formatMoney: MoneyFormatter;
   displayCurrency: string;
 }) {
+  const [query, setQuery] = useState('');
+  const [subscriptionId, setSubscriptionId] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [impactType, setImpactType] = useState('');
+  const [evidenceType, setEvidenceType] = useState('');
   const categories = report.tierACategories.filter((category) => STALE_CATEGORIES.has(category.category));
   const lines = categories.flatMap((category) => category.lines.map((line) => ({ category, line })));
-  const verifiedSaving = categories
-    .filter((category) => category.impactType === 'potential_savings')
-    .reduce((sum, category) => sum + category.monthlyTotal, 0);
-  const costAtRisk = categories
-    .filter((category) => category.impactType === 'cost_at_risk')
-    .reduce((sum, category) => sum + category.monthlyTotal, 0);
+  const subscriptions = [...new Map(lines.map(({ line }) => [line.subscriptionId, line.subscriptionName])).entries()]
+    .sort((left, right) => left[1].localeCompare(right[1]));
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filteredLines = lines.filter(({ category, line }) => {
+    const searchText = [category.displayName, line.resourceName, line.resourceId, line.subscriptionName, line.detail, EVIDENCE_LABELS[line.evidenceType]].join(' ').toLocaleLowerCase();
+    return (!normalizedQuery || searchText.includes(normalizedQuery))
+      && (!subscriptionId || line.subscriptionId === subscriptionId)
+      && (!categoryId || category.category === categoryId)
+      && (!impactType || category.impactType === impactType)
+      && (!evidenceType || line.evidenceType === evidenceType);
+  });
+  const verifiedSaving = filteredLines
+    .filter(({ category }) => category.impactType === 'potential_savings')
+    .reduce((sum, { line }) => sum + (line.monthlyCost ?? 0), 0);
+  const costAtRisk = filteredLines
+    .filter(({ category }) => category.impactType === 'cost_at_risk')
+    .reduce((sum, { line }) => sum + (line.monthlyCost ?? 0), 0);
+  const hasFilters = !!(query || subscriptionId || categoryId || impactType || evidenceType);
+  useEffect(() => {
+    setQuery('');
+    setSubscriptionId('');
+    setCategoryId('');
+    setImpactType('');
+    setEvidenceType('');
+  }, [report]);
   return (
     <div className="panel">
       <h2 className="section-title">Stale and Orphaned Resources</h2>
@@ -3417,7 +3441,7 @@ function StaleResourcesTab({
       <div className="kpi-grid stale-kpi-grid">
         <div className="kpi-card">
           <div className="kpi-label">Flagged resources</div>
-          <div className="kpi-value">{lines.length}</div>
+          <div className="kpi-value">{filteredLines.length}</div>
         </div>
         <div className="kpi-card positive">
           <div className="kpi-label">Verified saving / month</div>
@@ -3435,7 +3459,17 @@ function StaleResourcesTab({
       {lines.length === 0 ? (
         <EvidenceState title="No stale-resource findings" detail="No stale or orphaned resources matched the current evidence rules." />
       ) : (
-        <div className="stale-table-scroll">
+        <>
+          <div className="billing-filters" role="group" aria-label="Stale resource filters">
+            <label className="billing-filter"><span>Find resource</span><input type="search" aria-label="Find stale resource" value={query} placeholder="Name, ID, or evidence" onChange={(event) => setQuery(event.target.value)} /></label>
+            <label className="billing-filter"><span>Subscription</span><select aria-label="Stale resource subscription" value={subscriptionId} onChange={(event) => setSubscriptionId(event.target.value)}><option value="">All subscriptions</option>{subscriptions.map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select></label>
+            <label className="billing-filter"><span>Category</span><select aria-label="Stale resource category" value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="">All categories</option>{categories.slice().sort((left, right) => left.displayName.localeCompare(right.displayName)).map((category) => <option value={category.category} key={category.category}>{category.displayName}</option>)}</select></label>
+            <label className="billing-filter"><span>Impact</span><select aria-label="Stale resource impact" value={impactType} onChange={(event) => setImpactType(event.target.value)}><option value="">All impacts</option><option value="potential_savings">Potential saving</option><option value="cost_at_risk">Cost at risk</option><option value="inventory">Inventory review</option></select></label>
+            <label className="billing-filter"><span>Evidence</span><select aria-label="Stale resource evidence" value={evidenceType} onChange={(event) => setEvidenceType(event.target.value)}><option value="">All evidence</option>{Object.entries(EVIDENCE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+            <button type="button" className="ghost-button" disabled={!hasFilters} onClick={() => { setQuery(''); setSubscriptionId(''); setCategoryId(''); setImpactType(''); setEvidenceType(''); }}>Clear filters</button>
+          </div>
+          <p className="billing-provenance" role="status" aria-live="polite">Showing {filteredLines.length} of {lines.length} flagged resources.</p>
+          {filteredLines.length === 0 ? <EvidenceState title="No resources match these filters" detail="Clear or change the stale-resource filters to restore matching evidence." /> : <div className="stale-table-scroll">
           <table className="report-table stale-resource-table">
             <thead>
               <tr>
@@ -3447,7 +3481,7 @@ function StaleResourcesTab({
               </tr>
             </thead>
             <tbody>
-              {lines.map(({ category, line }) => (
+              {filteredLines.map(({ category, line }) => (
                 <tr key={`${category.category}-${line.resourceId}`}>
                   <td>
                     <strong>{category.displayName}</strong>
@@ -3482,7 +3516,8 @@ function StaleResourcesTab({
               ))}
             </tbody>
           </table>
-        </div>
+        </div>}
+        </>
       )}
     </div>
   );

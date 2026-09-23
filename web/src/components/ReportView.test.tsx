@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getCostAnomalies, getExchangeRates, getRateOptimization, getResourceAvailability, getServiceRetirements, listBudgets } from '../api';
-import { anomalyFixture, detailReportFixture, pricingReportFixture, reportFixture, tagReportFixture } from '../report/testFixtures';
+import { anomalyFixture, detailReportFixture, pricingReportFixture, reportFixture, resourceReportFixture, tagReportFixture } from '../report/testFixtures';
 import { ReportView } from './ReportView';
 import { BudgetContext, budgetFilterMatches, budgetThreshold } from './BudgetContext';
 
@@ -290,4 +290,65 @@ it('distinguishes missing evidence from empty findings and does not draw empty s
   expect(container.querySelector('.evidence-state')?.getAttribute('aria-busy')).toBe('false');
   await act(async () => button('Cost by Tags/Application').click());
   expect(container.querySelector('.evidence-state')?.textContent).toContain('Tag evidence unavailable');
+});
+
+it('filters stale resources by search, subscription, category, impact and evidence', async () => {
+  const disk = resourceReportFixture.tierACategories[0];
+  const stoppedVm = {
+    ...disk,
+    category: 'stopped_vms', displayName: 'Stopped virtual machines', impactType: 'cost_at_risk' as const,
+    count: 1, monthlyTotal: 80, annualTotal: 960,
+    lines: [{ ...disk.lines[0], category: 'stopped_vms', resourceId: '/subscriptions/sub-2/resourceGroups/operations/providers/Microsoft.Compute/virtualMachines/operations-vm', resourceName: 'operations-vm', subscriptionId: 'sub-2', subscriptionName: 'Operations subscription', monthlyCost: 80, evidenceType: 'metrics_verified_idle' as const, detail: 'Stopped VM with retained billed resources.' }],
+  };
+  const snapshot = {
+    ...disk,
+    category: 'old_snapshots', displayName: 'Old snapshots', impactType: 'inventory' as const,
+    count: 1, monthlyTotal: 0, annualTotal: 0,
+    lines: [{ ...disk.lines[0], category: 'old_snapshots', resourceId: '/subscriptions/sub-3/resourceGroups/archive/providers/Microsoft.Compute/snapshots/archive-snapshot', resourceName: 'archive-snapshot', subscriptionId: 'sub-3', subscriptionName: 'Archive subscription', monthlyCost: null, evidenceType: 'inventory_candidate' as const, detail: 'Snapshot exceeded the inventory age threshold.' }],
+  };
+  const report = { ...resourceReportFixture, tierACategories: [disk, stoppedVm, snapshot] };
+  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" />));
+  await act(async () => button('Stale Resources').click());
+  const rows = () => container.querySelectorAll('.stale-resource-table tbody tr');
+  const select = (label: string) => container.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+  const choose = async (label: string, value: string) => {
+    const control = select(label);
+    await act(async () => { control.value = value; control.dispatchEvent(new Event('change', { bubbles: true })); });
+  };
+  const clear = async () => { await act(async () => button('Clear filters').click()); };
+  expect(rows()).toHaveLength(3);
+  expect(container.querySelector('.billing-provenance[role="status"]')?.textContent).toContain('Showing 3 of 3');
+
+  const search = container.querySelector<HTMLInputElement>('[aria-label="Find stale resource"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'snapshot');
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(rows()).toHaveLength(1);
+  expect(rows()[0].textContent).toContain('archive-snapshot');
+  await clear();
+
+  await choose('Stale resource subscription', 'sub-2');
+  expect(rows()).toHaveLength(1);
+  expect(rows()[0].textContent).toContain('operations-vm');
+  expect([...container.querySelectorAll('.stale-kpi-grid .kpi-card')].find((card) => card.textContent?.includes('Billed cost at risk'))?.textContent).toContain('80');
+  await clear();
+
+  await choose('Stale resource category', 'old_snapshots');
+  expect(rows()[0].textContent).toContain('Old snapshots');
+  await clear();
+  await choose('Stale resource impact', 'cost_at_risk');
+  expect(rows()[0].textContent).toContain('operations-vm');
+  await clear();
+  await choose('Stale resource evidence', 'inventory_candidate');
+  expect(rows()[0].textContent).toContain('archive-snapshot');
+
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'no matching resource');
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(container.querySelector('.stale-resource-table')).toBeNull();
+  expect(container.textContent).toContain('No resources match these filters');
+  await clear();
+  expect(rows()).toHaveLength(3);
 });
