@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,7 +41,7 @@ class ChatUsage(BaseModel):
 class ChatAnswer(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    intent: Literal["overview", "subscription_change", "unattached_disks", "score", "trend", "forecast", "help"]
+    intent: Literal["overview", "subscription_change", "unattached_disks", "top_resources", "score", "trend", "forecast", "help"]
     answer: str
     metrics: list[ChatMetric] = Field(default_factory=list)
     resources: list[ChatResource] = Field(default_factory=list)
@@ -57,11 +58,17 @@ class ChatAnswer(BaseModel):
 
 
 _SUGGESTIONS = [
+    "List the top 5 resources by cost.",
     "Why is subscription X spending more this month?",
     "Show all unattached disks.",
     "Show the 3, 6, and 12 month trends.",
     "What is the expected next-month spend and end-of-year projection?",
 ]
+
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
 
 
 def _money(value: float, currency: str) -> str:
@@ -119,6 +126,14 @@ def _score_metric(report: FullReport) -> ChatMetric:
     if change is not None:
         detail += f"; {change:+.1f} points this month"
     return ChatMetric(label="FinOps Score", value=f"{score:.0f} / 100", detail=detail)
+
+
+def _resource_limit(question: str) -> int:
+    match = re.search(r"\btop\s+(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\b", question.casefold())
+    if not match:
+        return 5
+    value = _NUMBER_WORDS.get(match.group(1), int(match.group(1)) if match.group(1).isdigit() else 5)
+    return max(1, min(value, 25))
 
 
 def _subscription_answer(question: str, report: FullReport, currency: str) -> ChatAnswer | None:
@@ -201,6 +216,41 @@ def answer_question(question: str, report: FullReport) -> ChatAnswer:
             disclaimer=deterministic,
         )
 
+    resource_ranking = "resource" in normalized and any(term in normalized for term in ("top", "highest", "most expensive", "costliest"))
+    if resource_ranking:
+        limit = _resource_limit(normalized)
+        ranked = sorted(
+            (item for item in report.cost_hierarchy if item.monthly_spend > 0),
+            key=lambda item: (-item.monthly_spend, item.resource_name.casefold(), item.resource_id.casefold()),
+        )[:limit]
+        resources = [
+            ChatResource(
+                resourceName=item.resource_name,
+                resourceId=item.resource_id,
+                subscriptionName=item.subscription_name,
+                monthlyCost=item.monthly_spend,
+                currency=currency,
+                detail=f"{item.resource_type} in {item.resource_group or 'an unassigned resource group'}",
+            )
+            for item in ranked
+        ]
+        return ChatAnswer(
+            intent="top_resources",
+            answer=(
+                f"Here are the top {len(resources)} resource(s) by monthly FOCUS EffectiveCost."
+                if resources else "No resource-level positive cost was available in this report snapshot."
+            ),
+            metrics=[ChatMetric(
+                label="Ranked resources",
+                value=str(len(resources)),
+                detail=f"Requested {limit}; ranked by monthly FOCUS EffectiveCost.",
+            )],
+            resources=resources,
+            suggestions=_SUGGESTIONS,
+            dataAsOf=data_as_of,
+            disclaimer=deterministic,
+        )
+
     if "why" in normalized and "subscription" in normalized:
         subscription = _subscription_answer(question, report, currency)
         if subscription:
@@ -234,7 +284,7 @@ def answer_question(question: str, report: FullReport) -> ChatAnswer:
         return ChatAnswer(intent="forecast", answer="This baseline extrapolates the linear trend in completed monthly consumption history.", metrics=_forecast_metrics(months, currency), suggestions=_SUGGESTIONS, dataAsOf=data_as_of, disclaimer="Forecasts are planning estimates, not billing commitments. " + deterministic)
     return ChatAnswer(
         intent="help",
-        answer="I can explain subscription changes, list unattached disks, show the FinOps Score and trends, or forecast spend from the current report.",
+        answer="I can rank resources by cost, explain subscription changes, list unattached disks, show the FinOps Score and trends, or forecast spend from the current report.",
         suggestions=_SUGGESTIONS,
         dataAsOf=data_as_of,
         disclaimer=deterministic,

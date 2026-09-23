@@ -518,11 +518,18 @@ test('workspace states support sign-in, report retry, chat retry and schedule re
   await expect(page.getByRole('alert')).toContainText('Synthetic chat retry required.');
   await expect(page.getByLabel('Ask about this report')).toHaveValue('What changed in this report?');
   await expect(page.locator('.chat-message.user')).toHaveCount(0);
-  await page.route('**/api/chat', (route) => route.fulfill({ json: {
-    intent: 'overview', answer: 'Synthetic verified answer.', metrics: [{ label: 'Monthly spend', value: '$3,120', detail: 'August 2026' }], resources: [], suggestions: [], evidenceKeys: ['summary'], disclaimer: 'Synthetic report evidence.', responseMode: 'deterministic_fallback', selectedModel: null, usage: null, dataAsOf: '2026-09-09T10:00:00Z',
-  } }));
+  await page.getByLabel('Ask about this report').fill('Can you list the top 5 resources?');
+  await page.route('**/api/chat', (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({ question: 'Can you list the top 5 resources?' });
+    return route.fulfill({ json: {
+      intent: 'top_resources', answer: 'Here are the top resources by monthly FOCUS EffectiveCost.', metrics: [{ label: 'Ranked resources', value: '1', detail: 'Requested 5; ranked by monthly FOCUS EffectiveCost.' }], resources: [{ resourceName: 'finance-vm', resourceId: '/subscriptions/sub-1/resourceGroups/finance/providers/Microsoft.Compute/virtualMachines/finance-vm', subscriptionName: 'Demo subscription', monthlyCost: 288, currency: 'USD', detail: 'Microsoft.Compute/virtualMachines in finance' }], suggestions: [], evidenceKeys: [], disclaimer: 'Synthetic report evidence.', responseMode: 'deterministic_fallback', selectedModel: null, usage: null, dataAsOf: '2026-09-09T10:00:00Z',
+    } });
+  });
   await page.getByRole('button', { name: 'Send question' }).click();
-  await expect(page.getByText('Synthetic verified answer.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Here are the top resources by monthly FOCUS EffectiveCost.', { exact: true })).toBeVisible();
+  await expect(page.locator('.chat-resources')).toContainText('finance-vm');
+  await expect(page.locator('.chat-resources')).toContainText('USD 288.00 / month');
+  await expect(page.locator('.chat-resources')).toContainText('Microsoft.Compute/virtualMachines in finance');
   await expect(page.locator('.chat-message.user')).toHaveCount(1);
   await expect(page.locator('.chat-error')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('390-chat-recovery.png'), fullPage: true, animations: 'disabled' });

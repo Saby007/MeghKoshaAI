@@ -95,7 +95,7 @@ export type ChatResource = {
   detail: string;
 };
 export type ChatAnswer = {
-  intent: 'overview' | 'subscription_change' | 'unattached_disks' | 'score' | 'trend' | 'forecast' | 'help';
+  intent: 'overview' | 'subscription_change' | 'unattached_disks' | 'top_resources' | 'score' | 'trend' | 'forecast' | 'help';
   answer: string;
   metrics: ChatMetric[];
   resources: ChatResource[];

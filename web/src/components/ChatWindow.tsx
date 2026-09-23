@@ -20,7 +20,7 @@ type ChatMessage =
   | { id: number; role: 'assistant'; answer: ChatAnswer };
 
 const STARTERS = [
-  { label: 'Spend drivers', text: 'Why is subscription X spending more this month?', icon: TrendingUp },
+  { label: 'Top resources', text: 'List the top 5 resources by cost.', icon: TrendingUp },
   { label: 'Idle storage', text: 'Show all unattached disks.', icon: HardDrive },
   { label: 'Cost trajectory', text: 'Show the 3, 6, and 12 month trends.', icon: Gauge },
   { label: 'Planning outlook', text: 'What is the expected next-month spend and end-of-year projection?', icon: CalendarRange },

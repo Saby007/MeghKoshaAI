@@ -27,6 +27,16 @@ def _report():
         monthly_cost=12.5,
         detail="Disk has no managedBy attachment.",
     )
+    resource_costs = [17.0, 91.0, 43.0, 12.0, 65.0, 28.0, 54.0]
+    cost_hierarchy = [SimpleNamespace(
+        subscription_id="sub-1",
+        subscription_name="Subscription One",
+        resource_group=f"group-{index}",
+        resource_id=f"/subscriptions/sub-1/resourceGroups/group-{index}/providers/Microsoft.Compute/virtualMachines/vm-{index}",
+        resource_name=f"vm-{index}",
+        resource_type="Microsoft.Compute/virtualMachines",
+        monthly_spend=cost,
+    ) for index, cost in enumerate(resource_costs, start=1)]
     return SimpleNamespace(
         report_metadata=SimpleNamespace(currency="USD", period="2026-07", cost_basis="FOCUS EffectiveCost"),
         spend_history=SimpleNamespace(months=months, status_message="7 complete months available."),
@@ -39,6 +49,7 @@ def _report():
             category_costs={"Compute": 130.0, "Storage": 75.0},
         )],
         tier_a_categories=[SimpleNamespace(category="unattached_disks", lines=[disk])],
+        cost_hierarchy=cost_hierarchy,
         prioritized_findings=[],
         spend_categories=[],
     )
@@ -76,6 +87,27 @@ def test_unattached_disks_returns_grounded_resource_lines():
     assert answer.metrics[0].value == "1"
     assert answer.resources[0].resource_name == "disk-one"
     assert answer.resources[0].monthly_cost == 12.5
+
+
+def test_top_resources_returns_requested_count_ranked_by_monthly_cost():
+    answer = answer_question("Can you list the top 5 resources?", _report())
+
+    assert answer.intent == "top_resources"
+    assert answer.metrics[0].value == "5"
+    assert [resource.resource_name for resource in answer.resources] == ["vm-2", "vm-5", "vm-7", "vm-3", "vm-6"]
+    assert [resource.monthly_cost for resource in answer.resources] == [91.0, 65.0, 54.0, 43.0, 28.0]
+    assert answer.resources[0].currency == "USD"
+    assert answer.resources[0].detail == "Microsoft.Compute/virtualMachines in group-2"
+    assert "monthly FOCUS EffectiveCost" in answer.answer
+
+
+def test_top_resources_supports_word_counts_and_caps_large_requests():
+    report = _report()
+
+    assert len(answer_question("List the top three resources by cost", report).resources) == 3
+    capped = answer_question("List the top 999 resources by cost", report)
+    assert len(capped.resources) == len(report.cost_hierarchy)
+    assert capped.metrics[0].detail.startswith("Requested 25")
 
 
 def test_model_router_contract_rejects_quantitative_narrative():
