@@ -232,6 +232,8 @@ def test_ai_deployment_helper_plans_previewed_ai_profile_with_processor():
     assert "az cognitiveservices account list" in source
     assert "az cognitiveservices account show" in source
     assert "az resource list" not in source
+    assert "azd env list --output json" in source
+    assert "azd env select $EnvironmentName 2>$null" not in source
     assert "azd down" not in source
     assert "--purge" not in source
 

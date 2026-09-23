@@ -40,8 +40,12 @@ if ($PlanOnly) {
 if (-not (Get-Command azd -ErrorAction SilentlyContinue)) { throw 'Azure Developer CLI (azd) is required.' }
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) { throw 'Azure CLI (az) is required.' }
 
-& azd env select $EnvironmentName 2>$null
-if ($LASTEXITCODE -ne 0) {
+$environments = @(& azd env list --output json | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0) { throw 'Unable to list azd environments.' }
+if ($environments.Name -contains $EnvironmentName) {
+    & azd env select $EnvironmentName | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Unable to select azd environment '$EnvironmentName'." }
+} else {
     & azd env new $EnvironmentName
     if ($LASTEXITCODE -ne 0) { throw "Unable to create azd environment '$EnvironmentName'." }
 }
