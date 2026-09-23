@@ -235,7 +235,9 @@ def test_ai_deployment_helper_plans_previewed_ai_profile_with_processor():
     assert "AccountProvisioningStateInvalid|Another operation is in progress" in source
     assert "resource not found: unable to find a resource with name 'ca-(api|web)-" in source
     assert "$deploymentActive = $text -match 'DeploymentActive'" in source
-    assert "foundryRace -or $missingApp -or $deploymentActive" in source
+    assert "$acrPullRace = $text -match 'unable to pull image using Managed identity'" in source
+    assert "foundryRace -or $missingApp -or $deploymentActive -or $acrPullRace" in source
+    assert "function Wait-RbacPropagation" in source
     assert "function Wait-ActiveDeployments" in source
     assert "function Test-AppsHealthy" in source
     assert "function Get-WebEndpointUrl" in source

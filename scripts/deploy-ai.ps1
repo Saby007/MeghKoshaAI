@@ -141,6 +141,13 @@ function Sync-ProcessorImage {
     if ($LASTEXITCODE -ne 0) { throw 'Unable to reuse the API image for the scheduled processor.' }
 }
 
+function Wait-RbacPropagation {
+    # AcrPull role assignments succeed in ARM immediately but the AKV/ACR data-plane authorization
+    # cache can lag behind by up to ~2 minutes; there is no provisioningState to poll here.
+    Write-Warning 'Waiting for the new role assignment to propagate to the container registry data plane.'
+    Start-Sleep -Seconds 90
+}
+
 $completed = $false
 for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
     Wait-ActiveDeployments
@@ -166,7 +173,8 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
     $foundryRace = $text -match 'AccountProvisioningStateInvalid|Another operation is in progress'
     $missingApp = $text -match "resource not found: unable to find a resource with name 'ca-(api|web)-"
     $deploymentActive = $text -match 'DeploymentActive'
-    if (-not ($foundryRace -or $missingApp -or $deploymentActive) -or $attempt -eq $MaxAttempts) {
+    $acrPullRace = $text -match 'unable to pull image using Managed identity'
+    if (-not ($foundryRace -or $missingApp -or $deploymentActive -or $acrPullRace) -or $attempt -eq $MaxAttempts) {
         throw "azd up failed on attempt $attempt. Review the output above before retrying."
     }
     if ($foundryRace) {
@@ -177,6 +185,8 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
     } elseif ($deploymentActive) {
         Write-Warning 'A previous deployment operation was still finishing on Azure. Waiting for it to reach a terminal state before retrying.'
         Wait-ActiveDeployments
+    } elseif ($acrPullRace) {
+        Wait-RbacPropagation
     } else {
         Write-Warning 'Images were published after infrastructure planning. Retrying so Bicep can create the Container Apps.'
     }
