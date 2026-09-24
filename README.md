@@ -12,6 +12,7 @@ You deploy it once into a subscription of your choice, grant it three read/cost-
 - [Architecture](#architecture)
 - [System design](#system-design)
 - [Dashboards and tabs](#dashboards-and-tabs)
+- [Prerequisites](#prerequisites)
 - [Deploying to Azure](#deploying-to-azure)
 - [The three manual role assignments](#the-three-manual-role-assignments)
 - [Local development](#local-development)
@@ -109,13 +110,31 @@ Two other top-level views round out the app:
 - **Chat** — ask follow-up questions about the current report in natural language (enabled by the `ai` profile and `APP_ENABLE_CHAT_RUNTIME=true`).
 - **Schedules** — see per-subscription export/schedule status, trigger the automatic setup described above, and pause, resume, or manually run a subscription's monthly cycle.
 
+## Prerequisites
+
+The subscription you deploy MeghKoshaAI **into** must have the [`Microsoft.CostManagementExports` resource provider](https://learn.microsoft.com/azure/azure-resource-manager/management/resource-providers-and-types) registered. Azure Cost Management uses it to reach the export destination storage account that this deployment creates. Register it once, before your first deployment:
+
+```powershell
+az provider register --namespace Microsoft.CostManagementExports --subscription <subscription-id>
+```
+
+Registration usually completes in under a minute. Confirm it reports `Registered` before deploying:
+
+```powershell
+az provider show --namespace Microsoft.CostManagementExports --subscription <subscription-id> --query registrationState -o tsv
+```
+
+**Register the subscription that hosts the export destination storage account** — that is, the subscription you deploy this app into. The subscriptions you only *assess* do not need it, so a deployment can happily export cost data for an unregistered subscription as long as its own storage account lives in a registered one. Registering requires **Contributor** or **Owner** on that subscription.
+
+> Creating an export in the Azure portal registers this provider for you automatically, but MeghKoshaAI creates its export through the [Cost Management REST API](https://learn.microsoft.com/rest/api/cost-management/exports/create-or-update), which does not. If the provider is missing, Azure rejects the export-creation call with `400 Bad Request`, the **Schedules** tab shows **Export status unavailable** with *"FOCUS export configuration could not be confirmed"*, and no export is ever created — regardless of how correct your role assignments and storage firewall settings are. Registering the provider and then using **Refresh schedules** resolves it; nothing needs redeploying.
+
 ## Deploying to Azure
 
 There are two ways to deploy: the recommended Azure Developer CLI workflow, or a portal-button path (ARM/Bicep templates can only reference already-built container images — they cannot build code from a repository by themselves).
 
 ### Option A — Azure Developer CLI, no Docker required
 
-Requires [git](https://git-scm.com/), the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/), and the [Azure CLI](https://learn.microsoft.com/cli/azure/) installed locally. Clone the repo first — `azd` reads `azure.yaml`/`infra/`/`api/`/`web/` from your local copy, it doesn't deploy directly from GitHub:
+Requires [git](https://git-scm.com/), the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/), and the [Azure CLI](https://learn.microsoft.com/cli/azure/) installed locally, plus the [provider registration above](#prerequisites). Clone the repo first — `azd` reads `azure.yaml`/`infra/`/`api/`/`web/` from your local copy, it doesn't deploy directly from GitHub:
 
 ```powershell
 git clone https://github.com/Saby007/MeghKoshaAI.git
@@ -327,6 +346,8 @@ See [the three manual role assignments](#the-three-manual-role-assignments) belo
 #### 6. Open the app
 
 Sign in, open **Schedules**, and use **Refresh schedules**. Once the roles above are visible, the app finishes export and schedule setup on its own. After the first six-month cycle completes, open **Report** and select **Run report**.
+
+If **Schedules** keeps reporting **Export status unavailable** or *"FOCUS export configuration could not be confirmed"* even though all three role assignments are in place, re-check the [`Microsoft.CostManagementExports` registration](#prerequisites) on the subscription you deployed into — that is the most common cause, and it is not something role assignments or a redeploy can fix.
 
 ## The three manual role assignments
 
