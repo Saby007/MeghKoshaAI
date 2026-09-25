@@ -130,11 +130,43 @@ az provider show --namespace Microsoft.CostManagementExports --subscription <sub
 
 ## Deploying to Azure
 
-There are two ways to deploy: the recommended Azure Developer CLI workflow, or a portal-button path (ARM/Bicep templates can only reference already-built container images — they cannot build code from a repository by themselves).
+There are three ways to deploy: one command that does the whole thing, the step-by-step Azure Developer CLI workflow, or a portal-button path (ARM/Bicep templates can only reference already-built container images — they cannot build code from a repository by themselves).
 
-### Option A — Azure Developer CLI, no Docker required
+### Option 1 — One command, end to end (recommended)
 
-Requires [git](https://git-scm.com/), the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/), and the [Azure CLI](https://learn.microsoft.com/cli/azure/) installed locally, plus the [provider registration above](#prerequisites). Clone the repo first — `azd` reads `azure.yaml`/`infra/`/`api/`/`web/` from your local copy, it doesn't deploy directly from GitHub:
+`scripts/deploy-end-to-end.ps1` is this entire page in a single self-contained script: clone, sign in, environment settings, preview, the repeated `azd up` passes with automatic retries, the scheduled processor, `bootstrap-identity.ps1` plus the client-ID redeploy, and the three role assignments on every subscription you name. When it finishes, the app is deployed, sign-in works, and the subscriptions you listed are ready to assess — no manual follow-up steps.
+
+Requires [git](https://git-scm.com/), the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/), the [Azure CLI](https://learn.microsoft.com/cli/azure/), **PowerShell 7+** (`pwsh`), and the [provider registration above](#prerequisites).
+
+```powershell
+git clone https://github.com/Saby007/MeghKoshaAI.git
+cd MeghKoshaAI
+azd auth login
+pwsh ./scripts/deploy-end-to-end.ps1 `
+  -EnvironmentName my-environment `
+  -Location centralindia `
+  -TargetSubscriptionId '<subscription-id>,<another-subscription-id>'
+```
+
+`-TargetSubscriptionId` takes a comma-separated list (or several values) so one run can grant access to every subscription you want to assess; omit it and only the subscription you deploy into is granted. The deployment subscription itself defaults to the Azure CLI's current one — pass `-SubscriptionId` to deploy somewhere else. The script pins that subscription into the azd environment and into every `az` lookup, so no step stops to prompt you halfway through a long run.
+
+**Expect the run to take roughly 30–60 minutes, and expect it to retry itself.** A brand-new environment reliably hits one or more of [the four known transient errors](#known-transient-azd-up-errors) — the Foundry account still settling in `Accepted`, the container images landing after infrastructure planning, a still-active ARM deployment, or the ACR data plane lagging behind its AcrPull grant. The script recognizes each one, applies the documented fix (including switching to `APP_REUSE_AI_ACCOUNT=true`), waits, and retries. Warnings like *"The AI Foundry account is still settling"* are normal progress, not failures. Raise `-MaxAttempts` (default 3) if a slow subscription needs more passes.
+
+Every phase is idempotent, so a run that stops partway can simply be rerun — it redeploys the current code once and then skips whatever is already settled, without deleting the environment. Because the run is long, prefer a terminal that won't be closed or recycled underneath it.
+
+| Switch | Use it when |
+| --- | --- |
+| `-PlanOnly` | Print exactly what would happen without touching Azure. |
+| `-SubscriptionId` | Deploy into a subscription other than the Azure CLI's current one. |
+| `-MaxAttempts` | Allow more `azd up` retries (default 3). |
+| `-SkipIdentityBootstrap` | A separate Entra administrator creates the app registrations. |
+| `-SkipRoleAssignments` | A subscription Owner grants the three roles separately. |
+| `-SkipProcessor` | Scheduled six-month exports are intentionally out of scope. |
+| `-SkipPreview` | Skip `azd provision --preview` on a rerun you have already reviewed. |
+
+### Option 2 — Azure Developer CLI, step by step
+
+Use this when you want to drive each stage yourself. Requires the same tooling as Option 1, plus the [provider registration above](#prerequisites). Clone the repo first — `azd` reads `azure.yaml`/`infra/`/`api/`/`web/` from your local copy, it doesn't deploy directly from GitHub:
 
 ```powershell
 git clone https://github.com/Saby007/MeghKoshaAI.git
@@ -144,6 +176,8 @@ pwsh ./scripts/deploy-ai.ps1 -EnvironmentName my-environment -Location centralin
 ```
 
 The helper previews before deploying, configures the recommended `ai` profile, deploys the app-local Model Router, builds remotely in ACR, retries only the known Foundry-readiness and first-image-handoff conditions, enables the six-month processor after the API image exists, and verifies `/api/health`. Use `-SkipProcessor` only when schedules are intentionally out of scope.
+
+Unlike Option 1, this helper stops once the app is running — you still do [step 4 (sign-in)](#4-configure-sign-in) and [step 5 (role assignments)](#5-grant-access-to-the-subscriptions-you-want-to-assess) yourself.
 
 The equivalent settings applied by the helper are:
 
@@ -167,7 +201,9 @@ Set every value above before the first `azd up`. `APP_PROFILE=ai` includes the d
 
 `azd up` provisions the infrastructure, including the app-specific `cost-agent-project` and `model-router` deployment for the `ai` profile, builds both container images **remotely in Azure Container Registry** (no local Docker or Podman needed — [azd's `remoteBuild` option](https://learn.microsoft.com/azure/developer/azure-developer-cli/azd-schema#docker) is enabled in this repo's [azure.yaml](azure.yaml)), pushes them, and deploys the running app.
 
-> **A brand-new environment can require repeated `azd up` runs. Do not delete the environment between retries.** These are all transient — the helper detects and retries all four automatically; if you're running raw `azd up`, three of them just need a plain rerun, but the Foundry `Accepted` race needs one extra manual step from its **second** failure onward:
+#### Known transient `azd up` errors
+
+> **A brand-new environment can require repeated `azd up` runs. Do not delete the environment between retries.** These are all transient — both helpers detect and retry all four automatically; if you're running raw `azd up`, three of them just need a plain rerun, but the Foundry `Accepted` race needs one extra manual step from its **second** failure onward:
 >
 > | Error you see | Cause | What to do |
 > | --- | --- | --- |
@@ -207,7 +243,7 @@ azd up
 
 Re-running `azd up` (or `azd deploy` alone) later picks up any code changes and updates the deployment in place.
 
-> If `azd up`/`azd provision` crashes with a Go panic mentioning `HooksMiddleware`, that's a known `azd` bug ([azure-dev#10037](https://github.com/Azure/azure-dev/issues/10037)) unrelated to this repo — try upgrading `azd` (`azd version` to check, then reinstall the latest). If it persists, use Option B below instead.
+> If `azd up`/`azd provision` crashes with a Go panic mentioning `HooksMiddleware`, that's a known `azd` bug ([azure-dev#10037](https://github.com/Azure/azure-dev/issues/10037)) unrelated to this repo — try upgrading `azd` (`azd version` to check, then reinstall the latest). If it persists, use Option 3 below instead.
 
 ### Troubleshooting: `azd up` fails on the AI Foundry account
 
@@ -226,7 +262,7 @@ These two errors are opposites of each other — only act on whichever one you a
 
 `APP_RESTORE_AI_ACCOUNT` defaults to `false` and is **not** part of the normal setup sequence above — it only matters when one of these two specific errors shows up, and it's scoped per environment (`azd env new` does not carry it over), so re-check it explicitly rather than assuming its value from a prior environment.
 
-### Option B — Azure portal button (no CLI tooling required)
+### Option 3 — Azure portal button (no CLI tooling required)
 
 
 > **The Deploy to Azure button below only provisions infrastructure** — a resource group, network, Container Apps environment, container registry, and managed identities. It does **not** build or run the application by itself. You click the button **twice** in total (steps 1 and 3 — step 2 is just two terminal commands, no portal interaction): the second click reuses the **same environment name**, so it updates your existing deployment instead of creating a new one.
@@ -284,11 +320,15 @@ az deployment sub create --location <location> --template-file infra/main.json `
 
 Both containers only start once **both** image parameters are non-empty. Wait for the two Container Apps (`ca-api-*`, `ca-web-*`) to report **Running** before continuing.
 
-### Then, either way
+### Then, for Options 2 and 3
+
+> Option 1 already did both of these steps for you. Continue here only if you deployed with Option 2 or Option 3.
 
 #### 4. Configure sign-in
 
 This step creates two Microsoft Entra ID app registrations: a **public-client SPA** (what users sign into in the browser) and a **confidential-client API** (what validates their token). `scripts/bootstrap-identity.ps1` creates both for you — redirect URI, API scope, and the federated credential the API's managed identity needs — instead of you clicking through the Entra portal by hand.
+
+> [`scripts/deploy-end-to-end.ps1`](#option-1--one-command-end-to-end-recommended) runs this entire step for you, including feeding the two client IDs back into `azd` and redeploying. Follow the manual steps below when you want to review the plan first, or when a separate Entra administrator runs the bootstrap.
 
 > Run this with **PowerShell 7+** (`pwsh`), not Windows PowerShell 5.1 — the `-Apply` path uses `ConvertFrom-Json -AsHashtable`, which doesn't exist in 5.1. If you're on Windows and typed `./scripts/bootstrap-identity.ps1` directly, check `$PSVersionTable.PSVersion` first; if it's below 7, launch `pwsh` and run the command again from there.
 
@@ -377,6 +417,8 @@ az role assignment create --assignee-object-id $processorPrincipalId --assignee-
 ```
 
 Allow a few minutes for RBAC propagation, then use **Refresh schedules** in the app.
+
+> [`scripts/deploy-end-to-end.ps1`](#option-1--one-command-end-to-end-recommended) performs exactly these three assignments for every subscription passed to `-TargetSubscriptionId` (comma-separated), skipping any that already exist. It still needs a signed-in user with **Owner** or **User Access Administrator** on each target subscription — the script cannot grant itself that.
 
 > Use **Cost Management Contributor**, not **Cost Management Reader**, on both identities — creating and running a native export are both write actions (`.../exports/write` and `.../exports/run/action`), which Reader's `*/read` permissions do not cover.
 
