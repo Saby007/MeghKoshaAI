@@ -284,7 +284,6 @@
 
 .cost-count {
     font-size: var(--font-size-lg);
-    color: var(--color-cost-increase);
 }
 
 @media (max-width: 640px) {

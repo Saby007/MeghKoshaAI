@@ -6,6 +6,13 @@ import type { AnomalySummary, FullReport } from '../report/models';
 type AnomalyScope = Pick<FullReport, 'subscriptionBreakdown' | 'reportMetadata'>;
 export type AnomalyState = { result: AnomalySummary | null; error: string | null; loading: boolean; refresh: () => void };
 
+/* Colour for a count of things nobody wants any of. Zero is the good outcome
+   and reads green; anything above it is amber, or red where the count is
+   already of confirmed-severe items rather than merely flagged ones. An
+   unavailable count stays neutral - absence of evidence is not good news. */
+export const countTone = (value: number | null, severe = false) =>
+  value === null ? '' : value === 0 ? 'metric-count-good' : severe ? 'metric-count-risk' : 'metric-count-warn';
+
 export function useAnomalySummary(report: AnomalyScope): AnomalyState {
   const [result, setResult] = useState<AnomalySummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +60,7 @@ export function AnomalyOverview({ state, onOpenDetails, formatMoney }: {
   const severityOrder = { High: 0, Medium: 1, Low: 2 };
   const signals = ready ? result.anomalies.slice().sort((first, second) => severityOrder[first.severity] - severityOrder[second.severity] || Math.abs(second.absoluteDelta) - Math.abs(first.absoluteDelta)).slice(0, 3) : [];
   const spikeImpact = ready ? result.anomalies.filter((signal) => signal.dimensionType === 'subscription').reduce((sum, signal) => sum + Math.max(0, signal.absoluteDelta), 0) : null;
+  const highSignals = ready ? result.anomalies.filter((signal) => signal.severity === 'High').length : 0;
   return (
     <section className="anomaly-overview" aria-label="Cost anomaly overview" aria-busy={loading}>
       <header>
@@ -70,9 +78,9 @@ export function AnomalyOverview({ state, onOpenDetails, formatMoney }: {
       {ready && (
         <>
           <div className="anomaly-overview-metrics">
-            <span><strong>{result.anomalies.length}</strong> signal{result.anomalies.length === 1 ? '' : 's'}</span>
-            <span><strong>{result.anomalies.filter((signal) => signal.severity === 'High').length}</strong> high severity</span>
-            <span>Subscription spike impact <strong>{formatMoney(spikeImpact!)}</strong></span>
+            <span><strong className={countTone(result.anomalies.length)}>{result.anomalies.length}</strong> signal{result.anomalies.length === 1 ? '' : 's'}</span>
+            <span><strong className={countTone(highSignals, true)}>{highSignals}</strong> high severity</span>
+            <span>Subscription spike impact <strong className={spikeImpact ? 'cost-increase' : 'cost-decrease'}>{formatMoney(spikeImpact!)}</strong></span>
           </div>
           {signals.length ? <ul className="anomaly-overview-signals">{signals.map((signal) => (
             <li key={signal.anomalyId}>

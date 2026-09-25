@@ -232,6 +232,21 @@
     color: var(--color-metric-green);
 }
 
+/* Counts of unwanted things - anomalies, spikes, failures. Zero is a result
+   worth showing as good rather than as another neutral number. */
+
+.metric-count-good {
+    color: var(--color-metric-green);
+}
+
+.metric-count-warn {
+    color: var(--color-warning);
+}
+
+.metric-count-risk {
+    color: var(--color-cost-increase);
+}
+
 .billing-coverage,
 .billing-provenance {
     color: var(--color-pale-stone);

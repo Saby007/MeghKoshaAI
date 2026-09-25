@@ -3979,12 +3979,70 @@ function CostByTagsTab({
   const scopeLabel = activeValue === null
     ? `all ${dimension?.tagKey ?? 'tag'} values`
     : `${dimension?.tagKey} = ${activeValue || '(empty)'}`;
+  const subscriptionNames = useMemo(
+    () => new Map(report.subscriptionBreakdown.map((row) => [row.subscriptionId.toLowerCase(), row.subscriptionName])),
+    [report.subscriptionBreakdown],
+  );
+  /* A budget whose own filter targets this spend is an allocation for it. One
+     that merely contains it - a subscription-wide budget, or one whose filter
+     Azure would not return in an evaluable form - governs everything in its
+     subscription, so it matches every tag equally. Listing both as one set
+     made the same budgets appear whichever tag was selected, which reads as
+     "these are this application's budgets" when they are nothing of the kind. */
+  const allocatedBudgets = taggedBudgets.filter((item) => item.relation === 'Matching budget filter');
+  const containingBudgets = taggedBudgets.filter((item) => item.relation !== 'Matching budget filter');
   /* Picking a day on a budget chart asks "what did this application run that
      day", so the answer is resource-level and stays inside the selection. */
   const [budgetDay, setBudgetDay] = useState<{ key: string; date: string } | null>(null);
   useEffect(() => {
     setBudgetDay(null);
   }, [selectedKey, activeValue, costWindow.startDate, costWindow.endDate]);
+  const budgetCard = ({ budget, relation }: { budget: Budget; relation: string }) => {
+    const status = budgetThreshold(budget);
+    const key = `${budget.subscriptionId}:${budget.name}`;
+    const selectedDay = budgetDay?.key === key ? budgetDay.date : null;
+    const native = (value: number | null) => value === null ? 'Unavailable' : `${budget.currency} ${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+    return (
+      <article className="tag-budget-card" key={key}>
+        <header className="cost-section-heading">
+          <h4>{budget.name}</h4>
+          <span className={`budget-status budget-${status.tone}`}>{status.label}</span>
+        </header>
+        {/* The subscription is part of the budget's identity: two subscriptions
+            commonly carry a budget of the same name, and without it they read
+            as one budget listed twice. */}
+        <p className="billing-provenance">{subscriptionNames.get(budget.subscriptionId.toLowerCase()) ?? budget.subscriptionId} · {relation} · {budget.timeGrain} · {native(budget.currentSpend)} of {native(budget.amount)} reported by Azure for the current cycle.</p>
+        <BudgetDailyChart
+          budget={budget}
+          details={report.costDetails}
+          window={costWindow}
+          formatMoney={formatMoney}
+          filters={scopedFilters}
+          scopeLabel={scopeLabel}
+          selectedDate={selectedDay}
+          onSelectDate={report.costDetails?.status === 'complete'
+            ? (date) => setBudgetDay((value) => value?.key === key && value.date === date ? null : { key, date })
+            : undefined}
+        />
+        {selectedDay && report.costDetails?.status === 'complete' && (
+          <section className="budget-day-drilldown" aria-label={`Resource costs on ${selectedDay} for ${budget.name}`}>
+            <header className="cost-section-heading">
+              <h4>{reportDate(selectedDay)} · {scopeLabel}</h4>
+              <button type="button" className="ghost-button" onClick={() => setBudgetDay(null)} aria-label="Close budget day details">Close</button>
+            </header>
+            <ResourceCostTable
+              details={report.costDetails}
+              window={{ startDate: selectedDay, endDate: selectedDay }}
+              previous={previousCostWindow({ startDate: selectedDay, endDate: selectedDay })}
+              filters={{ ...scopedFilters, subscriptionId: budget.subscriptionId }}
+              formatMoney={formatHourlyMoney}
+              snapshotId={snapshotId}
+            />
+          </section>
+        )}
+      </article>
+    );
+  };
   return (
     <div className="panel">
       <h2 className="section-title">Cost by Tags/Application</h2>
@@ -4071,58 +4129,33 @@ function CostByTagsTab({
             <p role="status">Checking subscription budgets...</p>
           ) : budgetState.error ? (
             <p role="alert">{budgetState.error}</p>
-          ) : taggedBudgets.length === 0 ? (
-            <EvidenceState
-              title="No budget covers this selection"
-              detail={`No Azure budget in the assessed subscriptions matches ${scopeLabel}. Create one on the Budgets page to track this spend against a limit.`}
-            />
           ) : (
             <>
-              <p className="section-subtitle">{taggedBudgets.length === 1 ? 'One budget bears' : `${taggedBudgets.length} budgets bear`} on {scopeLabel}.</p>
-              {taggedBudgets.slice(0, 3).map(({ budget, relation }) => {
-                const status = budgetThreshold(budget);
-                const key = `${budget.subscriptionId}:${budget.name}`;
-                const selectedDay = budgetDay?.key === key ? budgetDay.date : null;
-                const native = (value: number | null) => value === null ? 'Unavailable' : `${budget.currency} ${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
-                return (
-                  <article className="tag-budget-card" key={`${budget.subscriptionId}:${budget.name}`}>
-                    <header className="cost-section-heading">
-                      <h4>{budget.name}</h4>
-                      <span className={`budget-status budget-${status.tone}`}>{status.label}</span>
-                    </header>
-                    <p className="billing-provenance">{relation} · {budget.timeGrain} · {native(budget.currentSpend)} of {native(budget.amount)} reported by Azure for the current cycle.</p>
-                    <BudgetDailyChart
-                      budget={budget}
-                      details={report.costDetails}
-                      window={costWindow}
-                      formatMoney={formatMoney}
-                      filters={scopedFilters}
-                      scopeLabel={scopeLabel}
-                      selectedDate={selectedDay}
-                      onSelectDate={report.costDetails?.status === 'complete'
-                        ? (date) => setBudgetDay((value) => value?.key === key && value.date === date ? null : { key, date })
-                        : undefined}
-                    />
-                    {selectedDay && report.costDetails?.status === 'complete' && (
-                      <section className="budget-day-drilldown" aria-label={`Resource costs on ${selectedDay} for ${budget.name}`}>
-                        <header className="cost-section-heading">
-                          <h4>{reportDate(selectedDay)} · {scopeLabel}</h4>
-                          <button type="button" className="ghost-button" onClick={() => setBudgetDay(null)} aria-label="Close budget day details">Close</button>
-                        </header>
-                        <ResourceCostTable
-                          details={report.costDetails}
-                          window={{ startDate: selectedDay, endDate: selectedDay }}
-                          previous={previousCostWindow({ startDate: selectedDay, endDate: selectedDay })}
-                          filters={{ ...scopedFilters, subscriptionId: budget.subscriptionId }}
-                          formatMoney={formatHourlyMoney}
-                          snapshotId={snapshotId}
-                        />
-                      </section>
-                    )}
-                  </article>
-                );
-              })}
-              {taggedBudgets.length > 3 && <p className="section-subtitle">{taggedBudgets.length - 3} further matching {taggedBudgets.length - 3 === 1 ? 'budget is' : 'budgets are'} listed on the Budgets page.</p>}
+              {allocatedBudgets.length === 0 ? (
+                <EvidenceState
+                  title={`No budget is scoped to ${scopeLabel}`}
+                  detail={containingBudgets.length
+                    ? `No Azure budget filters on ${scopeLabel}. The subscription-wide budgets below include this spend but are not an allocation for it.`
+                    : `No Azure budget in the assessed subscriptions matches ${scopeLabel}. Create one on the Budgets page to track this spend against a limit.`}
+                />
+              ) : (
+                <>
+                  <p className="section-subtitle">{allocatedBudgets.length === 1 ? 'One budget is' : `${allocatedBudgets.length} budgets are`} scoped to {scopeLabel}.</p>
+                  {allocatedBudgets.slice(0, 3).map(budgetCard)}
+                  {allocatedBudgets.length > 3 && <p className="section-subtitle">{allocatedBudgets.length - 3} further scoped {allocatedBudgets.length - 3 === 1 ? 'budget is' : 'budgets are'} listed on the Budgets page.</p>}
+                </>
+              )}
+              {containingBudgets.length > 0 && (
+                <details className="wider-budgets">
+                  <summary>
+                    {containingBudgets.length} wider {containingBudgets.length === 1 ? 'budget includes' : 'budgets include'} this spend
+                    <span>Not an allocation for {scopeLabel}</span>
+                  </summary>
+                  <p className="billing-provenance">These govern their whole subscription, so they bear on every tag with spend there and do not change as the selection changes. Each chart below is still limited to {scopeLabel}.</p>
+                  {containingBudgets.slice(0, 3).map(budgetCard)}
+                  {containingBudgets.length > 3 && <p className="section-subtitle">{containingBudgets.length - 3} further wider {containingBudgets.length - 3 === 1 ? 'budget is' : 'budgets are'} listed on the Budgets page.</p>}
+                </details>
+              )}
             </>
           )}
         </section>

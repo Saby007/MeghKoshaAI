@@ -274,6 +274,7 @@ const applicationTagReport = {
   },
 };
 const subscriptionWideBudget = { subscriptionId: 'sub-1', name: 'Subscription budget', category: 'Cost', amount: 3000, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '', currentSpend: 400, forecastSpend: 900, filter: {} };
+const financeBudget = { subscriptionId: 'sub-1', name: 'Finance app budget', category: 'Cost', amount: 2000, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '', currentSpend: 300, forecastSpend: 700, filter: { tags: { name: 'application', operator: 'In', values: ['Finance'] } } };
 const foreignSubscriptionBudget = { subscriptionId: 'sub-2', name: 'Unrelated subscription budget', category: 'Cost', amount: 500, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '', currentSpend: 100, forecastSpend: 200, filter: {} };
 const renderTagBudgets = async (budgets: unknown[]) => {
   vi.mocked(listBudgets).mockResolvedValue(budgets as never);
@@ -298,20 +299,59 @@ it('scopes budget evidence to the selected tag and drops budgets the selection n
 });
 
 it('drills a selected budget day into the resources of that tag on that day', async () => {
-  await renderTagBudgets([subscriptionWideBudget]);
+  await renderTagBudgets([financeBudget]);
   await chooseTagOption('Tag value', 'Finance');
   expect(container.querySelector('[aria-label^="Resource costs on"]')).toBeNull();
 
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Resource costs for 2026-09-03"]')!.click());
-  const drilldown = container.querySelector('[aria-label="Resource costs on 2026-09-03 for Subscription budget"]')!;
+  const drilldown = container.querySelector('[aria-label="Resource costs on 2026-09-03 for Finance app budget"]')!;
   expect(drilldown).not.toBeNull();
   expect(drilldown.textContent).toContain('finance-vm');
   expect(drilldown.textContent).toContain('$288.00');
-  // Platform spend shares the budget but not the selected application.
+  // Platform spend shares the subscription but not the selected application.
   expect(drilldown.textContent).not.toContain('shared-disk');
 
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Resource costs for 2026-09-03"]')!.click());
   expect(container.querySelector('[aria-label^="Resource costs on"]')).toBeNull();
+});
+
+it('separates budgets allocated to the tag from wider budgets that merely contain it', async () => {
+  await renderTagBudgets([financeBudget, subscriptionWideBudget, foreignSubscriptionBudget]);
+  await chooseTagOption('Tag value', 'Finance');
+  const budgets = container.querySelector('.tag-cost-budgets')!;
+  expect(budgets.textContent).toContain('One budget is scoped to application = Finance');
+  const wider = budgets.querySelector('.wider-budgets')!;
+  expect(wider.querySelector('summary')!.textContent).toContain('Not an allocation for application = Finance');
+  expect(wider.textContent).toContain('Subscription budget');
+  // The application's own budget leads the section rather than being buried.
+  expect(wider.textContent).not.toContain('Finance app budget');
+  // Same-named budgets in different subscriptions are told apart by subscription.
+  expect(budgets.textContent).toContain('Demo subscription');
+
+  // Switching application changes which budget is presented as its allocation.
+  await chooseTagOption('Tag value', 'Platform');
+  const afterSwitch = container.querySelector('.tag-cost-budgets')!;
+  expect(afterSwitch.textContent).toContain('No budget is scoped to application = Platform');
+  expect(afterSwitch.textContent).not.toContain('Finance app budget');
+  expect(afterSwitch.querySelector('.wider-budgets')!.textContent).toContain('Subscription budget');
+});
+
+it('colours anomaly counts by severity when signals need action', async () => {
+  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} onCostWindowChange={() => {}} />));
+  const overview = container.querySelector('.anomaly-overview-metrics')!;
+  // The synthetic fixture carries one signal, and that signal is high severity.
+  expect(overview.querySelectorAll('.metric-count-warn')).toHaveLength(1);
+  expect(overview.querySelectorAll('.metric-count-risk')).toHaveLength(1);
+  expect(overview.querySelector('.metric-count-good')).toBeNull();
+});
+
+it('colours anomaly counts green when nothing crossed the thresholds', async () => {
+  vi.mocked(getCostAnomalies).mockResolvedValue({ ...anomalyFixture, anomalies: [] });
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
+  const overview = container.querySelector('.anomaly-overview-metrics')!;
+  expect(overview.querySelectorAll('.metric-count-good')).toHaveLength(2);
+  expect(overview.querySelector('.metric-count-warn')).toBeNull();
+  expect(overview.querySelector('.metric-count-risk')).toBeNull();
 });
 
 it('ignores a tag value inherited from a different tag key when scoping the selection', async () => {
