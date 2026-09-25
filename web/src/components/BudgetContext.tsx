@@ -61,10 +61,15 @@ export function useBudgetSummary(report: Pick<FullReport, 'subscriptionBreakdown
    across the app. `verified` is false when Azure returned a filter shape we
    cannot evaluate, or returned no filter metadata at all - in that case the
    rows are the whole subscription, which is a guess, and the caller has to say
-   so rather than presenting the total as the budget's spend. */
-export function budgetScopedRows(budget: Budget, details?: CostDetailSummary): { rows: CostDetailRow[]; verified: boolean } {
+   so rather than presenting the total as the budget's spend.
+
+   `filters` narrows the evidence further to whatever selection the caller is
+   reporting against - a tag or application, say. Without it a page that asks
+   "how is this application tracking against its budget" charts the budget's
+   entire subscription instead, which answers a different question. */
+export function budgetScopedRows(budget: Budget, details?: CostDetailSummary, filters: CostFilter = {}): { rows: CostDetailRow[]; verified: boolean } {
   if (!details || details.status !== 'complete') return { rows: [], verified: false };
-  const inSubscription = details.rows.filter((row) => row.subscriptionId.toLowerCase() === budget.subscriptionId.toLowerCase());
+  const inSubscription = details.rows.filter((row) => row.subscriptionId.toLowerCase() === budget.subscriptionId.toLowerCase() && matchesCostFilter(row, filters));
   const unfiltered = budget.filter !== undefined && Object.keys(budget.filter).length === 0;
   if (unfiltered) return { rows: inSubscription, verified: true };
   const decided = inSubscription.map((row) => ({ row, match: budgetFilterMatches(budget.filter, row) }));
@@ -100,13 +105,21 @@ export function BudgetDailyChart({
   details,
   window,
   formatMoney,
+  filters = {},
+  scopeLabel,
+  selectedDate = null,
+  onSelectDate,
 }: {
   budget: Budget;
   details?: CostDetailSummary;
   window: CostWindow;
   formatMoney: (value: number) => string;
+  filters?: CostFilter;
+  scopeLabel?: string;
+  selectedDate?: string | null;
+  onSelectDate?: (date: string) => void;
 }) {
-  const { rows, verified } = budgetScopedRows(budget, details);
+  const { rows, verified } = budgetScopedRows(budget, details, filters);
   const dates = costWindowDates(window);
   const values = dates.map((date) => {
     const covered = rows.filter((row) => row.dailyCosts[date] !== undefined);
@@ -124,12 +137,18 @@ export function BudgetDailyChart({
         seriesName={`${budget.name} daily cost`}
         formatMoney={formatMoney}
         ariaLabel={`Daily cost for ${budget.name}`}
-        emptyMessage="No daily cost evidence covers this budget in the selected period."
+        emptyMessage={scopeLabel
+          ? `No daily cost evidence covers ${scopeLabel} under this budget in the selected period.`
+          : 'No daily cost evidence covers this budget in the selected period.'}
         reference={allowance === null ? null : { value: allowance, label: `Even daily share of ${budget.currency} ${budget.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}` }}
+        selectedDate={selectedDate}
+        onSelectDate={onSelectDate}
+        selectLabel={(date) => `Resource costs for ${date}`}
       />
       {observed.length > 0 && (
         <p className="billing-provenance">
           {formatMoney(total)} across {observed.length} covered {observed.length === 1 ? 'day' : 'days'}
+          {scopeLabel ? ` for ${scopeLabel}` : ''}
           {allowance === null
             ? `. ${budget.timeGrain} budgets have no single daily share, so no allowance line is drawn.`
             : `, against an even daily share of ${formatMoney(allowance)}. ${over} ${over === 1 ? 'day is' : 'days are'} above that share.`}
@@ -145,12 +164,20 @@ export function BudgetDailyChart({
 
    Exported because the tag page asks the same question the budget table does -
    "does a budget cover this?" - and two implementations would drift into two
-   different answers. */
-export function relateBudgets(budgets: Budget[], rows: CostDetailRow[], filters: CostFilter = {}) {
+   different answers.
+
+   `requireEvidence` separates "there is no cost evidence to judge with" from
+   "there is evidence and none of it falls in this budget's subscription".
+   Callers reporting against a deliberately narrowed selection set it, so a
+   budget covering a subscription the selection never touches is reported as
+   unrelated instead of being claimed as covering it on no evidence at all. */
+export function relateBudgets(budgets: Budget[], rows: CostDetailRow[], filters: CostFilter = {}, requireEvidence = false) {
   return budgets
     .filter((budget) => !filters.subscriptionId || budget.subscriptionId.toLowerCase() === filters.subscriptionId.toLowerCase())
     .map((budget) => {
-      const conditions = rows.filter((row) => row.subscriptionId.toLowerCase() === budget.subscriptionId.toLowerCase()).map((row) => budgetFilterMatches(budget.filter, row));
+      const inScope = rows.filter((row) => row.subscriptionId.toLowerCase() === budget.subscriptionId.toLowerCase());
+      if (requireEvidence && !inScope.length) return { budget, relation: 'unrelated' };
+      const conditions = inScope.map((row) => budgetFilterMatches(budget.filter, row));
       const unfiltered = budget.filter !== undefined && Object.keys(budget.filter).length === 0;
       return { budget, relation: unfiltered ? 'Subscription-wide budget' : conditions.includes(true) ? 'Matching budget filter' : !conditions.length || conditions.includes(null) ? 'Filter applicability unverified' : 'unrelated' };
     })

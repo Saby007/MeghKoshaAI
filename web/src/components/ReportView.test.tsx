@@ -261,6 +261,70 @@ it('preserves the missing-tag state and disables the value filter for a key with
   expect([...tagSelect('Tag value').options].map((option) => option.textContent)).toEqual(['All values']);
 });
 
+/* The tag page reports budgets "for this selection", so the evidence behind
+   that claim has to be the selection - not the budget's whole subscription. */
+const applicationTagReport = {
+  ...detailReportFixture,
+  tagCosts: {
+    available: true, status: 'Available', totalSpend: 200, growthRate: null,
+    dimensions: [{ tagKey: 'application', unallocatedCost: 0, rows: [
+      { value: 'Finance', monthlyCost: 120, pctOfTotal: 0.6, forecastNextMonth: null },
+      { value: 'Platform', monthlyCost: 80, pctOfTotal: 0.4, forecastNextMonth: null },
+    ] }],
+  },
+};
+const subscriptionWideBudget = { subscriptionId: 'sub-1', name: 'Subscription budget', category: 'Cost', amount: 3000, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '', currentSpend: 400, forecastSpend: 900, filter: {} };
+const foreignSubscriptionBudget = { subscriptionId: 'sub-2', name: 'Unrelated subscription budget', category: 'Cost', amount: 500, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '', currentSpend: 100, forecastSpend: 200, filter: {} };
+const renderTagBudgets = async (budgets: unknown[]) => {
+  vi.mocked(listBudgets).mockResolvedValue(budgets as never);
+  await act(async () => root.render(<ReportView report={applicationTagReport} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} onCostWindowChange={() => {}} />));
+  await act(async () => button('Cost by Tags/Application').click());
+};
+
+it('scopes budget evidence to the selected tag and drops budgets the selection never touches', async () => {
+  await renderTagBudgets([subscriptionWideBudget, foreignSubscriptionBudget]);
+  const budgets = container.querySelector('.tag-cost-budgets')!;
+  expect(budgets.textContent).toContain('Subscription budget');
+  // sub-2 carries none of the assessed tag spend, so it does not bear on the selection.
+  expect(budgets.textContent).not.toContain('Unrelated subscription budget');
+  // All application values: both tagged resources, 1632 + 204 across the window.
+  expect(budgets.textContent).toContain('$1,836');
+  expect(budgets.textContent).toContain('all application values');
+
+  await chooseTagOption('Tag value', 'Finance');
+  // Finance alone, not the budget's whole subscription.
+  expect(container.querySelector('.tag-cost-budgets')!.textContent).toContain('$1,632');
+  expect(container.querySelector('.tag-cost-budgets')!.textContent).toContain('for application = Finance');
+});
+
+it('drills a selected budget day into the resources of that tag on that day', async () => {
+  await renderTagBudgets([subscriptionWideBudget]);
+  await chooseTagOption('Tag value', 'Finance');
+  expect(container.querySelector('[aria-label^="Resource costs on"]')).toBeNull();
+
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Resource costs for 2026-09-03"]')!.click());
+  const drilldown = container.querySelector('[aria-label="Resource costs on 2026-09-03 for Subscription budget"]')!;
+  expect(drilldown).not.toBeNull();
+  expect(drilldown.textContent).toContain('finance-vm');
+  expect(drilldown.textContent).toContain('$288.00');
+  // Platform spend shares the budget but not the selected application.
+  expect(drilldown.textContent).not.toContain('shared-disk');
+
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Resource costs for 2026-09-03"]')!.click());
+  expect(container.querySelector('[aria-label^="Resource costs on"]')).toBeNull();
+});
+
+it('ignores a tag value inherited from a different tag key when scoping the selection', async () => {
+  await renderTagBudgets([subscriptionWideBudget]);
+  await chooseTagOption('Cost tag key', 'owner');
+  await chooseTagOption('Cost tag value', 'Finance team');
+  // "owner = Finance team" must not be tested against the application key, which
+  // matches nothing and previously emptied the budget evidence for the page.
+  const budgets = container.querySelector('.tag-cost-budgets')!;
+  expect(budgets.textContent).toContain('$1,836');
+  expect(budgets.textContent).not.toContain('No daily cost evidence');
+});
+
 it.each([true, false])('shows the same realized RI and Savings Plan evidence in EA Pricing and Rate Optimization when pricing is available: %s', async (available) => {
   const report = { ...pricingReportFixture, pricingSummary: { ...pricingReportFixture.pricingSummary, available } };
   await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" />));

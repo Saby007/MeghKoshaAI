@@ -51,7 +51,7 @@ import { BillingHistoryTab, HourlyCostPanel } from './BillingHistory';
 import { AICostAlerts, AnomalyOverview, useAnomalySummary, type AnomalyState } from './AnomalyOverview';
 import { billingDates, billingWindow } from '../report/billingHistory';
 import { tagDistribution } from '../report/tagDistribution';
-import { CostExportButton, CostFilters, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
+import { CostExportButton, CostFilters, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, ResourceCostTable, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
 import { costWindowDates, matchesCostFilter, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import { BudgetContext, BudgetDailyChart, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
@@ -860,11 +860,13 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
             <CostByTagsTab
               report={report}
               formatMoney={formatMoney}
+              formatHourlyMoney={formatHourlyMoney}
               displayCurrency={displayCurrency}
               costWindow={costWindow}
               costFilters={costFilters}
               onCostFiltersChange={setCostFilters}
               budgetState={budgetState}
+              snapshotId={snapshotId}
             />
           )}
           {tab === 'Budgets' && (
@@ -3918,19 +3920,23 @@ function GovernanceTab({ report }: { report: FullReport }) {
 function CostByTagsTab({
   report,
   formatMoney,
+  formatHourlyMoney,
   displayCurrency,
   costWindow,
   costFilters,
   onCostFiltersChange,
   budgetState,
+  snapshotId,
 }: {
   report: FullReport;
   formatMoney: MoneyFormatter;
+  formatHourlyMoney: MoneyFormatter;
   displayCurrency: string;
   costWindow: CostWindow;
   costFilters: CostFilter;
   onCostFiltersChange: (value: CostFilter) => void;
   budgetState?: BudgetState;
+  snapshotId: string | null;
 }) {
   const summary = report.tagCosts;
   const dimensions = summary?.dimensions ?? [];
@@ -3945,24 +3951,40 @@ function CostByTagsTab({
   const maxCost = Math.max(...allRows.map((row) => row.monthlyCost), 1);
   /* Selecting a tag key and value here scopes the breakdowns below, so the two
      halves of this page answer the same question rather than sitting side by
-     side unaware of each other. */
-  const scopedFilters: CostFilter = {
-    ...costFilters,
-    ...(dimension?.tagKey ? { tagKey: dimension.tagKey } : {}),
-    ...(activeValue === null ? {} : { tagValue: activeValue }),
-  };
+     side unaware of each other.
+
+     The page's own selectors own the tag dimension outright. Overriding
+     `tagKey` while still inheriting `tagValue` from the shared cost filters
+     tested one key's value against a different key - a scope that matches
+     nothing - so every budget on the page was mapped against an empty
+     selection. An inherited value is kept only while it belongs to the key
+     actually being shown. */
+  const pageTagKey = dimension?.tagKey;
+  const inheritedTagValue = pageTagKey && costFilters.tagKey?.toLowerCase() === pageTagKey.toLowerCase()
+    ? costFilters.tagValue
+    : undefined;
+  const scopedFilters: CostFilter = pageTagKey
+    ? { ...costFilters, tagKey: pageTagKey, tagValue: activeValue === null ? inheritedTagValue : activeValue }
+    : costFilters;
   /* Budgets are matched against the rows the selection actually covers, not
      against the tag string, so a budget scoped by resource group still shows
-     up when that group is what carries the tag. */
+     up when that group is what carries the tag. A budget whose subscription
+     carries none of the selected spend is not reported as covering it. */
   const taggedBudgets = useMemo(() => {
     if (!budgetState || report.costDetails?.status !== 'complete') return [];
-    const rows = report.costDetails.rows.filter((row) => matchesCostFilter(row, scopedFilters));
-    return relateBudgets(budgetState.budgets, rows, scopedFilters);
+    const scopedRows = report.costDetails.rows.filter((row) => matchesCostFilter(row, scopedFilters));
+    return relateBudgets(budgetState.budgets, scopedRows, scopedFilters, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [budgetState?.budgets, report.costDetails, JSON.stringify(scopedFilters)]);
   const scopeLabel = activeValue === null
     ? `all ${dimension?.tagKey ?? 'tag'} values`
     : `${dimension?.tagKey} = ${activeValue || '(empty)'}`;
+  /* Picking a day on a budget chart asks "what did this application run that
+     day", so the answer is resource-level and stays inside the selection. */
+  const [budgetDay, setBudgetDay] = useState<{ key: string; date: string } | null>(null);
+  useEffect(() => {
+    setBudgetDay(null);
+  }, [selectedKey, activeValue, costWindow.startDate, costWindow.endDate]);
   return (
     <div className="panel">
       <h2 className="section-title">Cost by Tags/Application</h2>
@@ -4059,6 +4081,8 @@ function CostByTagsTab({
               <p className="section-subtitle">{taggedBudgets.length === 1 ? 'One budget bears' : `${taggedBudgets.length} budgets bear`} on {scopeLabel}.</p>
               {taggedBudgets.slice(0, 3).map(({ budget, relation }) => {
                 const status = budgetThreshold(budget);
+                const key = `${budget.subscriptionId}:${budget.name}`;
+                const selectedDay = budgetDay?.key === key ? budgetDay.date : null;
                 const native = (value: number | null) => value === null ? 'Unavailable' : `${budget.currency} ${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
                 return (
                   <article className="tag-budget-card" key={`${budget.subscriptionId}:${budget.name}`}>
@@ -4067,7 +4091,34 @@ function CostByTagsTab({
                       <span className={`budget-status budget-${status.tone}`}>{status.label}</span>
                     </header>
                     <p className="billing-provenance">{relation} · {budget.timeGrain} · {native(budget.currentSpend)} of {native(budget.amount)} reported by Azure for the current cycle.</p>
-                    <BudgetDailyChart budget={budget} details={report.costDetails} window={costWindow} formatMoney={formatMoney} />
+                    <BudgetDailyChart
+                      budget={budget}
+                      details={report.costDetails}
+                      window={costWindow}
+                      formatMoney={formatMoney}
+                      filters={scopedFilters}
+                      scopeLabel={scopeLabel}
+                      selectedDate={selectedDay}
+                      onSelectDate={report.costDetails?.status === 'complete'
+                        ? (date) => setBudgetDay((value) => value?.key === key && value.date === date ? null : { key, date })
+                        : undefined}
+                    />
+                    {selectedDay && report.costDetails?.status === 'complete' && (
+                      <section className="budget-day-drilldown" aria-label={`Resource costs on ${selectedDay} for ${budget.name}`}>
+                        <header className="cost-section-heading">
+                          <h4>{reportDate(selectedDay)} · {scopeLabel}</h4>
+                          <button type="button" className="ghost-button" onClick={() => setBudgetDay(null)} aria-label="Close budget day details">Close</button>
+                        </header>
+                        <ResourceCostTable
+                          details={report.costDetails}
+                          window={{ startDate: selectedDay, endDate: selectedDay }}
+                          previous={previousCostWindow({ startDate: selectedDay, endDate: selectedDay })}
+                          filters={{ ...scopedFilters, subscriptionId: budget.subscriptionId }}
+                          formatMoney={formatHourlyMoney}
+                          snapshotId={snapshotId}
+                        />
+                      </section>
+                    )}
                   </article>
                 );
               })}

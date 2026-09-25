@@ -181,6 +181,24 @@
     gap: var(--space-2);
 }
 
+/* The day drilldown answers a question asked on the chart above it, so it
+   reads as a continuation of that card rather than a new panel. */
+
+.budget-day-drilldown {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: var(--border-width) solid var(--color-ash-stroke);
+}
+
+.budget-day-drilldown h4 {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-semi);
+}
+
 /* The drilldown sits inside a table cell, so it needs its own breathing room
    rather than inheriting the dense row padding around it. */
 
