@@ -74,7 +74,7 @@ export function BillingHistoryTab({ report, formatMoney, details, costWindow, co
           <table className="data-table billing-table">
             <caption>Tag-attributed charges (non-additive)</caption>
             <thead><tr><th scope="col">Tag</th><th scope="col">{baselineDate || 'Baseline'}</th><th scope="col">{comparisonDate || 'Comparison'}</th><th scope="col">Change</th></tr></thead>
-            <tbody>{rows.map((row) => <tr key={row.id}><th scope="row">{row.label}</th><td>{moneyOrUnavailable(row.baseline, formatMoney)}</td><td>{moneyOrUnavailable(row.comparison, formatMoney)}</td><td>{change(row.delta)}</td></tr>)}</tbody>
+            <tbody>{rows.map((row) => <tr key={row.id}><th scope="row">{row.label}</th><td>{moneyOrUnavailable(row.baseline, formatMoney)}</td><td>{moneyOrUnavailable(row.comparison, formatMoney)}</td><td className={row.delta === null || row.delta === 0 ? '' : row.delta > 0 ? 'cost-increase' : 'cost-decrease'}>{change(row.delta)}</td></tr>)}</tbody>
           </table>
         </div>
       )}

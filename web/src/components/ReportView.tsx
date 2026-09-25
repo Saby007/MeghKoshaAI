@@ -418,7 +418,7 @@ function TopSummaryBar({ report, formatMoney }: { report: FullReport; formatMone
   const lastComplete = months.length > 0 ? months[months.length - 1] : null;
   return (
     <div className="summary-strip" aria-label="Report headline metrics">
-      <div className="summary-tile">
+      <div className={`summary-tile ${s.spendChangePercentage === null || s.spendChangePercentage === 0 ? '' : s.spendChangePercentage > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()}>
         <span className="summary-tile-label">Assessed month</span>
         <strong className="summary-tile-value">{formatMoney(s.currentMonthlySpend)}</strong>
         <small>
@@ -753,6 +753,7 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
               costFilters={costFilters}
               onCostFiltersChange={setCostFilters}
               budgetState={budgetState}
+              onNavigate={selectTab}
             />
           )}
           {tab === 'Savings Roadmap' && (
@@ -1548,6 +1549,7 @@ function ExecutiveSummaryTab({
   costFilters,
   onCostFiltersChange,
   budgetState,
+  onNavigate,
 }: {
   report: FullReport;
   narrativeSummary?: string;
@@ -1563,6 +1565,7 @@ function ExecutiveSummaryTab({
   costFilters: CostFilter;
   onCostFiltersChange: (value: CostFilter) => void;
   budgetState?: BudgetState;
+  onNavigate: (tab: Tab) => void;
 }) {
   const s = report.executiveSummary;
   const metadata = report.reportMetadata;
@@ -1602,7 +1605,7 @@ function ExecutiveSummaryTab({
         }
       >
         <div className="kpi-grid executive-hero-grid">
-          <div className="kpi-card">
+          <button type="button" className={`kpi-card kpi-link-card ${s.spendChangePercentage === null || s.spendChangePercentage === 0 ? '' : s.spendChangePercentage > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()} onClick={() => onNavigate('History')} aria-label="Open cost history">
             <div className="kpi-label">Total monthly spend</div>
             <div className="kpi-value">{formatMoney(s.currentMonthlySpend)}</div>
             <div className="kpi-note">
@@ -1610,28 +1613,32 @@ function ExecutiveSummaryTab({
                 ? `${completeness.availableSubscriptions} complete exports · comparison accrues next month`
                 : `${s.spendChangePercentage >= 0 ? '▲' : '▼'} ${Math.abs(s.spendChangePercentage * 100).toFixed(1)}% vs previous complete month`}
             </div>
-          </div>
-          <div className="kpi-card risk">
+            <span className="kpi-card-link-label">Open history <ChevronRight size={14} aria-hidden="true" /></span>
+          </button>
+          <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open stale and orphaned resources">
             <div className="kpi-label">Estimated wastage</div>
             <div className="kpi-value">{formatMoney(s.estimatedWastageMonth)}</div>
             <div className="kpi-note">{percent(s.pctWastage)} of total · includes billed cost at risk</div>
-          </div>
-          <div className="kpi-card positive">
+            <span className="kpi-card-link-label">Review waste <ChevronRight size={14} aria-hidden="true" /></span>
+          </button>
+          <button type="button" className="kpi-card kpi-link-card positive" onClick={() => onNavigate('Savings Roadmap')} aria-label="Open savings roadmap">
             <div className="kpi-label">Potential savings</div>
             <div className="kpi-value">{formatMoney(s.potentialSavingsMonth)}</div>
             <div className="kpi-note">{percent(s.pctRecoverable)} of total bill · estimated / month</div>
-          </div>
+            <span className="kpi-card-link-label">Open roadmap <ChevronRight size={14} aria-hidden="true" /></span>
+          </button>
           <div className="kpi-card">
             <div className="kpi-label">{s.idleReviewCandidates == null ? 'Active resources' : 'Other billed resources'}</div>
             <div className="kpi-value">{s.activeResources.toLocaleString()}</div>
             <div className="kpi-note">Cost-bearing resources across {completeness.availableSubscriptions} subscriptions</div>
           </div>
-          <div className="kpi-card risk">
+          <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open confirmed idle resources">
             <div className="kpi-label">{s.idleReviewCandidates == null ? 'Idle resources (legacy)' : 'Confirmed idle resources'}</div>
             <div className="kpi-value">{s.idleResources.toLocaleString()}</div>
             {s.idleReviewCandidates != null && <div className="kpi-note">{s.idleReviewCandidates.toLocaleString()} candidates require evidence or owner review</div>}
             <div className="kpi-note">{percent(s.idleResourcePercentage)} of assessed active + idle resources</div>
-          </div>
+            <span className="kpi-card-link-label">Review resources <ChevronRight size={14} aria-hidden="true" /></span>
+          </button>
           <div className="kpi-card">
             <div className="kpi-label">Advisor score</div>
             <div className="kpi-value">{report.advisorScore.score === null ? '—' : `${report.advisorScore.score.toFixed(0)} / 100`}</div>
@@ -3304,8 +3311,8 @@ function CostAnomaliesTab({
           <div className="kpi-grid anomaly-kpi-grid">
             <div className="kpi-card"><div className="kpi-label">Detected signals</div><div className="kpi-value">{result.anomalies.length}</div><div className="kpi-note">Across four dimensions</div></div>
             <div className="kpi-card risk"><div className="kpi-label">Subscription spike impact</div><div className="kpi-value">{formatMoney(spikeImpact)}</div><div className="kpi-note">Unexpected cost, not savings</div></div>
-            <div className="kpi-card"><div className="kpi-label">Subscription drop impact</div><div className="kpi-value">{formatMoney(dropImpact)}</div><div className="kpi-note">Investigate service or usage change</div></div>
-            <div className="kpi-card"><div className="kpi-label">High severity</div><div className="kpi-value">{highSignals}</div><div className="kpi-note">Deterministic threshold</div></div>
+            <div className="kpi-card positive"><div className="kpi-label">Subscription drop impact</div><div className="kpi-value">{formatMoney(dropImpact)}</div><div className="kpi-note">Lower cost; investigate service or usage change</div></div>
+            <div className="kpi-card risk"><div className="kpi-label">High severity</div><div className="kpi-value">{highSignals}</div><div className="kpi-note">Deterministic threshold</div></div>
           </div>
           <AnomalyTrend trend={result.trend} anomalies={result.anomalies} formatMoney={formatMoney} displayCurrency={displayCurrency} />
           <section className="anomaly-results">
@@ -3439,7 +3446,7 @@ function StaleResourcesTab({
         Inventory threshold {report.reportMetadata.staleDays} days · protected tags {report.reportMetadata.protectedTagKeys.join(', ') || 'none'}
       </p>
       <div className="kpi-grid stale-kpi-grid">
-        <div className="kpi-card">
+        <div className="kpi-card risk">
           <div className="kpi-label">Flagged resources</div>
           <div className="kpi-value">{filteredLines.length}</div>
         </div>
@@ -4496,7 +4503,7 @@ export function ActionPlanTab({
               return <tr key={item.actionId || item.action}>
                 <td>{item.action}</td>
                 <td><SubscriptionReferences subscriptions={item.affectedSubscriptions} /></td>
-                <td className="num">{formatMoney(item.savingMonth)}</td>
+                <td className="num positive-text">{formatMoney(item.savingMonth)}</td>
                 <td>{item.prerequisite}</td>
                 <td><select disabled={!editable} aria-label={`Status for ${item.action}`} value={draft.status} onChange={(event) => updateDraft(item.actionId, { status: event.target.value as ActionDraft['status'] })}><option value="open">Open</option><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="dismissed">Dismissed</option></select></td>
                 <td><input disabled={!editable} aria-label={`Owner for ${item.action}`} value={draft.owner} placeholder="Owner" onChange={(event) => updateDraft(item.actionId, { owner: event.target.value })} /></td>

@@ -123,7 +123,7 @@ export function AICostAlerts({ state, formatMoney, displayCurrency }: {
               <dl className="ai-signal-metrics">
                 <div><dt>Actual cost</dt><dd>{formatMoney(signal.actualCost)}</dd></div>
                 <div><dt>Expected cost</dt><dd>{formatMoney(signal.expectedCost)}</dd></div>
-                <div><dt>Change</dt><dd className="ai-signal-change">{signal.absoluteDelta > 0 ? '+' : ''}{formatMoney(signal.absoluteDelta)}<small>{signal.percentageDelta === null ? 'No prior baseline' : `${signal.percentageDelta > 0 ? '+' : ''}${(signal.percentageDelta * 100).toFixed(1)}%`}</small></dd></div>
+                <div><dt>Change</dt><dd className={`ai-signal-change ${signal.absoluteDelta === 0 ? '' : signal.absoluteDelta > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()}>{signal.absoluteDelta > 0 ? '+' : ''}{formatMoney(signal.absoluteDelta)}<small>{signal.percentageDelta === null ? 'No prior baseline' : `${signal.percentageDelta > 0 ? '+' : ''}${(signal.percentageDelta * 100).toFixed(1)}%`}</small></dd></div>
               </dl>
               <details><summary>Detection details</summary>
                 <dl className="ai-signal-details"><div><dt>Subscription</dt><dd>{signal.subscriptionName || signal.subscriptionId}</dd></div><div><dt>Dimension</dt><dd>{signal.dimensionType} · {signal.dimensionId}</dd></div><div><dt>Incident (UTC)</dt><dd>{signal.firstDetectedDate} - {signal.lastDetectedDate} · {signal.durationDays} day(s)</dd></div><div><dt>Representative date</dt><dd>{signal.date}</dd></div><div><dt>Expected range</dt><dd>{formatMoney(signal.expectedLower)} - {formatMoney(signal.expectedUpper)}</dd></div><div><dt>Baseline</dt><dd>{signal.baselineSamples} same-weekday samples</dd></div></dl>

@@ -41,6 +41,19 @@ it('keeps the same visible category navigation across report tab switches', asyn
   expect(container.querySelectorAll('[aria-label="Spend by category"]')).toHaveLength(1);
 });
 
+it('navigates actionable cost overview cards and leaves informational cards static', async () => {
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
+  expect(container.querySelector('[aria-label="Open cost history"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Open stale and orphaned resources"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Open savings roadmap"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Open confirmed idle resources"]')).not.toBeNull();
+  const labels = [...container.querySelectorAll('.kpi-label')];
+  expect(labels.find((label) => label.textContent === 'Other billed resources')?.closest('button')).toBeNull();
+  expect(labels.find((label) => label.textContent === 'Advisor score')?.closest('button')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open savings roadmap"]')!.click());
+  expect(container.querySelector('#report-page-heading')?.textContent).toBe('Savings Roadmap');
+});
+
 it('keeps budget matching, forecast variance and status thresholds explicit', async () => {
   const budget = { subscriptionId: 'sub-1', name: 'Finance', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '', currentSpend: 105, forecastSpend: 140 };
   expect(budgetThreshold({ ...budget, currentSpend: 100 }).tone).toBe('within');
@@ -71,6 +84,7 @@ it('drills from a selected period into day resources, preserves the range for an
   expect(drilldown.textContent).toContain('2026-09-07 vs 2026-08-31');
   expect(drilldown.textContent).toContain('finance-vm');
   expect(drilldown.textContent).toContain('Finance team');
+  expect(drilldown.querySelector('.cost-change-cell.cost-increase')).not.toBeNull();
   expect(getResourceAvailability).not.toHaveBeenCalled();
   vi.mocked(getResourceAvailability).mockResolvedValue({ resourceId: detailReportFixture.costDetails!.rows[0].resourceId, date: '2026-09-07', status: 'partial', statusMessage: 'Missing minutes remain unknown', availableHours: null, observedAvailableHours: 12, coverageMinutes: 720, expectedMinutes: 1440, metric: 'VmAvailabilityMetric', observedAt: '2026-09-12T00:00:00Z' });
   await act(async () => drilldown.querySelector<HTMLButtonElement>('[aria-label^="Check VM availability"]')!.click());

@@ -49,6 +49,20 @@
     color: var(--color-pale-stone);
 }
 
+.cost-change-cell {
+    font-weight: var(--weight-semi);
+}
+
+.cost-change-cell.cost-increase {
+    background: color-mix(in srgb, var(--color-cost-increase) 10%, transparent);
+    box-shadow: inset 3px 0 0 var(--color-cost-increase);
+}
+
+.cost-change-cell.cost-decrease {
+    background: color-mix(in srgb, var(--color-metric-green) 10%, transparent);
+    box-shadow: inset 3px 0 0 var(--color-metric-green);
+}
+
 .cost-window-overview,
 .subscription-cost-breakdown,
 .period-cost-anomalies {

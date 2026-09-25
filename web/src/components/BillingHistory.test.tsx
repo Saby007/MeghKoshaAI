@@ -42,6 +42,7 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 it('compares two selected dates, supports swapping and keeps zero-baseline percentages honest', async () => {
   await act(async () => root.render(<BillingHistoryTab report={report} formatMoney={format} />));
   expect(output('Billing cost change')).toBe('+$72.00');
+  expect(container.querySelector('[aria-label="Billing cost change"]')?.classList.contains('cost-increase')).toBe(true);
   await change('Baseline billing date', '2026-09-04');
   expect(output('Baseline cost')).toBe('$0.00');
   expect(container.textContent).toContain('N/A (zero baseline)');

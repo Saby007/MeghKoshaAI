@@ -2972,6 +2972,44 @@ body {
     background: var(--glass-bg-strong);
 }
 
+.kpi-link-card {
+    width: 100%;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.kpi-link-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--elevation-hover);
+}
+
+.kpi-link-card:focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: 2px;
+}
+
+.kpi-card-link-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-top: 10px;
+    color: var(--color-electric-violet);
+    font-size: var(--font-size-xs);
+    font-weight: var(--weight-semi);
+}
+
+.kpi-card.cost-increase .kpi-value,
+.summary-tile.cost-increase .summary-tile-value {
+    color: var(--color-cost-increase);
+}
+
+.kpi-card.cost-decrease .kpi-value,
+.summary-tile.cost-decrease .summary-tile-value {
+    color: var(--color-metric-green);
+}
+
 .kpi-label {
     font-family: var(--font-geist-mono);
     font-size: 12px;
