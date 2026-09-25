@@ -13,7 +13,7 @@ resource modelRouter 'Microsoft.CognitiveServices/accounts/deployments@2024-10-0
   name: 'model-router'
   sku: {
     name: 'GlobalStandard'
-    capacity: 100
+    capacity: 20
   }
   properties: {
     model: {

@@ -148,7 +148,7 @@ The helper previews before deploying, configures the recommended `ai` profile, d
 The equivalent settings applied by the helper are:
 
 ```powershell
-$modelRouter = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":100}]'
+$modelRouter = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]'
 
 azd env new my-environment
 azd env set AZURE_LOCATION centralindia

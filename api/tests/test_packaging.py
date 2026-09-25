@@ -190,7 +190,7 @@ def test_approved_model_router_enables_chat_without_hosted_agent_narration():
             "modelName": "model-router",
             "modelVersion": "2025-11-18",
             "sku": "GlobalStandard",
-            "capacity": 100,
+            "capacity": 20,
         }]),
         "APP_ENABLE_CHAT_RUNTIME": "true",
         "APP_AI_VALIDATED": "true",
@@ -223,7 +223,7 @@ def test_ai_deployment_helper_plans_previewed_ai_profile_with_processor():
         "AZURE_LOCATION": "centralindia",
         "APP_PROFILE": "ai",
         "APP_EXPORT_TRUSTED_SERVICES": "true",
-        "APP_MODEL_DEPLOYMENTS": '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":100}]',
+        "APP_MODEL_DEPLOYMENTS": '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]',
         "MODEL_ROUTER_DEPLOYMENT_NAME": "model-router",
         "APP_ENABLE_CHAT_RUNTIME": "true",
         "APP_AI_VALIDATED": "true",
@@ -525,7 +525,7 @@ def test_operational_model_router_template_only_targets_the_existing_account_chi
     deployment = resources[0]
     assert deployment["type"] == "Microsoft.CognitiveServices/accounts/deployments"
     assert deployment["name"] == "[format('{0}/{1}', parameters('accountName'), 'model-router')]"
-    assert deployment["sku"] == {"name": "GlobalStandard", "capacity": 100}
+    assert deployment["sku"] == {"name": "GlobalStandard", "capacity": 20}
     assert deployment["properties"]["model"] == {
         "format": "OpenAI", "name": "model-router", "version": "2025-11-18",
     }

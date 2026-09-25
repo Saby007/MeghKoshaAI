@@ -129,8 +129,8 @@ foreach ($model in $models) {
     }
     if ($model.modelName -eq 'model-router') {
         if ($model.modelFormat -ne 'OpenAI' -or $model.modelVersion -ne '2025-11-18' -or
-            $model.sku -ne 'GlobalStandard' -or $model.capacity -ne 100) {
-            throw 'Model Router must use the approved OpenAI 2025-11-18 GlobalStandard deployment at capacity 100.'
+            $model.sku -ne 'GlobalStandard' -or $model.capacity -ne 20) {
+            throw 'Model Router must use the approved OpenAI 2025-11-18 GlobalStandard deployment at capacity 20.'
         }
         [void] $modelRouterNames.Add([string]$model.name)
     }
