@@ -35,12 +35,27 @@
     from -Location because the approved Model Router deployment is not offered in every region.
     The script verifies the model is available here and stops before provisioning if it is not.
 
+.PARAMETER PrivateRegistry
+    Put the container registry behind a private endpoint and deny public network access, for
+    subscriptions whose policy blocks public registry access. This raises the registry to the
+    Premium tier and adds an in-VNet build agent pool, because azd's remote build submits to the
+    registry's public endpoint and can no longer reach it. Provisioning and image building are
+    then separate steps rather than a single azd up.
+
+.PARAMETER BlobDataProtection
+    Enable blob versioning and blob/container soft delete on the export storage account, for
+    subscriptions that audit data-protection settings.
+
 .PARAMETER TargetSubscriptionId
     One or more subscriptions to assess, as separate values or a single comma-separated string,
     for example -TargetSubscriptionId '1111...,2222...'. Defaults to the subscription you deploy into.
 
 .EXAMPLE
     pwsh ./scripts/deploy-end-to-end.ps1 -EnvironmentName my-environment -TargetSubscriptionId 'sub-a,sub-b'
+
+.EXAMPLE
+    # A subscription whose policy denies public registry access and audits blob data protection.
+    pwsh ./scripts/deploy-end-to-end.ps1 -EnvironmentName my-environment -PrivateRegistry -BlobDataProtection
 
 .EXAMPLE
     # Standalone: downloads nothing else - clones the repository next to the current directory first.
@@ -69,6 +84,8 @@ param(
     [switch] $IncludeLocalhostRedirects,
     [switch] $GrantAdminConsent,
     [switch] $SkipModelAvailabilityCheck,
+    [switch] $PrivateRegistry,
+    [switch] $BlobDataProtection,
     [switch] $PlanOnly
 )
 
@@ -89,7 +106,12 @@ $settings = [ordered]@{
     APP_ENABLE_CHAT_RUNTIME = 'true'
     APP_AI_VALIDATED = 'true'
     APP_ENABLE_AI_RUNTIME = 'false'
+    APP_PRIVATE_REGISTRY = $PrivateRegistry.IsPresent.ToString().ToLowerInvariant()
+    APP_BLOB_DATA_PROTECTION = $BlobDataProtection.IsPresent.ToString().ToLowerInvariant()
 }
+# A registry that denies public access cannot be reached by azd's remote build, so those runs
+# provision only and the images are built separately on the registry's own in-VNet agent pool.
+$deployVerb = if ($PrivateRegistry) { 'provision' } else { 'up' }
 # The availability gate checks exactly what Bicep will deploy, so the approved model, version and
 # SKU are read back out of APP_MODEL_DEPLOYMENTS rather than repeated as literals here.
 $requiredModels = @($modelRouter | ConvertFrom-Json)
@@ -122,6 +144,9 @@ if ($PlanOnly) {
         resourceLocation = $Location
         foundryLocation = $FoundryLocation
         modelAvailabilityCheck = -not $SkipModelAvailabilityCheck
+        privateRegistry = [bool]$PrivateRegistry
+        blobDataProtection = [bool]$BlobDataProtection
+        deployVerb = $deployVerb
         preview = -not $SkipPreview
         enableProcessor = -not $SkipProcessor
         bootstrapIdentity = -not $SkipIdentityBootstrap
@@ -269,9 +294,9 @@ function Wait-ActiveDeployment {
 function Invoke-AzdUp {
     param([Parameter(Mandatory)][string] $Reason)
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        Write-Step "azd up - $Reason (attempt $attempt of $MaxAttempts)"
+        Write-Step "azd $deployVerb - $Reason (attempt $attempt of $MaxAttempts)"
         $lines = [System.Collections.Generic.List[string]]::new()
-        & azd up --environment $EnvironmentName 2>&1 | ForEach-Object {
+        & azd $deployVerb --environment $EnvironmentName 2>&1 | ForEach-Object {
             $line = $_.ToString()
             $lines.Add($line)
             Write-Host $line
@@ -279,7 +304,7 @@ function Invoke-AzdUp {
         if ($LASTEXITCODE -eq 0) { return }
         $text = $lines -join "`n"
         if ($attempt -eq $MaxAttempts) {
-            throw "azd up failed after $attempt attempt(s) while trying to $Reason. Review the output above; rerunning this script resumes from here."
+            throw "azd $deployVerb failed after $attempt attempt(s) while trying to $Reason. Review the output above; rerunning this script resumes from here."
         }
         if ($text -match 'AccountProvisioningStateInvalid|Another operation is in progress') {
             Write-Warning 'The AI Foundry account is still settling. Reusing the existing account on the retry.'
@@ -291,10 +316,33 @@ function Invoke-AzdUp {
         } elseif ($text -match 'DeploymentActive') {
             Write-Warning 'A previous deployment operation was still finishing on Azure.'
         } else {
-            Write-Warning 'azd up failed. Waiting before the next attempt.'
+            Write-Warning "azd $deployVerb failed. Waiting before the next attempt."
         }
-        Wait-Settle "azd up failed, retrying ($($attempt + 1) of $MaxAttempts)"
+        Wait-Settle "azd $deployVerb failed, retrying ($($attempt + 1) of $MaxAttempts)"
         Wait-ActiveDeployment
+    }
+}
+
+function Build-ImagesOnAgentPool {
+    # azd's remote build submits to the registry's public endpoint, which a private registry denies.
+    # The registry's own agent pool runs inside the VNet and reaches it through the private endpoint.
+    $registry = Get-AzdValue 'AZURE_CONTAINER_REGISTRY_NAME'
+    $endpoint = Get-AzdValue 'AZURE_CONTAINER_REGISTRY_ENDPOINT'
+    $pool = Get-AzdValue 'APP_BUILD_AGENT_POOL'
+    if (-not $registry -or -not $endpoint) { throw 'The container registry has not been provisioned yet, so the images cannot be built.' }
+    if (-not $pool) { throw 'No build agent pool was provisioned, so the images cannot reach the private registry. Rerun provisioning, or drop -PrivateRegistry.' }
+    $subscriptionArgs = Get-SubscriptionArgument
+    $tag = "build-$(Get-Date -Format 'yyyyMMddHHmmss')"
+    foreach ($service in @('api', 'web')) {
+        $repository = "cost-assessment-app/$service-$EnvironmentName"
+        Write-Step "Building the $service image on agent pool '$pool'"
+        & az acr build --registry $registry @subscriptionArgs --agent-pool $pool `
+            --image "${repository}:$tag" --file "$service/Dockerfile" "./$service" --only-show-errors | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "Building the $service image on agent pool '$pool' failed. Agent pools are a preview feature and are not offered in every region; confirm the pool exists with 'az acr agentpool show --registry $registry --name $pool'."
+        }
+        Set-AzdValue "SERVICE_$($service.ToUpperInvariant())_IMAGE_NAME" "$endpoint/${repository}:$tag"
+        Write-Host "  $service image: $endpoint/${repository}:$tag"
     }
 }
 
@@ -456,7 +504,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Infrastructure preview failed. Nothing was deployed.' }
     }
 
-    Invoke-AzdUp 'provision infrastructure and publish the container images'
+    Invoke-AzdUp $(if ($PrivateRegistry) { 'provision infrastructure, the private registry and its build agent pool' } else { 'provision infrastructure and publish the container images' })
     Wait-Settle 'letting the first deployment settle'
 
     Set-AzdValue 'APP_REUSE_AI_ACCOUNT' 'true'
@@ -467,7 +515,15 @@ try {
     $webImage = Get-AzdValue 'SERVICE_WEB_IMAGE_NAME'
     Write-Host "SERVICE_API_IMAGE_NAME = $(if ($apiImage) { $apiImage } else { '<not set>' })"
     Write-Host "SERVICE_WEB_IMAGE_NAME = $(if ($webImage) { $webImage } else { '<not set>' })"
-    if (-not $apiImage -or -not $webImage -or -not (Test-ContainerAppsExist)) {
+    if ($PrivateRegistry) {
+        # azd never built anything in this mode, so the images are produced here and the following
+        # provision pass is what creates the Container Apps from them.
+        Build-ImagesOnAgentPool
+        Invoke-AzdUp 'create the Container Apps from the agent-pool images'
+        Wait-Settle 'letting the Container Apps settle'
+        $apiImage = Get-AzdValue 'SERVICE_API_IMAGE_NAME'
+        $webImage = Get-AzdValue 'SERVICE_WEB_IMAGE_NAME'
+    } elseif (-not $apiImage -or -not $webImage -or -not (Test-ContainerAppsExist)) {
         # The first pass builds the images in parallel with provisioning, so Bicep usually cannot
         # create ca-api-*/ca-web-* until a second pass sees the published image names.
         Invoke-AzdUp 'create the Container Apps from the published images'
@@ -476,7 +532,7 @@ try {
         $webImage = Get-AzdValue 'SERVICE_WEB_IMAGE_NAME'
     }
     if (-not $apiImage -or -not $webImage) {
-        throw 'azd did not publish both container images. Rerun this script once the remote build completes.'
+        throw 'Both container images are required before the Container Apps can be created. Rerun this script once the image build completes.'
     }
 
     # -----------------------------------------------------------------------

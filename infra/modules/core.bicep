@@ -6,11 +6,50 @@ param tags object
 param vnetAddressPrefix string
 param containerSubnetPrefix string
 param privateEndpointSubnetPrefix string
+@description('Subnet for the registry build agents. They run on virtual machine scale sets, so this subnet must carry no delegation and cannot be shared with the Container Apps subnet.')
+param buildAgentSubnetPrefix string = '10.42.1.32/27'
 @minValue(30)
 @maxValue(730)
 param logRetentionDays int = 30
 @description('Put the registry behind a private endpoint and deny public network access. Requires the Premium tier, and azd remote builds can no longer reach the registry.')
 param privateRegistry bool = false
+@allowed(['S1', 'S2', 'S3'])
+@description('Build agent size. S1 is 2 CPU/3 GB, S2 is 4 CPU/8 GB, S3 is 8 CPU/16 GB.')
+param buildAgentTier string = 'S2'
+@minValue(1)
+@maxValue(10)
+param buildAgentCount int = 1
+
+var baseSubnets = [
+  {
+    name: 'containers'
+    properties: {
+      addressPrefix: containerSubnetPrefix
+      delegations: [
+        {
+          name: 'container-apps'
+          properties: { serviceName: 'Microsoft.App/environments' }
+        }
+      ]
+    }
+  }
+  {
+    name: 'private-endpoints'
+    properties: {
+      addressPrefix: privateEndpointSubnetPrefix
+      privateEndpointNetworkPolicies: 'Disabled'
+    }
+  }
+]
+// Only carved out when the registry is private, so the default network plan is unchanged.
+var buildAgentSubnets = [
+  {
+    name: 'build-agents'
+    properties: {
+      addressPrefix: buildAgentSubnetPrefix
+    }
+  }
+]
 
 resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: 'vnet-${resourceToken}'
@@ -18,27 +57,7 @@ resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   tags: tags
   properties: {
     addressSpace: { addressPrefixes: [vnetAddressPrefix] }
-    subnets: [
-      {
-        name: 'containers'
-        properties: {
-          addressPrefix: containerSubnetPrefix
-          delegations: [
-            {
-              name: 'container-apps'
-              properties: { serviceName: 'Microsoft.App/environments' }
-            }
-          ]
-        }
-      }
-      {
-        name: 'private-endpoints'
-        properties: {
-          addressPrefix: privateEndpointSubnetPrefix
-          privateEndpointNetworkPolicies: 'Disabled'
-        }
-      }
-    ]
+    subnets: privateRegistry ? concat(baseSubnets, buildAgentSubnets) : baseSubnets
   }
 }
 
@@ -115,6 +134,23 @@ resource registryZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGro
   }
 }
 
+// az acr build cannot reach a registry that denies public access, because the shared task fleet
+// runs from public IPs. A dedicated pool runs inside this VNet instead, resolving the registry
+// through the private endpoint above.
+resource buildAgents 'Microsoft.ContainerRegistry/registries/agentPools@2019-06-01-preview' = if (privateRegistry) {
+  parent: registry
+  name: 'build-agents'
+  location: location
+  tags: tags
+  properties: {
+    count: buildAgentCount
+    os: 'Linux'
+    tier: buildAgentTier
+    virtualNetworkSubnetResourceId: resourceId('Microsoft.Network/virtualNetworks/subnets', network.name, 'build-agents')
+  }
+  dependsOn: [registryZoneGroup]
+}
+
 resource identities 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = [for purpose in ['api', 'web', 'obo']: {
   name: 'id-${purpose}-${resourceToken}'
   location: location
@@ -162,6 +198,7 @@ output environmentDomain string = containerEnvironment.properties.defaultDomain
 output registryName string = registry.name
 output registryId string = registry.id
 output registryServer string = registry.properties.loginServer
+output buildAgentPoolName string = privateRegistry ? 'build-agents' : ''
 output networkId string = network.id
 output privateEndpointSubnetId string = resourceId('Microsoft.Network/virtualNetworks/subnets', network.name, 'private-endpoints')
 output workspaceId string = workspace.id

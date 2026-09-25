@@ -178,6 +178,29 @@ Before provisioning anything, the script checks that the exact approved model, v
 az cognitiveservices model list --location <region> --query "[?model.name=='model-router']"
 ```
 
+#### Deploying into a policy-restricted subscription
+
+Some subscriptions carry policies that the default template deliberately does not satisfy — most commonly ones that **deny public access to the container registry** and **audit blob versioning and soft delete**. Two opt-in switches adapt the deployment without changing anything for subscriptions that don't need them:
+
+```powershell
+pwsh ./scripts/deploy-end-to-end.ps1 `
+  -EnvironmentName my-environment `
+  -PrivateRegistry `
+  -BlobDataProtection `
+  -TargetSubscriptionId '<subscription-id>'
+```
+
+| Switch | Effect |
+| --- | --- |
+| `-PrivateRegistry` | Registry moves to the **Premium** tier behind a private endpoint with a `privatelink.azurecr.io` zone, and `publicNetworkAccess` becomes `Disabled`. |
+| `-BlobDataProtection` | Blob versioning plus blob and container soft delete are enabled on the export storage account (`APP_BLOB_RETENTION_DAYS`, default 7). |
+
+**`-PrivateRegistry` changes how the images are built.** `azd`'s remote build submits to the registry's *public* endpoint, so it cannot reach a registry that denies public access — [Microsoft's own guidance](https://learn.microsoft.com/azure/container-registry/container-registry-private-link) is explicit that `az acr build` stops working once public access is disabled. The deployment therefore splits in two: `azd provision` creates the infrastructure (including a **dedicated build agent pool** in its own undelegated `build-agents` subnet), the images are built on that pool so they reach the registry over the private endpoint, and a second `azd provision` creates the Container Apps from them. `azd up` is never used in this mode.
+
+> Build agent pools are a **preview** feature offered only in certain regions, and they add cost on top of the Premium registry. If the pool cannot be created in your region, the run stops and tells you how to verify it. The Premium tier is not optional — private endpoints are a Premium-only capability.
+
+Neither switch affects a normal deployment: both default to off, every added resource is conditional, and with them off the template compiles to the same registry tier, the same public access and the same blob settings as before.
+
 ### Option 2 — Azure Developer CLI, step by step
 
 Use this when you want to drive each stage yourself. Requires the same tooling as Option 1, plus the [provider registration above](#prerequisites). Clone the repo first — `azd` reads `azure.yaml`/`infra/`/`api/`/`web/` from your local copy, it doesn't deploy directly from GitHub:

@@ -25,6 +25,7 @@ $global:deployTestState = @{
     roleAssignments = [System.Collections.Generic.List[object]]::new()
     roleCreates = [System.Collections.Generic.List[object]]::new()
     bootstrapCalls = 0
+    acrBuilds = [System.Collections.Generic.List[object]]::new()
     modelChecks = 0
     catalogueUnavailable = $false
     # eastus2 offers the approved Model Router; centralindia offers an older variant only, which is
@@ -124,8 +125,25 @@ function azd {
         throw "Unexpected azd env call: $($a -join ' ')"
     }
     if ($a[0] -eq 'provision') {
-        if ($a -notcontains '--preview') { throw 'The helper must only ever call azd provision in preview mode.' }
-        $state.previewCalls++
+        if ($a -contains '--preview') {
+            $state.previewCalls++
+            return
+        }
+        # Private-registry runs provision instead of up, because azd cannot build into a registry
+        # that denies public access; the images arrive from the agent pool instead.
+        $values = $state.environments[$environment]
+        $state.upCalls.Add('provision')
+        if ($values.Contains('SERVICE_API_IMAGE_NAME') -and $values.Contains('SERVICE_WEB_IMAGE_NAME')) {
+            $state.containerApps = $true
+            $values['SERVICE_WEB_ENDPOINT_URL'] = 'https://web.example.test'
+        } else {
+            $values['AZURE_RESOURCE_GROUP'] = $state.resourceGroup
+            $values['APP_WEB_ORIGIN'] = 'https://web.example.test'
+            $values['AZURE_CONTAINER_REGISTRY_NAME'] = 'acrtest'
+            $values['AZURE_CONTAINER_REGISTRY_ENDPOINT'] = 'acrtest.azurecr.io'
+            $values['APP_BUILD_AGENT_POOL'] = 'build-agents'
+            $values['MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID'] = "/subscriptions/$($state.subscriptionId)/resourceGroups/$($state.resourceGroup)/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-obo"
+        }
         return
     }
     if ($a[0] -eq 'up') {
@@ -196,6 +214,15 @@ function az {
         if ($query -match "id-api-") { return $state.apiPrincipalId }
         if ($query -match "id-processor-") { return $state.processorPrincipalId }
         return "name              principalId`nid-api-x          $($state.apiPrincipalId)"
+    }
+    if ($a[0] -eq 'acr' -and $a[1] -eq 'build') {
+        $state.acrBuilds.Add(@{
+            registry = Get-StubArgument $a '--registry'
+            pool = Get-StubArgument $a '--agent-pool'
+            image = Get-StubArgument $a '--image'
+        })
+        if ((Get-StubArgument $a '--agent-pool') -ne 'build-agents') { throw 'A private registry can only be reached from its in-VNet agent pool.' }
+        return
     }
     if ($a[0] -eq 'role' -and $a[1] -eq 'assignment' -and $a[2] -eq 'list') {
         $scope = Get-StubArgument $a '--scope'
@@ -315,8 +342,13 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
         throw 'The deployment summary misreports the delivered environment.'
     }
 
-    # A rerun against a settled environment must deploy the current code once and nothing more:
-    # no repeated image-handoff, processor or sign-in deployments, and no duplicated role assignments.
+    # The default path must never opt into the policy-restricted behaviour.
+    if ($values['APP_PRIVATE_REGISTRY'] -ne 'false' -or $values['APP_BLOB_DATA_PROTECTION'] -ne 'false') {
+        throw 'The default deployment must leave the policy-restricted settings off.'
+    }
+    if ($state.acrBuilds.Count -ne 0) { throw 'The default deployment must let azd build the images, not the agent pool.' }
+
+
     $state.upCalls.Clear()
     $state.roleCreates.Clear()
     $state.previewCalls = 0
@@ -325,6 +357,36 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
     if ($state.roleCreates.Count -ne 0) { throw 'A rerun duplicated role assignments instead of detecting the existing ones.' }
     if ($state.previewCalls -ne 0) { throw '-SkipPreview still ran the infrastructure preview.' }
     if ($state.bootstrapCalls -ne 2) { throw 'The sign-in bootstrap must be re-verified on every run.' }
+
+    # A policy-restricted run provisions only, builds on the agent pool, then provisions again so
+    # Bicep creates the Container Apps from those images. azd up must never run, because it would
+    # try to build into a registry that denies public access.
+    $private = @{
+        EnvironmentName = 'app-private'
+        RepoDirectory = $repoRoot
+        TargetSubscriptionId = $targetOne
+        SettleSeconds = 0
+        MaxAttempts = 3
+    }
+    $state.upCalls.Clear()
+    $state.failNextUp = ''
+    $privateSummary = & $script @private -PrivateRegistry -BlobDataProtection -SkipPreview | Select-Object -Last 1 | ConvertFrom-Json -AsHashtable
+    $privateValues = $state.environments['app-private']
+    if ($privateValues['APP_PRIVATE_REGISTRY'] -ne 'true' -or $privateValues['APP_BLOB_DATA_PROTECTION'] -ne 'true') {
+        throw 'The policy-restricted switches were not passed through to the deployment.'
+    }
+    if (@($state.upCalls | Where-Object { $_ -ne 'provision' }).Count) {
+        throw "A private-registry run must only ever provision; got: $($state.upCalls -join ',')"
+    }
+    if ($state.acrBuilds.Count -ne 2) { throw "Expected the api and web images to be built on the agent pool, got $($state.acrBuilds.Count)." }
+    foreach ($service in @('api', 'web')) {
+        $built = @($state.acrBuilds | Where-Object { $_.image -like "*$service-app-private:*" })
+        if ($built.Count -ne 1) { throw "The $service image was not built on the agent pool." }
+        if ($privateValues["SERVICE_$($service.ToUpperInvariant())_IMAGE_NAME"] -notlike 'acrtest.azurecr.io/*') {
+            throw "The $service image name was not recorded for Bicep to consume."
+        }
+    }
+    if (-not $privateSummary.webUrl) { throw 'The private-registry deployment did not report a running app.' }
 
     # An unavailable model must stop the run before anything is provisioned, not fail deep inside
     # Bicep after the account and networking already exist.
@@ -363,7 +425,9 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
     if ($state.upCalls.Count -eq 0) { throw '-SkipModelAvailabilityCheck did not allow the deployment to proceed.' }
 
     [ordered]@{ result = 'passed'; deployments = 5; roleAssignments = 6; rerunRedeploysOnce = $true
-                modelGateStopsBeforeProvisioning = 3; catalogueFailureIsNonFatal = $true; gateOverridable = $true } | ConvertTo-Json -Compress
+                modelGateStopsBeforeProvisioning = 3; catalogueFailureIsNonFatal = $true; gateOverridable = $true
+                privateRegistryProvisionsOnly = $true; agentPoolImageBuilds = $state.acrBuilds.Count
+                defaultsUnchanged = $true } | ConvertTo-Json -Compress
 } finally {
     Remove-Variable -Name deployTestState -Scope Global -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $repoRoot -Recurse -Force -ErrorAction SilentlyContinue
