@@ -25,6 +25,23 @@ $global:deployTestState = @{
     roleAssignments = [System.Collections.Generic.List[object]]::new()
     roleCreates = [System.Collections.Generic.List[object]]::new()
     bootstrapCalls = 0
+    modelChecks = 0
+    catalogueUnavailable = $false
+    # eastus2 offers the approved Model Router; centralindia offers an older variant only, which is
+    # what the gate must reject rather than silently deploy.
+    modelRegions = @{
+        'eastus2' = @(
+            @{ model = @{ name = 'model-router'; format = 'OpenAI'; version = '2025-11-18'; skus = @(@{ name = 'GlobalStandard' }, @{ name = 'DataZoneStandard' }) } },
+            @{ model = @{ name = 'gpt-4o'; format = 'OpenAI'; version = '2024-11-20'; skus = @(@{ name = 'GlobalStandard' }) } }
+        )
+        'centralindia' = @(
+            @{ model = @{ name = 'model-router'; format = 'OpenAI'; version = '2025-05-19'; skus = @(@{ name = 'DataZoneStandard' }) } },
+            @{ model = @{ name = 'gpt-4o'; format = 'OpenAI'; version = '2024-11-20'; skus = @(@{ name = 'GlobalStandard' }) } }
+        )
+        'westus3' = @(
+            @{ model = @{ name = 'gpt-4o'; format = 'OpenAI'; version = '2024-11-20'; skus = @(@{ name = 'GlobalStandard' }) } }
+        )
+    }
     # PowerShell resolves a function's unqualified variables through the runtime caller chain, so a
     # stub reading $subscriptionId would silently pick up the script's own -SubscriptionId parameter.
     # Every fixture the stubs need therefore lives here and is read through $global:deployTestState.
@@ -153,6 +170,14 @@ function az {
         return
     }
     if ($a[0] -eq 'login') { $state.interactiveLogins++; return }
+    if ($a[0] -eq 'cognitiveservices' -and $a[1] -eq 'model' -and $a[2] -eq 'list') {
+        $state.modelChecks++
+        $region = Get-StubArgument $a '--location'
+        if ((Get-StubArgument $a '--subscription') -ne $state.subscriptionId) { throw 'The model catalogue must be read from the deployment subscription.' }
+        if ($state.catalogueUnavailable) { $global:LASTEXITCODE = 1; return }
+        if (-not $state.modelRegions.ContainsKey($region)) { return (ConvertTo-Json -InputObject @() -Depth 3) }
+        return (ConvertTo-Json -InputObject $state.modelRegions[$region] -Depth 6)
+    }
     if ($a[0] -in @('cognitiveservices', 'deployment', 'containerapp', 'identity') -and
         (Get-StubArgument $a '--subscription') -ne $state.subscriptionId) {
         throw "az $($a[0]) must be pinned to the deployment subscription, otherwise it reads the wrong one."
@@ -247,6 +272,7 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
 
     $expected = @{
         AZURE_LOCATION = 'centralindia'
+        FOUNDRY_LOCATION = 'eastus2'
         AZURE_SUBSCRIPTION_ID = $subscriptionId
         APP_PROFILE = 'ai'
         APP_EXPORT_TRUSTED_SERVICES = 'true'
@@ -270,6 +296,7 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
     if ($state.authChecks -ne 1 -or $state.interactiveLogins -ne 0) { throw 'Sign-in must be checked once and must not prompt when already authenticated.' }
     if ($state.cloneCalls -ne 0) { throw 'An existing checkout must not be cloned again.' }
     if ($state.bootstrapCalls -ne 1) { throw "bootstrap-identity.ps1 ran $($state.bootstrapCalls) times instead of once." }
+    if ($state.modelChecks -ne 1) { throw "The model availability check ran $($state.modelChecks) times instead of once." }
     if (($state.upCalls -join ',') -ne 'failed,succeeded,succeeded,succeeded,succeeded') {
         throw "Unexpected azd up sequence: $($state.upCalls -join ',')"
     }
@@ -299,7 +326,44 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
     if ($state.previewCalls -ne 0) { throw '-SkipPreview still ran the infrastructure preview.' }
     if ($state.bootstrapCalls -ne 2) { throw 'The sign-in bootstrap must be re-verified on every run.' }
 
-    [ordered]@{ result = 'passed'; deployments = 5; roleAssignments = 6; rerunRedeploysOnce = $true } | ConvertTo-Json -Compress
+    # An unavailable model must stop the run before anything is provisioned, not fail deep inside
+    # Bicep after the account and networking already exist.
+    foreach ($case in @(
+        @{ Region = 'westus3'; Reason = 'the model is not offered in the region at all' },
+        @{ Region = 'centralindia'; Reason = 'only a different version/SKU of the model is offered' },
+        @{ Region = 'nowhere-1'; Reason = 'the region returns an empty catalogue' })) {
+        $state.upCalls.Clear()
+        $state.previewCalls = 0
+        $before = $state.environments.Count
+        $stopped = $null
+        try { & $script @parameters -FoundryLocation $case.Region | Out-Null }
+        catch { $stopped = $_.Exception.Message }
+        if (-not $stopped) { throw "Deployment continued even though $($case.Reason) in '$($case.Region)'." }
+        if ($stopped -notmatch 'model-router' -or $stopped -notmatch [regex]::Escape($case.Region) -or $stopped -notmatch '-FoundryLocation') {
+            throw "The stop message for '$($case.Region)' must name the model, the region and the way to change it. Got: $stopped"
+        }
+        if ($state.upCalls.Count -ne 0 -or $state.previewCalls -ne 0 -or $state.environments.Count -ne $before) {
+            throw "Provisioning started for '$($case.Region)' before the model availability gate stopped it."
+        }
+    }
+
+    # A catalogue that cannot be read is not evidence of an unavailable model and must not block.
+    $state.catalogueUnavailable = $true
+    $state.upCalls.Clear()
+    try { & $script @parameters -SkipPreview | Out-Null } catch { throw "An unreadable model catalogue must not stop the deployment: $($_.Exception.Message)" }
+    if ($state.upCalls.Count -eq 0) { throw 'An unreadable model catalogue wrongly prevented the deployment.' }
+    $state.catalogueUnavailable = $false
+
+    # The override exists for a catalogue that disagrees with reality.
+    $state.upCalls.Clear()
+    $checksBefore = $state.modelChecks
+    try { & $script @parameters -FoundryLocation 'westus3' -SkipPreview -SkipModelAvailabilityCheck | Out-Null }
+    catch { throw "-SkipModelAvailabilityCheck did not bypass the gate: $($_.Exception.Message)" }
+    if ($state.modelChecks -ne $checksBefore) { throw '-SkipModelAvailabilityCheck still queried the catalogue.' }
+    if ($state.upCalls.Count -eq 0) { throw '-SkipModelAvailabilityCheck did not allow the deployment to proceed.' }
+
+    [ordered]@{ result = 'passed'; deployments = 5; roleAssignments = 6; rerunRedeploysOnce = $true
+                modelGateStopsBeforeProvisioning = 3; catalogueFailureIsNonFatal = $true; gateOverridable = $true } | ConvertTo-Json -Compress
 } finally {
     Remove-Variable -Name deployTestState -Scope Global -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $repoRoot -Recurse -Force -ErrorAction SilentlyContinue

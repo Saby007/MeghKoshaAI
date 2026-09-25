@@ -27,6 +27,14 @@
     The subscription to deploy into. Defaults to the Azure CLI's current subscription. It is pinned
     into the azd environment and every az lookup, so no azd command ever stops to prompt for it.
 
+.PARAMETER Location
+    Azure region for the application, data and networking resources.
+
+.PARAMETER FoundryLocation
+    Azure region for the AI Foundry account, project and model deployments. Deliberately separate
+    from -Location because the approved Model Router deployment is not offered in every region.
+    The script verifies the model is available here and stops before provisioning if it is not.
+
 .PARAMETER TargetSubscriptionId
     One or more subscriptions to assess, as separate values or a single comma-separated string,
     for example -TargetSubscriptionId '1111...,2222...'. Defaults to the subscription you deploy into.
@@ -44,6 +52,7 @@ param(
     [ValidatePattern('^[a-z0-9][a-z0-9-]{0,63}$')]
     [string] $EnvironmentName,
     [string] $Location = 'centralindia',
+    [string] $FoundryLocation = 'eastus2',
     [string] $SubscriptionId = '',
     [string[]] $TargetSubscriptionId = @(),
     [string] $RepoUrl = 'https://github.com/Saby007/MeghKoshaAI.git',
@@ -59,6 +68,7 @@ param(
     [switch] $SkipRoleAssignments,
     [switch] $IncludeLocalhostRedirects,
     [switch] $GrantAdminConsent,
+    [switch] $SkipModelAvailabilityCheck,
     [switch] $PlanOnly
 )
 
@@ -71,6 +81,7 @@ if ($PSVersionTable.PSVersion -lt [version]'7.0') {
 $modelRouter = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]'
 $settings = [ordered]@{
     AZURE_LOCATION = $Location
+    FOUNDRY_LOCATION = $FoundryLocation
     APP_PROFILE = 'ai'
     APP_EXPORT_TRUSTED_SERVICES = 'true'
     APP_MODEL_DEPLOYMENTS = $modelRouter
@@ -79,6 +90,9 @@ $settings = [ordered]@{
     APP_AI_VALIDATED = 'true'
     APP_ENABLE_AI_RUNTIME = 'false'
 }
+# The availability gate checks exactly what Bicep will deploy, so the approved model, version and
+# SKU are read back out of APP_MODEL_DEPLOYMENTS rather than repeated as literals here.
+$requiredModels = @($modelRouter | ConvertFrom-Json)
 
 $subscriptionIds = @(
     $TargetSubscriptionId |
@@ -105,6 +119,9 @@ if ($PlanOnly) {
         repository = @{ url = $RepoUrl; directory = $RepoDirectory }
         settings = $settings
         deploymentSubscription = $SubscriptionId
+        resourceLocation = $Location
+        foundryLocation = $FoundryLocation
+        modelAvailabilityCheck = -not $SkipModelAvailabilityCheck
         preview = -not $SkipPreview
         enableProcessor = -not $SkipProcessor
         bootstrapIdentity = -not $SkipIdentityBootstrap
@@ -163,6 +180,60 @@ function Get-ResourceGroupName {
 function Get-SubscriptionArgument {
     if ($deploymentSubscription) { return @('--subscription', $deploymentSubscription) }
     return @()
+}
+
+function Assert-ModelAvailability {
+    # Deploying a model into a region that does not offer it fails deep inside the Bicep run, after
+    # the account, project and networking are already created. The regional catalogue is queried up
+    # front so an unavailable region stops the run before anything is provisioned.
+    if ($SkipModelAvailabilityCheck) {
+        Write-Warning 'Skipping the model availability check (-SkipModelAvailabilityCheck).'
+        return
+    }
+    Write-Step "Checking model availability in $FoundryLocation"
+    $subscriptionArgs = Get-SubscriptionArgument
+    $json = Get-CliText (& az cognitiveservices model list --location $FoundryLocation @subscriptionArgs --output json --only-show-errors 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $json) {
+        # An unreachable catalogue is not evidence of an unavailable model, so it must not mimic one.
+        Write-Warning "The model catalogue for '$FoundryLocation' could not be read, so availability was not confirmed. Deployment continues; a genuinely unavailable model will fail during provisioning."
+        return
+    }
+    $catalogue = @($json | ConvertFrom-Json)
+    $missing = [System.Collections.Generic.List[string]]::new()
+    foreach ($model in $requiredModels) {
+        $found = @($catalogue | Where-Object {
+            $_.model.name -eq $model.modelName -and
+            $_.model.format -eq $model.modelFormat -and
+            $_.model.version -eq $model.modelVersion -and
+            @($_.model.skus | Where-Object { $_.name -eq $model.sku }).Count -gt 0
+        })
+        if ($found.Count) {
+            Write-Host "  available: $($model.modelName) $($model.modelVersion) ($($model.sku))" -ForegroundColor Green
+            continue
+        }
+        $missing.Add("$($model.modelName) $($model.modelVersion) ($($model.sku))")
+        # Naming the closest matches turns "pick another region" into a decision the operator can make.
+        $sameModel = @($catalogue | Where-Object { $_.model.name -eq $model.modelName })
+        if ($sameModel.Count) {
+            $offered = @($sameModel | ForEach-Object {
+                $skus = ($_.model.skus | ForEach-Object { $_.name }) -join '/'
+                "$($_.model.version) ($skus)"
+            } | Select-Object -Unique) -join ', '
+            Write-Host "  '$($model.modelName)' exists in $FoundryLocation but not as $($model.modelVersion)/$($model.sku). Offered there: $offered" -ForegroundColor Yellow
+        } else {
+            Write-Host "  '$($model.modelName)' is not offered in $FoundryLocation at all." -ForegroundColor Yellow
+        }
+    }
+    if (-not $missing.Count) { return }
+    throw @"
+$($missing -join '; ') is not available in the Foundry region '$FoundryLocation', so the deployment was stopped before provisioning anything.
+
+Choose a Foundry region that offers it and rerun with -FoundryLocation <region>. The Foundry region is independent of -Location, so the rest of the app can stay in '$Location'. List the regions that offer it with:
+
+  az cognitiveservices model list --location <region> --query "[?model.name=='model-router']"
+
+If you are certain the model is available and the catalogue is wrong, rerun with -SkipModelAvailabilityCheck.
+"@
 }
 
 function Test-FoundryAccountExists {
@@ -334,6 +405,10 @@ try {
     $subscriptionName = Get-CliText (& az account show --subscription $deploymentSubscription --query name --output tsv --only-show-errors 2>$null)
     if ($LASTEXITCODE -ne 0) { throw "The signed-in account cannot access subscription $deploymentSubscription." }
     Write-Host "Deploying into subscription $deploymentSubscription ($subscriptionName)."
+    Write-Host "Resource region: $Location. Foundry region: $FoundryLocation."
+
+    # Runs before the azd environment is even created, so an unavailable model costs nothing.
+    Assert-ModelAvailability
 
     # -----------------------------------------------------------------------
     # 3. Environment and settings

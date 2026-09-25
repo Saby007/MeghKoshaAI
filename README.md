@@ -145,6 +145,7 @@ azd auth login
 pwsh ./scripts/deploy-end-to-end.ps1 `
   -EnvironmentName my-environment `
   -Location centralindia `
+  -FoundryLocation eastus2 `
   -TargetSubscriptionId '<subscription-id>,<another-subscription-id>'
 ```
 
@@ -158,11 +159,24 @@ Every phase is idempotent, so a run that stops partway can simply be rerun — i
 | --- | --- |
 | `-PlanOnly` | Print exactly what would happen without touching Azure. |
 | `-SubscriptionId` | Deploy into a subscription other than the Azure CLI's current one. |
+| `-Location` | Choose the region for the app, data and networking resources. |
+| `-FoundryLocation` | Choose the region for the AI Foundry account, project and Model Router. |
+| `-SkipModelAvailabilityCheck` | Deploy anyway when you are certain the regional catalogue is wrong. |
 | `-MaxAttempts` | Allow more `azd up` retries (default 3). |
 | `-SkipIdentityBootstrap` | A separate Entra administrator creates the app registrations. |
 | `-SkipRoleAssignments` | A subscription Owner grants the three roles separately. |
 | `-SkipProcessor` | Scheduled six-month exports are intentionally out of scope. |
 | `-SkipPreview` | Skip `azd provision --preview` on a rerun you have already reviewed. |
+
+#### Choosing regions
+
+The application and the Foundry account are placed independently, because **the approved Model Router deployment is not offered in every region** — `centralindia` runs the app perfectly well but offers no `model-router` at all, which is why `-FoundryLocation` defaults to `eastus2`.
+
+Before provisioning anything, the script checks that the exact approved model, version and SKU exist in `-FoundryLocation`. If they don't, it stops immediately, names what is missing, lists what that region does offer instead, and creates nothing — rather than failing deep inside the Bicep run after the account and networking already exist. Check a region yourself with:
+
+```powershell
+az cognitiveservices model list --location <region> --query "[?model.name=='model-router']"
+```
 
 ### Option 2 — Azure Developer CLI, step by step
 
