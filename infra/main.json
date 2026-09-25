@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "17186321338134873976"
+      "templateHash": "9210360678355881479"
     }
   },
   "definitions": {
@@ -129,6 +129,26 @@
       "type": "bool",
       "defaultValue": false
     },
+    "privateRegistry": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Policy-restricted subscriptions: put the container registry behind a private endpoint and deny public network access. Requires the Premium registry tier and stops azd remote builds from reaching the registry."
+      }
+    },
+    "blobDataProtection": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Policy-restricted subscriptions: enable blob versioning and blob/container soft delete on the export storage account."
+      }
+    },
+    "blobRetentionDays": {
+      "type": "int",
+      "defaultValue": 7,
+      "minValue": 1,
+      "maxValue": 365
+    },
     "enableProcessor": {
       "type": "bool",
       "defaultValue": false,
@@ -245,6 +265,9 @@
           },
           "logRetentionDays": {
             "value": "[parameters('logRetentionDays')]"
+          },
+          "privateRegistry": {
+            "value": "[parameters('privateRegistry')]"
           }
         },
         "template": {
@@ -254,7 +277,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "948594918234827166"
+              "templateHash": "5519137542488930911"
             }
           },
           "parameters": {
@@ -283,6 +306,13 @@
               "defaultValue": 30,
               "minValue": 30,
               "maxValue": 730
+            },
+            "privateRegistry": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Put the registry behind a private endpoint and deny public network access. Requires the Premium tier, and azd remote builds can no longer reach the registry."
+              }
             }
           },
           "resources": [
@@ -346,12 +376,86 @@
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
               "sku": {
-                "name": "Basic"
+                "name": "[if(parameters('privateRegistry'), 'Premium', 'Basic')]"
               },
               "properties": {
                 "adminUserEnabled": false,
-                "publicNetworkAccess": "Enabled"
+                "publicNetworkAccess": "[if(parameters('privateRegistry'), 'Disabled', 'Enabled')]",
+                "networkRuleBypassOptions": "AzureServices"
               }
+            },
+            {
+              "condition": "[parameters('privateRegistry')]",
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "[format('privatelink{0}', environment().suffixes.acrLoginServer)]",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "condition": "[parameters('privateRegistry')]",
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', format('privatelink{0}', environment().suffixes.acrLoginServer), format('link-{0}', parameters('resourceToken')))]",
+              "location": "global",
+              "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                  "id": "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken')))]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.Network/privateDnsZones', format('privatelink{0}', environment().suffixes.acrLoginServer))]"
+              ]
+            },
+            {
+              "condition": "[parameters('privateRegistry')]",
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2024-05-01",
+              "name": "[format('pe-acr-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "subnet": {
+                  "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', format('vnet-{0}', parameters('resourceToken')), 'private-endpoints')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "registry",
+                    "properties": {
+                      "privateLinkServiceId": "[resourceId('Microsoft.ContainerRegistry/registries', format('acr{0}', parameters('resourceToken')))]",
+                      "groupIds": [
+                        "registry"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.ContainerRegistry/registries', format('acr{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "condition": "[parameters('privateRegistry')]",
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2024-05-01",
+              "name": "[format('{0}/{1}', format('pe-acr-{0}', parameters('resourceToken')), 'default')]",
+              "properties": {
+                "privateDnsZoneConfigs": [
+                  {
+                    "name": "registry",
+                    "properties": {
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', format('privatelink{0}', environment().suffixes.acrLoginServer))]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints', format('pe-acr-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.Network/privateDnsZones', format('privatelink{0}', environment().suffixes.acrLoginServer))]"
+              ]
             },
             {
               "copy": {
@@ -543,6 +647,12 @@
           },
           "allowNativeExportTrustedServices": {
             "value": "[parameters('allowNativeExportTrustedServices')]"
+          },
+          "blobDataProtection": {
+            "value": "[parameters('blobDataProtection')]"
+          },
+          "blobRetentionDays": {
+            "value": "[parameters('blobRetentionDays')]"
           }
         },
         "template": {
@@ -552,7 +662,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "7007577972180877994"
+              "templateHash": "15794514357208644712"
             }
           },
           "parameters": {
@@ -590,6 +700,19 @@
               "metadata": {
                 "description": "Explicitly approved native-export ingress exception; never bypass an Azure Policy denial."
               }
+            },
+            "blobDataProtection": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Enable blob versioning and blob/container soft delete for subscriptions that audit data-protection settings."
+              }
+            },
+            "blobRetentionDays": {
+              "type": "int",
+              "defaultValue": 7,
+              "minValue": 1,
+              "maxValue": 365
             }
           },
           "variables": {
@@ -640,13 +763,9 @@
               "apiVersion": "2023-05-01",
               "name": "[format('{0}/{1}', format('st{0}', parameters('resourceToken')), 'default')]",
               "properties": {
-                "deleteRetentionPolicy": {
-                  "enabled": false
-                },
-                "containerDeleteRetentionPolicy": {
-                  "enabled": false
-                },
-                "isVersioningEnabled": false,
+                "deleteRetentionPolicy": "[if(parameters('blobDataProtection'), createObject('enabled', true(), 'days', parameters('blobRetentionDays')), createObject('enabled', false()))]",
+                "containerDeleteRetentionPolicy": "[if(parameters('blobDataProtection'), createObject('enabled', true(), 'days', parameters('blobRetentionDays')), createObject('enabled', false()))]",
+                "isVersioningEnabled": "[parameters('blobDataProtection')]",
                 "changeFeed": {
                   "enabled": false
                 }

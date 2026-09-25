@@ -28,6 +28,13 @@ param logRetentionDays int = 30
 @allowed(['Standard_LRS', 'Standard_ZRS'])
 param storageSku string = 'Standard_LRS'
 param allowNativeExportTrustedServices bool = false
+@description('Policy-restricted subscriptions: put the container registry behind a private endpoint and deny public network access. Requires the Premium registry tier and stops azd remote builds from reaching the registry.')
+param privateRegistry bool = false
+@description('Policy-restricted subscriptions: enable blob versioning and blob/container soft delete on the export storage account.')
+param blobDataProtection bool = false
+@minValue(1)
+@maxValue(365)
+param blobRetentionDays int = 7
 @description('Keep false until the scheduled processor implementation is validated end to end.')
 param enableProcessor bool = false
 @description('Only set true when redeploying the same environment name after azd down without --purge left a soft-deleted AI Foundry account behind.')
@@ -76,6 +83,7 @@ module core './modules/core.bicep' = {
     containerSubnetPrefix: containerSubnetPrefix
     privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
     logRetentionDays: logRetentionDays
+    privateRegistry: privateRegistry
   }
 }
 
@@ -91,6 +99,8 @@ module data './modules/data.bicep' = if (dataEnabled) {
     apiPrincipalId: core.outputs.apiIdentity.principalId
     storageSku: storageSku
     allowNativeExportTrustedServices: allowNativeExportTrustedServices
+    blobDataProtection: blobDataProtection
+    blobRetentionDays: blobRetentionDays
   }
 }
 

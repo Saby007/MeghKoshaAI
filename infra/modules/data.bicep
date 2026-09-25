@@ -10,6 +10,11 @@ param apiPrincipalId string
 param storageSku string = 'Standard_LRS'
 @description('Explicitly approved native-export ingress exception; never bypass an Azure Policy denial.')
 param allowNativeExportTrustedServices bool = false
+@description('Enable blob versioning and blob/container soft delete for subscriptions that audit data-protection settings.')
+param blobDataProtection bool = false
+@minValue(1)
+@maxValue(365)
+param blobRetentionDays int = 7
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: 'st${resourceToken}'
@@ -44,9 +49,9 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01'
   parent: storage
   name: 'default'
   properties: {
-    deleteRetentionPolicy: { enabled: false }
-    containerDeleteRetentionPolicy: { enabled: false }
-    isVersioningEnabled: false
+    deleteRetentionPolicy: blobDataProtection ? { enabled: true, days: blobRetentionDays } : { enabled: false }
+    containerDeleteRetentionPolicy: blobDataProtection ? { enabled: true, days: blobRetentionDays } : { enabled: false }
+    isVersioningEnabled: blobDataProtection
     changeFeed: { enabled: false }
   }
 }

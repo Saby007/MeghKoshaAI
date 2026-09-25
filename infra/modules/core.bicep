@@ -9,6 +9,8 @@ param privateEndpointSubnetPrefix string
 @minValue(30)
 @maxValue(730)
 param logRetentionDays int = 30
+@description('Put the registry behind a private endpoint and deny public network access. Requires the Premium tier, and azd remote builds can no longer reach the registry.')
+param privateRegistry bool = false
 
 resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: 'vnet-${resourceToken}'
@@ -55,10 +57,61 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: 'acr${resourceToken}'
   location: location
   tags: tags
-  sku: { name: 'Basic' }
+  // Private endpoints are a Premium-tier feature, so denying public access forces the tier up.
+  sku: { name: privateRegistry ? 'Premium' : 'Basic' }
   properties: {
     adminUserEnabled: false
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: privateRegistry ? 'Disabled' : 'Enabled'
+    // ACR Tasks are not implicitly trusted once public access is denied; this only readmits
+    // first-party services such as Defender, not the public internet.
+    networkRuleBypassOptions: 'AzureServices'
+  }
+}
+
+resource registryZone 'Microsoft.Network/privateDnsZones@2020-06-01' = if (privateRegistry) {
+  name: 'privatelink${environment().suffixes.acrLoginServer}'
+  location: 'global'
+  tags: tags
+}
+
+resource registryZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = if (privateRegistry) {
+  parent: registryZone
+  name: 'link-${resourceToken}'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: { id: network.id }
+  }
+}
+
+resource registryEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = if (privateRegistry) {
+  name: 'pe-acr-${resourceToken}'
+  location: location
+  tags: tags
+  properties: {
+    subnet: { id: resourceId('Microsoft.Network/virtualNetworks/subnets', network.name, 'private-endpoints') }
+    privateLinkServiceConnections: [
+      {
+        name: 'registry'
+        properties: {
+          privateLinkServiceId: registry.id
+          groupIds: ['registry']
+        }
+      }
+    ]
+  }
+}
+
+resource registryZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = if (privateRegistry) {
+  parent: registryEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'registry'
+        properties: { privateDnsZoneId: registryZone.id }
+      }
+    ]
   }
 }
 
