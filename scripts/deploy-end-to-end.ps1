@@ -291,6 +291,20 @@ function Wait-ActiveDeployment {
     Write-Warning 'A previous deployment is still running on Azure; continuing anyway.'
 }
 
+function Wait-BuildAgentPool {
+    # The pool provisions on virtual machine scale sets and takes minutes; redeclaring it while it
+    # is still building is rejected, so the retry waits for a terminal state first.
+    $registry = Get-AzdValue 'AZURE_CONTAINER_REGISTRY_NAME'
+    if (-not $registry) { Start-Sleep -Seconds 60; return }
+    $subscriptionArgs = Get-SubscriptionArgument
+    for ($attempt = 1; $attempt -le 40; $attempt++) {
+        $state = Get-CliText (& az acr agentpool show --registry $registry --name 'build-agents' @subscriptionArgs --query provisioningState --output tsv --only-show-errors 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $state -and $state -notin @('Creating', 'Updating')) { return }
+        Start-Sleep -Seconds 15
+    }
+    Write-Warning 'Timed out waiting for the build agent pool to finish provisioning; continuing anyway.'
+}
+
 function Invoke-AzdUp {
     param([Parameter(Mandatory)][string] $Reason)
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
@@ -314,6 +328,11 @@ function Invoke-AzdUp {
         if ($text -match 'AccountProvisioningStateInvalid|Another operation is in progress') {
             Write-Warning 'The AI Foundry account is still settling. Reusing the existing account on the retry.'
             Set-AzdValue 'APP_REUSE_AI_ACCOUNT' 'true'
+        } elseif ($text -match 'RegistryStatusConflict|is in ''DeploymentInProgress'' state') {
+            # The agent pool takes several minutes to build out, and redeclaring it while that is
+            # still running is rejected outright.
+            Write-Warning 'The registry build agent pool is still being created. Waiting for it to finish before retrying.'
+            Wait-BuildAgentPool
         } elseif ($text -match "resource not found: unable to find a resource with name 'ca-(api|web)-") {
             Write-Warning 'The container images were published after infrastructure planning. Retrying so Bicep can create the Container Apps.'
         } elseif ($text -match 'unable to pull image using Managed identity') {
@@ -341,13 +360,22 @@ function Build-ImagesOnAgentPool {
     foreach ($service in @('api', 'web')) {
         $repository = "cost-assessment-app/$service-$EnvironmentName"
         Write-Step "Building the $service image on agent pool '$pool'"
-        & az acr build --registry $registry @subscriptionArgs --agent-pool $pool `
-            --image "${repository}:$tag" --file "$service/Dockerfile" "./$service" --only-show-errors | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            throw "Building the $service image on agent pool '$pool' failed. Agent pools are a preview feature and are not offered in every region; confirm the pool exists with 'az acr agentpool show --registry $registry --name $pool'."
+        # Streaming the build log kills the Azure CLI on a non-UTF8 Windows console (colorama
+        # writes the log through the console code page and raises UnicodeEncodeError) long after
+        # the build itself has succeeded. --no-logs still waits for the run and reports its status,
+        # so the outcome comes from the run object rather than from parsing a log stream.
+        $json = Get-CliText (& az acr build --registry $registry @subscriptionArgs --agent-pool $pool `
+            --image "${repository}:$tag" --file "$service/Dockerfile" "./$service" `
+            --no-logs --output json --only-show-errors 2>$null)
+        if ($LASTEXITCODE -ne 0 -or -not $json) {
+            throw "Building the $service image on agent pool '$pool' could not be started. Confirm the pool with 'az acr agentpool show --registry $registry --name $pool'."
+        }
+        $run = $json | ConvertFrom-Json
+        if ($run.status -ne 'Succeeded') {
+            throw "The $service image build ($($run.runId)) ended as '$($run.status)'. Read the build log with 'az acr task logs --registry $registry --run-id $($run.runId)'."
         }
         Set-AzdValue "SERVICE_$($service.ToUpperInvariant())_IMAGE_NAME" "$endpoint/${repository}:$tag"
-        Write-Host "  $service image: $endpoint/${repository}:$tag"
+        Write-Host "  $service image built by run $($run.runId): $endpoint/${repository}:$tag"
     }
 }
 

@@ -27,6 +27,7 @@ $global:deployTestState = @{
     roleCreates = [System.Collections.Generic.List[object]]::new()
     bootstrapCalls = 0
     acrBuilds = [System.Collections.Generic.List[object]]::new()
+    buildStatus = 'Succeeded'
     providerChecks = 0
     agentPoolRegions = @('East US', 'West Europe', 'Central US')
     modelChecks = 0
@@ -228,13 +229,17 @@ function az {
         })
     }
     if ($a[0] -eq 'acr' -and $a[1] -eq 'build') {
+        $image = Get-StubArgument $a '--image'
         $state.acrBuilds.Add(@{
             registry = Get-StubArgument $a '--registry'
             pool = Get-StubArgument $a '--agent-pool'
-            image = Get-StubArgument $a '--image'
+            image = $image
         })
         if ((Get-StubArgument $a '--agent-pool') -ne 'build-agents') { throw 'A private registry can only be reached from its in-VNet agent pool.' }
-        return
+        # Streaming the log crashes the CLI on a non-UTF8 console, so the helper must ask for the
+        # run object instead of parsing a stream.
+        if ($a -notcontains '--no-logs') { throw 'The image build must not stream logs; it must report the run status instead.' }
+        return (ConvertTo-Json -Depth 3 -InputObject @{ runId = "run$($state.acrBuilds.Count)"; status = $state.buildStatus })
     }
     if ($a[0] -eq 'role' -and $a[1] -eq 'assignment' -and $a[2] -eq 'list') {
         $scope = Get-StubArgument $a '--scope'
@@ -402,6 +407,16 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
     if (-not $privateSummary.webUrl) { throw 'The private-registry deployment did not report a running app.' }
     if ($state.providerChecks -eq 0) { throw 'The agent pool region was never checked for a private-registry run.' }
     $agentPoolBuilds = $state.acrBuilds.Count
+
+    # A build run that reports a failed status must stop the deployment, even though the CLI
+    # itself exits zero once it stops streaming logs.
+    $state.buildStatus = 'Failed'
+    $state.upCalls.Clear()
+    $buildFailed = $null
+    try { & $script @private -PrivateRegistry -SkipPreview | Out-Null } catch { $buildFailed = $_.Exception.Message }
+    $state.buildStatus = 'Succeeded'
+    if (-not $buildFailed) { throw 'A failed image build was reported as a successful deployment.' }
+    if ($buildFailed -notmatch 'az acr task logs') { throw "A failed build must say how to read its log. Got: $buildFailed" }
 
     # Agent pools exist in a subset of regions. An unsupported region must stop the run up front,
     # because the resulting validation failure is deterministic and would otherwise be retried.
