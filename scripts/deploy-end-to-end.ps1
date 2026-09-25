@@ -303,6 +303,11 @@ function Invoke-AzdUp {
         }
         if ($LASTEXITCODE -eq 0) { return }
         $text = $lines -join "`n"
+        # Region, SKU and policy refusals are decisions, not races: every retry reproduces them
+        # exactly, so retrying only delays the report and wastes the remaining attempts.
+        if ($text -match 'LocationNotAvailableForResourceType|SkuNotAvailable|LocationNotAvailable|RequestDisallowedByPolicy|InvalidTemplateDeployment.*not available in the current region') {
+            throw "azd $deployVerb failed for a reason that will not change on a retry while trying to $Reason. Review the error above - it is a region, SKU or policy refusal, not a transient failure."
+        }
         if ($attempt -eq $MaxAttempts) {
             throw "azd $deployVerb failed after $attempt attempt(s) while trying to $Reason. Review the output above; rerunning this script resumes from here."
         }
@@ -344,6 +349,43 @@ function Build-ImagesOnAgentPool {
         Set-AzdValue "SERVICE_$($service.ToUpperInvariant())_IMAGE_NAME" "$endpoint/${repository}:$tag"
         Write-Host "  $service image: $endpoint/${repository}:$tag"
     }
+}
+
+function Assert-BuildAgentRegion {
+    # Agent pools are a preview feature offered in a subset of regions. Without this check the
+    # deployment fails during validation, and because that failure is deterministic every retry
+    # reproduces it, so the run burns its whole retry budget on an impossible deployment.
+    if (-not $PrivateRegistry) { return }
+    Write-Step "Checking build agent pool availability in $Location"
+    $json = Get-CliText (& az provider show --namespace Microsoft.ContainerRegistry --output json --only-show-errors 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $json) {
+        Write-Warning 'The Microsoft.ContainerRegistry provider could not be read, so agent pool availability was not confirmed.'
+        return
+    }
+    $provider = $json | ConvertFrom-Json
+    $agentPools = @($provider.resourceTypes | Where-Object { $_.resourceType -eq 'registries/agentPools' })
+    if (-not $agentPools.Count) {
+        Write-Warning 'The provider did not report agent pool regions, so availability was not confirmed.'
+        return
+    }
+    $normalise = { param($value) ($value -replace '\s', '').ToLowerInvariant() }
+    $supported = @($agentPools[0].locations | ForEach-Object { & $normalise $_ })
+    if ($supported -contains (& $normalise $Location)) {
+        Write-Host "  available: build agent pools in $Location" -ForegroundColor Green
+        return
+    }
+    $readable = (@($agentPools[0].locations) | Sort-Object) -join ', '
+    throw @"
+-PrivateRegistry needs a container registry build agent pool, and agent pools are not offered in '$Location'. The deployment was stopped before provisioning anything.
+
+A private registry denies public network access, so azd's remote build and the shared ACR task fleet can no longer reach it; the agent pool is what runs the build inside the virtual network instead.
+
+Deploy the application resources in one of these regions instead, with -Location <region>:
+
+  $readable
+
+The Foundry region is chosen separately with -FoundryLocation, so the AI resources can stay where they are. If the registry does not have to be private in this subscription, drop -PrivateRegistry and the normal remote build applies.
+"@
 }
 
 function Get-WebEndpointUrl {
@@ -457,6 +499,7 @@ try {
 
     # Runs before the azd environment is even created, so an unavailable model costs nothing.
     Assert-ModelAvailability
+    Assert-BuildAgentRegion
 
     # -----------------------------------------------------------------------
     # 3. Environment and settings

@@ -22,10 +22,13 @@ $global:deployTestState = @{
     containerApps = $false
     imagesPublished = $false
     failNextUp = 'AccountProvisioningStateInvalid: the account is still in Accepted'
+    failPermanently = $false
     roleAssignments = [System.Collections.Generic.List[object]]::new()
     roleCreates = [System.Collections.Generic.List[object]]::new()
     bootstrapCalls = 0
     acrBuilds = [System.Collections.Generic.List[object]]::new()
+    providerChecks = 0
+    agentPoolRegions = @('East US', 'West Europe', 'Central US')
     modelChecks = 0
     catalogueUnavailable = $false
     # eastus2 offers the approved Model Router; centralindia offers an older variant only, which is
@@ -94,7 +97,7 @@ function azd {
             'list' { return (ConvertTo-Json -InputObject @($state.environments.Keys | ForEach-Object { @{ Name = $_ } }) -Depth 3) }
             'new' {
                 $name = $a[2]
-                if ((Get-StubArgument $a '--subscription') -ne $state.subscriptionId -or (Get-StubArgument $a '--location') -ne 'centralindia') {
+                if ((Get-StubArgument $a '--subscription') -ne $state.subscriptionId -or -not (Get-StubArgument $a '--location')) {
                     throw 'azd env new must pin the subscription and location, otherwise azd prompts for them interactively.'
                 }
                 $state.environments[$name] = [ordered]@{
@@ -150,7 +153,7 @@ function azd {
         $values = $state.environments[$environment]
         if ($state.failNextUp) {
             $message = $state.failNextUp
-            $state.failNextUp = ''
+            if (-not $state.failPermanently) { $state.failNextUp = '' }
             $state.upCalls.Add('failed')
             Write-Output $message
             $global:LASTEXITCODE = 1
@@ -214,6 +217,15 @@ function az {
         if ($query -match "id-api-") { return $state.apiPrincipalId }
         if ($query -match "id-processor-") { return $state.processorPrincipalId }
         return "name              principalId`nid-api-x          $($state.apiPrincipalId)"
+    }
+    if ($a[0] -eq 'provider' -and $a[1] -eq 'show') {
+        $state.providerChecks++
+        return (ConvertTo-Json -Depth 5 -InputObject @{
+            resourceTypes = @(
+                @{ resourceType = 'registries'; locations = @('Central India', 'East US') },
+                @{ resourceType = 'registries/agentPools'; locations = @($state.agentPoolRegions) }
+            )
+        })
     }
     if ($a[0] -eq 'acr' -and $a[1] -eq 'build') {
         $state.acrBuilds.Add(@{
@@ -365,6 +377,7 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
         EnvironmentName = 'app-private'
         RepoDirectory = $repoRoot
         TargetSubscriptionId = $targetOne
+        Location = 'eastus'
         SettleSeconds = 0
         MaxAttempts = 3
     }
@@ -387,6 +400,40 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
         }
     }
     if (-not $privateSummary.webUrl) { throw 'The private-registry deployment did not report a running app.' }
+    if ($state.providerChecks -eq 0) { throw 'The agent pool region was never checked for a private-registry run.' }
+    $agentPoolBuilds = $state.acrBuilds.Count
+
+    # Agent pools exist in a subset of regions. An unsupported region must stop the run up front,
+    # because the resulting validation failure is deterministic and would otherwise be retried.
+    $state.upCalls.Clear()
+    $state.acrBuilds.Clear()
+    $before = $state.environments.Count
+    $stopped = $null
+    try { & $script @private -Location 'centralindia' -PrivateRegistry -SkipPreview | Out-Null }
+    catch { $stopped = $_.Exception.Message }
+    if (-not $stopped) { throw 'A region without agent pools was allowed to start provisioning.' }
+    if ($stopped -notmatch 'centralindia' -or $stopped -notmatch '-Location' -or $stopped -notmatch 'East US') {
+        throw "The agent pool region message must name the region, how to change it, and the supported regions. Got: $stopped"
+    }
+    if ($state.upCalls.Count -ne 0 -or $state.environments.Count -ne $before) {
+        throw 'Provisioning started before the agent pool region gate stopped it.'
+    }
+    # A public-registry deployment must not be blocked by the agent pool region at all.
+    $checksBefore = $state.providerChecks
+    & $script @parameters -SkipPreview | Out-Null
+    if ($state.providerChecks -ne $checksBefore) { throw 'The agent pool region was checked for a deployment that does not use one.' }
+
+    # A deterministic refusal must fail immediately instead of consuming the retry budget.
+    $state.upCalls.Clear()
+    $state.failNextUp = "ERROR: LocationNotAvailableForResourceType: The provided location 'centralindia' is not available"
+    $state.failPermanently = $true
+    $refused = $null
+    try { & $script @parameters -SkipPreview | Out-Null } catch { $refused = $_.Exception.Message }
+    $state.failPermanently = $false
+    $state.failNextUp = ''
+    if (-not $refused) { throw 'A region refusal did not stop the deployment.' }
+    if ($refused -notmatch 'will not change on a retry') { throw "A region refusal must be reported as permanent. Got: $refused" }
+    if ($state.upCalls.Count -ne 1) { throw "A region refusal was retried $($state.upCalls.Count) times instead of failing immediately." }
 
     # An unavailable model must stop the run before anything is provisioned, not fail deep inside
     # Bicep after the account and networking already exist.
@@ -426,7 +473,8 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
 
     [ordered]@{ result = 'passed'; deployments = 5; roleAssignments = 6; rerunRedeploysOnce = $true
                 modelGateStopsBeforeProvisioning = 3; catalogueFailureIsNonFatal = $true; gateOverridable = $true
-                privateRegistryProvisionsOnly = $true; agentPoolImageBuilds = $state.acrBuilds.Count
+                privateRegistryProvisionsOnly = $true; agentPoolImageBuilds = $agentPoolBuilds
+                agentPoolRegionGateStops = $true; permanentFailuresNotRetried = $true
                 defaultsUnchanged = $true } | ConvertTo-Json -Compress
 } finally {
     Remove-Variable -Name deployTestState -Scope Global -ErrorAction SilentlyContinue
