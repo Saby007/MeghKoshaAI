@@ -1757,25 +1757,41 @@ function ExecutiveSummaryTab({
           <HourlyCostPanel report={report} formatMoney={formatExactMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} embedded />
         </ReportSection>
 
-        {report.operationalSignals.length > 0 && (
-          <ReportSection
-            id="operational-signals"
-            title="Operational signals"
-            caption="Platform observations across the assessed estate"
-            defaultOpen={false}
-            meta={`${report.operationalSignals.length} ${report.operationalSignals.length === 1 ? 'signal' : 'signals'}`}
-          >
-            <div className="executive-signal-grid">
-              {report.operationalSignals.map((signal) => (
-                <div className={`executive-signal ${signal.tone}`} key={signal.key}>
-                  <span>{signal.label}</span>
-                  <strong>{signal.value}</strong>
-                  <small>{signal.detail}</small>
+        {report.operationalSignals.length > 0 && (() => {
+          /* The badge counted checks run, not issues found, so three clean
+             checks read as "3 signals". A value that parses to zero is a
+             clean check; anything else (including a non-numeric value) is
+             kept as a signal rather than hidden. */
+          const raised = report.operationalSignals.filter((signal) => {
+            const amount = Number.parseFloat(signal.value);
+            return !Number.isFinite(amount) || amount !== 0;
+          });
+          return (
+            <ReportSection
+              id="operational-signals"
+              title="Operational signals"
+              caption="Platform observations across the assessed estate"
+              defaultOpen={false}
+              meta={raised.length ? `${raised.length} ${raised.length === 1 ? 'signal' : 'signals'}` : 'All clear'}
+            >
+              {raised.length === 0 ? (
+                <p className="executive-signal-clear" role="status">
+                  No issues across {report.operationalSignals.length} checks: {report.operationalSignals.map((signal) => signal.label.toLowerCase()).join(', ')}.
+                </p>
+              ) : (
+                <div className="executive-signal-grid">
+                  {raised.map((signal) => (
+                    <div className={`executive-signal ${signal.tone}`} key={signal.key}>
+                      <span>{signal.label}</span>
+                      <strong>{signal.value}</strong>
+                      <small>{signal.detail}</small>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </ReportSection>
-        )}
+              )}
+            </ReportSection>
+          );
+        })()}
 
         {report.topServices.length > 0 && (
           <ReportSection
@@ -1804,12 +1820,15 @@ function ExecutiveSummaryTab({
           </ReportSection>
         )}
 
+        {/* With one subscription the table was a single row followed by an
+            identical Total row - it restated the headline and nothing else. */}
+        {report.subscriptionBreakdown.length > 1 && (
         <ReportSection
           id="subscriptions"
           title="Subscriptions"
           caption="Spend against verified saving"
           defaultOpen={false}
-          meta={`${report.subscriptionBreakdown.length} ${report.subscriptionBreakdown.length === 1 ? 'subscription' : 'subscriptions'}`}
+          meta={`${report.subscriptionBreakdown.length} subscriptions`}
         >
           <div className="executive-table-scroll">
             <table className="report-table executive-subscription-table">
@@ -1840,6 +1859,7 @@ function ExecutiveSummaryTab({
             </table>
           </div>
         </ReportSection>
+        )}
 
         <ReportSection
           id="prioritised-findings"
@@ -1848,6 +1868,11 @@ function ExecutiveSummaryTab({
           defaultOpen={false}
           meta={report.prioritizedFindings.length === 0 ? 'None' : `${report.prioritizedFindings.length} ${report.prioritizedFindings.length === 1 ? 'finding' : 'findings'}`}
         >
+          {report.prioritizedFindings.length === 0 ? (
+            /* An empty table with five column headers read as a failed load;
+               the statement stands on its own. */
+            <p className="executive-signal-clear" role="status">No prioritised findings in this snapshot. Review coverage and domain evidence before concluding that no action is needed.</p>
+          ) : (
           <div className="executive-table-scroll">
             <table className="report-table executive-findings-table">
               <thead>
@@ -1860,9 +1885,6 @@ function ExecutiveSummaryTab({
                 </tr>
               </thead>
               <tbody>
-                {report.prioritizedFindings.length === 0 && (
-                  <tr><td colSpan={5}>No prioritised findings in this snapshot. Review coverage and domain evidence before concluding that no action is needed.</td></tr>
-                )}
                 {report.prioritizedFindings.map((finding) => (
                   <tr key={finding.category}>
                     <td className="num finding-rank">{finding.rank}</td>
@@ -1886,6 +1908,7 @@ function ExecutiveSummaryTab({
               </tbody>
             </table>
           </div>
+          )}
         </ReportSection>
       </div>
       </>}

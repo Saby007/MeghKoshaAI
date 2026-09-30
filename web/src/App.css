@@ -12433,6 +12433,14 @@ body {
     vertical-align: top;
 }
 
+/* One-line result for a section with nothing to show. */
+:root .app-shell.app-shell .executive-signal-clear {
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    font-size: calc(12.5px * var(--ui-zoom));
+    color: var(--color-graphite-mid);
+}
+
 :root .app-shell.app-shell .budget-table td.cost-increase {
     color: var(--color-cost-increase);
 }
