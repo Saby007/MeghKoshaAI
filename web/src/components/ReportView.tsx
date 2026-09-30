@@ -1594,6 +1594,12 @@ function ExecutiveSummaryTab({
     ? `${reportDate(analysisWindow.startDate)} - ${reportDate(analysisWindow.endDate)}`
     : `Last ${rangeMode} days`;
   const [costDetailsOpened, setCostDetailsOpened] = useState(true);
+  // Shown on the collapsed "Spend over time" badge so the index row still
+  // carries its headline figure without opening the section.
+  const rangeTotal = useMemo(
+    () => billingWindow(report, { rangeDays, startDate: analysisWindow.startDate, endDate: analysisWindow.endDate }).totalCost,
+    [report, rangeDays, analysisWindow.startDate, analysisWindow.endDate],
+  );
   /* The daily figures sit at the end of the report rather than under the
      chart, so the day selection they drive is owned here and handed to the
      cost window instead of living inside it. */
@@ -1702,7 +1708,7 @@ function ExecutiveSummaryTab({
           snapshotId={snapshotId}
           window={costWindow}
           onChange={onCostWindowChange}
-          formatMoney={formatHourlyMoney}
+          formatMoney={formatExactMoney}
           onOpenAnomalies={onOpenAnomalies}
           budgetState={budgetState}
           filters={costFilters}
@@ -1737,16 +1743,18 @@ function ExecutiveSummaryTab({
           id="spend-over-time"
           title="Spend over time"
           caption="Range totals and hourly cost"
-          meta={rangeLabel}
+          defaultOpen={false}
+          meta={rangeTotal === null ? rangeLabel : `${rangeLabel} · ${formatExactMoney(rangeTotal)}`}
         >
           <RangeSpendSummary report={report} formatMoney={formatExactMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
-          <HourlyCostPanel report={report} formatMoney={formatHourlyMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} embedded />
+          <HourlyCostPanel report={report} formatMoney={formatExactMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} embedded />
         </ReportSection>
 
         <ReportSection
           id="spend-distribution"
           title="Spend distribution"
           caption="Where the money goes, by type, tag and region"
+          defaultOpen={false}
           meta={formatMoney(s.currentMonthlySpend)}
         >
           <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />

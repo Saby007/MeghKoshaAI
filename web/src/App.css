@@ -11935,3 +11935,41 @@ body {
         gap: var(--space-1);
     }
 }
+
+
+/* ================================================================
+   Executive summary — page rhythm
+   ----------------------------------------------------------------
+   The page read as a pile rather than a document: a 5,000px column
+   in which every block announced itself at the same volume. These
+   rules give it a consistent beat and stop short tables from being
+   sliced mid-row, which is what made it look unfinished.
+   ================================================================ */
+
+/* Budget tables are short by nature - a handful of budgets per scope.
+   The shared table cap sliced the last row in half, which reads as
+   broken rather than scrollable, so let this one size to content. */
+:root .app-shell.app-shell [data-dashboard-section='budget-context'] .billing-table-scroll {
+    max-height: none;
+}
+
+/* A clipped scroll region needs to look deliberate. The inner shadow
+   sits on the container, so a table that ends short of the cap simply
+   draws it against its own final row. */
+:root .app-shell.app-shell .daily-cost-group .billing-table-scroll {
+    margin: 0;
+}
+
+/* The six analysis sections are an index: uniform rows, each with its
+   headline figure on the right. Give them a consistent height and
+   divider so they scan as a list rather than six unrelated blocks. */
+:root .app-shell.app-shell .report-section-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+:root .app-shell.app-shell .report-section-meta {
+    font-variant-numeric: var(--nums);
+    white-space: nowrap;
+}
