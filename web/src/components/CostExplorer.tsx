@@ -256,7 +256,10 @@ export function CostWindowOverview({ report, snapshotId, window, onChange, forma
     <div className="billing-metrics cost-window-metrics">
       <div><span>Selected period</span><output>{money(total, formatMoney)}</output><small>{window.startDate} - {window.endDate} / {coverage.coveredDays} of {coverage.dates.length} days</small></div>
       <div><span>Previous period</span><output>{money(before, formatMoney)}</output><small>{previous.startDate} - {previous.endDate} / {previousCoverage.coveredDays} of {previousCoverage.dates.length} days</small></div>
-      <button type="button" className="period-anomaly-link" onClick={onOpenAnomalies}><span><TriangleAlert size={16} aria-hidden="true" /> Period anomalies</span><strong className={countTone(coverage.complete && previousCoverage.complete ? spikes.length : null)}>{coverage.complete && previousCoverage.complete ? spikes.length : 'Unavailable'}</strong><small>Resource cost spikes above 30% <ArrowRight size={14} aria-hidden="true" /></small></button>
+      {/* "Anomaly" is reserved for the statistical detector in Insights; this
+          is a fixed 30% threshold on resource cost, so it is named for what
+          it counts. Two cells both called anomalies disagreed (5 vs 1). */}
+      <button type="button" className="period-anomaly-link" onClick={onOpenAnomalies}><span><TriangleAlert size={16} aria-hidden="true" /> Cost spikes</span><strong className={countTone(coverage.complete && previousCoverage.complete ? spikes.length : null)}>{coverage.complete && previousCoverage.complete ? spikes.length : 'Unavailable'}</strong><small>{spikes.length === 1 ? 'Resource' : 'Resources'} up more than 30% on the previous period <ArrowRight size={14} aria-hidden="true" /></small></button>
     </div>
     <CostFilters details={report.costDetails} value={filters} onChange={onFiltersChange} />
     <CostComparisonChart details={report.costDetails} window={window} filters={filters} formatMoney={formatMoney} showDailyValues={showDailyValues} onSelectDay={(date, previousDate, subscriptionId) => setSelectedDay({ date, previousDate, subscriptionId })} />
