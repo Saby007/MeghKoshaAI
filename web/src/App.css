@@ -12066,7 +12066,33 @@ body {
 }
 
 :root .app-shell.app-shell .category-pill {
-    padding: calc(5px * var(--ui-zoom)) var(--space-3);
+    padding: calc(3px * var(--ui-zoom)) var(--space-3);
+    line-height: 1.25;
+}
+
+:root .app-shell.app-shell .category-pill>span {
+    font-size: calc(9.5px * var(--ui-zoom));
+}
+
+:root .app-shell.app-shell .category-pill strong {
+    font-size: calc(13px * var(--ui-zoom));
+    line-height: 1.2;
+}
+
+/* Controls in the title and utility bands were sized for touch even on
+   pointer devices, which is what kept those rows tall. */
+:root .app-shell.app-shell .dashboard-titlebar :is(select, button) {
+    min-height: calc(28px * var(--ui-zoom));
+}
+
+:root .app-shell.app-shell .report-context-details>summary {
+    padding-block: calc(3px * var(--ui-zoom));
+}
+
+@media (pointer: coarse) {
+    :root .app-shell.app-shell .dashboard-titlebar :is(select, button) {
+        min-height: var(--touch-height);
+    }
 }
 
 /* Budget tables are short by nature - a handful of budgets per scope.
