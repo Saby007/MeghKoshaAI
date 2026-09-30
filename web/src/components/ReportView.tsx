@@ -417,6 +417,9 @@ function TopSummaryBar({ report, formatMoney }: { report: FullReport; formatMone
   const completeness = report.completeness;
   const months = report.spendHistory.months;
   const lastComplete = months.length > 0 ? months[months.length - 1] : null;
+  /* When the last complete month is the assessed month the tile repeated the
+     assessed figure under a second name ("$494 · August 2026" beside "$494"). */
+  const lastCompleteIsAssessed = lastComplete !== null && lastComplete.month === metadata.periodStart.slice(0, 7);
   return (
     <div className="summary-strip" aria-label="Report headline metrics">
       <div className={`summary-tile ${s.spendChangePercentage === null || s.spendChangePercentage === 0 ? '' : s.spendChangePercentage > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()}>
@@ -428,6 +431,7 @@ function TopSummaryBar({ report, formatMoney }: { report: FullReport; formatMone
             : `${s.spendChangePercentage >= 0 ? '▲' : '▼'} ${Math.abs(s.spendChangePercentage * 100).toFixed(1)}% vs previous`}
         </small>
       </div>
+      {!lastCompleteIsAssessed && (
       <div className="summary-tile">
         <span className="summary-tile-label">Last complete month</span>
         <strong className="summary-tile-value">{lastComplete ? formatMoney(lastComplete.total) : '—'}</strong>
@@ -437,6 +441,7 @@ function TopSummaryBar({ report, formatMoney }: { report: FullReport; formatMone
             : report.spendHistory.statusMessage}
         </small>
       </div>
+      )}
       <div className="summary-tile positive">
         <span className="summary-tile-label">Potential savings</span>
         <strong className="summary-tile-value">{formatMoney(s.potentialSavingsMonth)}</strong>
@@ -707,7 +712,10 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           </>
         )}
           </div>
-          <TopSummaryBar report={report} formatMoney={formatMoney} />
+          {/* On the Executive Summary the overview already carries these
+              figures directly beneath this disclosure, so repeating them here
+              only duplicated the page. Other tabs keep them as context. */}
+          {tab !== 'Executive Summary' && <TopSummaryBar report={report} formatMoney={formatMoney} />}
         </div>
       </details>
       {activeRemediation && (

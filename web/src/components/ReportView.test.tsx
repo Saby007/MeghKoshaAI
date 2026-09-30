@@ -145,7 +145,8 @@ it('surfaces the detailed visuals by default and keeps them mounted across toggl
   const visuals = container.querySelector('.executive-visual-grid');
   expect(visuals).not.toBeNull();
   expect(container.querySelector('.cost-analysis-details .billing-filters')).not.toBeNull();
-  expect(container.textContent).toContain('Assessed month');
+  // The overview carries the headline figures, so the report-context strip does not repeat them here.
+  expect(container.querySelector('.report-context-details .summary-strip')).toBeNull();
   expect(container.textContent).not.toContain('Month to date');
   expect(container.querySelector('[aria-label="Report areas"]')?.tagName).toBe('NAV');
   expect(container.querySelector('[aria-pressed="true"]')?.textContent).toContain('Overview');
