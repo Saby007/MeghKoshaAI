@@ -12095,6 +12095,81 @@ body {
     }
 }
 
+
+/* ================================================================
+   Metric cells — one treatment, not three
+   ----------------------------------------------------------------
+   The hero cells, the Cost Comparison cells and the completeness
+   stamp each had their own label size, value size, padding and
+   divider style, so three adjacent groups of numbers read as three
+   different components. They now share one rhythm: a small uppercase
+   label, a tabular figure, a muted note, and hairline separation.
+   ================================================================ */
+
+:root .app-shell.app-shell .billing-metrics {
+    gap: 1px;
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+    background: var(--color-ash-stroke);
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell .billing-metrics>* {
+    border: 0;
+    border-radius: 0;
+    padding: calc(11px * var(--ui-zoom)) var(--space-4);
+    background: var(--color-surface);
+    gap: 2px;
+}
+
+:root .app-shell.app-shell .billing-metrics>*>span:first-child {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: calc(10px * var(--ui-zoom));
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell .billing-metrics output {
+    font-size: calc(21px * var(--ui-zoom));
+    line-height: 1.15;
+    font-variant-numeric: var(--nums);
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading-lg);
+}
+
+:root .app-shell.app-shell .billing-metrics small {
+    font-size: calc(11px * var(--ui-zoom));
+    color: var(--color-graphite-mid);
+}
+
+/* The anomaly cell keeps its accent ground but loses the separate
+   frame - it is one cell in the row, not a card resting on top. */
+:root .app-shell.app-shell .billing-metrics .period-anomaly-link {
+    border-radius: 0;
+}
+
+/* The completeness stamp was a boxed panel competing with the section
+   title beside it. As a slim chip it states the same fact quietly. */
+:root .app-shell.app-shell .completeness-stamp {
+    min-width: 0;
+    align-items: center;
+    gap: 0 var(--space-2);
+    padding: calc(5px * var(--ui-zoom)) var(--space-3);
+    border-radius: 999px;
+}
+
+:root .app-shell.app-shell .completeness-stamp :is(span, small) {
+    font-size: calc(9.5px * var(--ui-zoom));
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell .completeness-stamp strong {
+    font-size: calc(14px * var(--ui-zoom));
+    font-variant-numeric: var(--nums);
+}
+
 /* Budget tables are short by nature - a handful of budgets per scope.
    The shared table cap sliced the last row in half, which reads as
    broken rather than scrollable, so let this one size to content. */
