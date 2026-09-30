@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getCostAnomalies, getExchangeRates, getRateOptimization, getResourceAvailability, getServiceRetirements, listBudgets } from '../api';
 import { anomalyFixture, detailReportFixture, pricingReportFixture, reportFixture, resourceReportFixture, tagReportFixture } from '../report/testFixtures';
 import { ReportView } from './ReportView';
-import { BudgetContext, budgetFilterMatches, budgetThreshold } from './BudgetContext';
+import { BudgetContext, budgetCycle, budgetFilterMatches, budgetThreshold } from './BudgetContext';
 
 vi.mock('../api', async (importOriginal) => ({ ...await importOriginal<typeof import('../api')>(), getCostAnomalies: vi.fn(), getExchangeRates: vi.fn(), getRateOptimization: vi.fn(), getResourceAvailability: vi.fn(), getServiceRetirements: vi.fn(), listBudgets: vi.fn() }));
 let container: HTMLDivElement;
@@ -67,8 +67,14 @@ it('keeps budget matching, forecast variance and status thresholds explicit', as
   expect(budgetFilterMatches(undefined, row)).toBeNull();
   await act(async () => root.render(<BudgetContext details={detailReportFixture.costDetails} state={{ budgets: [budget], loading: false, error: null, refresh: vi.fn() }} />));
   expect(container.textContent).toContain('Filter applicability unverified');
-  expect(container.textContent).toContain('USD -5');
-  expect(container.textContent).toContain('Projected overrun: USD 40');
+  expect(container.textContent).toContain('$5.00 over');
+  expect(container.textContent).toContain('Overrun $40.00');
+  expect(budgetThreshold(budget).label).toBe('Over by 5%');
+  // A monthly budget checked on 30 Sep reports September to date, not the report month.
+  expect(budgetCycle({ ...budget, periodStart: '2026-01-01' }, '2026-09-30T10:00:00Z')).toEqual({ start: '2026-09-01', end: '2026-09-30' });
+  expect(budgetCycle({ ...budget, timeGrain: 'Quarterly', periodStart: '2026-01-01' }, '2026-08-15')).toEqual({ start: '2026-07-01', end: '2026-09-30' });
+  expect(budgetCycle({ ...budget, timeGrain: 'Annually', periodStart: '2025-04-01' }, '2026-02-10')).toEqual({ start: '2025-04-01', end: '2026-03-31' });
+  expect(budgetCycle({ ...budget, periodStart: '2027-01-01' }, '2026-09-30')).toBeNull();
 });
 
 it('drills from a selected period into day resources, preserves the range for anomalies, and replaces savings breakdown', async () => {

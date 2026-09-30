@@ -12417,6 +12417,45 @@ body {
     font-size: calc(11px * var(--ui-zoom));
 }
 
+/* Figure notes (cycle, grain, forecast outcome) sit under their figure
+   instead of running into it - "USD 851.75Projected overrun" read as one
+   word. */
+:root .app-shell.app-shell .budget-table td>small {
+    display: block;
+    margin-top: 1px;
+    font-size: calc(11px * var(--ui-zoom));
+    color: var(--color-graphite-mid);
+    white-space: nowrap;
+}
+
+:root .app-shell.app-shell .budget-table td {
+    font-variant-numeric: var(--nums);
+    vertical-align: top;
+}
+
+:root .app-shell.app-shell .budget-table td.cost-increase {
+    color: var(--color-cost-increase);
+}
+
+:root .app-shell.app-shell .budget-table th>details>summary {
+    font-size: calc(11px * var(--ui-zoom));
+    font-weight: 400;
+    color: var(--color-graphite-mid);
+}
+
+/* Short, sentence-case status. The long uppercase labels shouted and
+   wrapped; "Over by 12%" carries more information in less space. */
+:root .app-shell.app-shell .budget-table .budget-status {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: calc(11.5px * var(--ui-zoom));
+    font-weight: var(--weight-semi);
+    letter-spacing: 0;
+    text-transform: none;
+    white-space: nowrap;
+}
+
 /* Budget tables are short by nature - a handful of budgets per scope.
    The shared table cap sliced the last row in half, which reads as
    broken rather than scrollable, so let this one size to content. */
