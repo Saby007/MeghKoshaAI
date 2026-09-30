@@ -12114,7 +12114,7 @@ body {
     overflow: hidden;
 }
 
-:root .app-shell.app-shell .billing-metrics>* {
+:root .app-shell.app-shell .billing-metrics>*:not(.period-anomaly-link) {
     border: 0;
     border-radius: 0;
     padding: calc(11px * var(--ui-zoom)) var(--space-4);
@@ -12142,10 +12142,14 @@ body {
     color: var(--color-graphite-mid);
 }
 
-/* The anomaly cell keeps its accent ground but loses the separate
-   frame - it is one cell in the row, not a card resting on top. */
+/* The anomaly cell keeps its accent ground - it is the one cell in the
+   row that is a warning - but loses the separate frame so it sits in
+   the row rather than resting on top of it. */
 :root .app-shell.app-shell .billing-metrics .period-anomaly-link {
+    border: 0;
     border-radius: 0;
+    padding: calc(11px * var(--ui-zoom)) var(--space-4);
+    gap: 2px;
 }
 
 /* The completeness stamp was a boxed panel competing with the section
