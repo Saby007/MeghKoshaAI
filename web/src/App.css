@@ -12016,6 +12016,59 @@ body {
     }
 }
 
+
+/* ================================================================
+   Top chrome — four bands before any content
+   ----------------------------------------------------------------
+   App header, scope ribbon, saved-report strip and the dashboard
+   titlebar stacked to 291px before the first section, each with its
+   own height, padding and margin. They are now a single tighter
+   stack: reduced heights, hairline separation instead of gaps, and
+   the secondary strip visually demoted so the eye goes to the scope
+   bar and then straight into the report.
+   ================================================================ */
+
+:root .app-shell.app-shell .app-header {
+    min-height: calc(46px * var(--ui-zoom));
+    margin-bottom: var(--space-2);
+}
+
+:root .app-shell.app-shell .scope-ribbon {
+    margin-bottom: var(--space-2);
+}
+
+:root .app-shell.app-shell .scope-ribbon-main {
+    min-height: calc(42px * var(--ui-zoom));
+}
+
+/* The saved-report strip is a utility row, not a peer of the scope
+   bar: smaller type, muted, and no longer claiming a full band. */
+:root .app-shell.app-shell .saved-report-controls {
+    gap: var(--space-3);
+    padding: calc(5px * var(--ui-zoom)) var(--space-3);
+    font-size: var(--font-size-xs);
+}
+
+:root .app-shell.app-shell .dashboard-titlebar {
+    padding-block: calc(8px * var(--ui-zoom));
+}
+
+:root .app-shell.app-shell .report-page-title h1 {
+    font-size: calc(19px * var(--ui-zoom));
+    line-height: 1.2;
+}
+
+/* The category strip is navigation, so it reads as a row of controls
+   rather than a row of cards. */
+:root .app-shell.app-shell .category-pill-row {
+    padding: var(--space-1) var(--space-3);
+    gap: var(--space-1);
+}
+
+:root .app-shell.app-shell .category-pill {
+    padding: calc(5px * var(--ui-zoom)) var(--space-3);
+}
+
 /* Budget tables are short by nature - a handful of budgets per scope.
    The shared table cap sliced the last row in half, which reads as
    broken rather than scrollable, so let this one size to content. */
