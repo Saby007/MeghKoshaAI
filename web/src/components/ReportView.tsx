@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, Inbox, LayoutDashboard, LoaderCircle, Mail, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
 import worldMapUrl from '@svg-maps/world/world.svg?url';
+import { CountUp } from './CountUp';
 import {
   downloadCustomReport,
   downloadReportArtifact,
@@ -616,7 +617,11 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
     currencyDisplay: 'narrowSymbol',
     maximumFractionDigits: 0,
   });
-  const formatMoney: MoneyFormatter = (value) => numberFormatter.format(value * conversionRate);
+  // Whole-dollar rounding would print a real 32-cent figure as $0, which reads as missing data.
+  const formatMoney: MoneyFormatter = (value) => {
+    const converted = value * conversionRate;
+    return converted !== 0 && Math.abs(converted) < 0.5 ? exactFormatter.format(converted) : numberFormatter.format(converted);
+  };
   // Whole-dollar rounding hides real per-hour figures (most resources cost well
   // under $1/hr) - use a separate formatter with decimal precision for those.
   const hourlyFormatter = new Intl.NumberFormat(undefined, {
@@ -1592,7 +1597,7 @@ function ExecutiveSummaryTab({
         <div className="executive-hero">
           <button type="button" className={`kpi-card kpi-link-card exec-primary ${s.spendChangePercentage === null || s.spendChangePercentage === 0 ? '' : s.spendChangePercentage > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()} onClick={() => onNavigate('History')} aria-label="Open cost history">
             <div className="kpi-label">Total monthly spend</div>
-            <div className="kpi-value">{formatMoney(s.currentMonthlySpend)}</div>
+            <div className="kpi-value"><CountUp value={s.currentMonthlySpend} format={formatMoney} /></div>
             <div className="kpi-note">
               {s.spendChangePercentage === null
                 ? `${completeness.availableSubscriptions} complete exports · comparison accrues next month`
@@ -1611,13 +1616,13 @@ function ExecutiveSummaryTab({
           <div className="executive-hero-money">
             <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open stale and orphaned resources">
               <div className="kpi-label">Estimated wastage</div>
-              <div className="kpi-value">{formatMoney(s.estimatedWastageMonth)}</div>
+              <div className="kpi-value"><CountUp value={s.estimatedWastageMonth} format={formatMoney} /></div>
               <div className="kpi-note">{percent(s.pctWastage)} of total · includes billed cost at risk</div>
               <span className="kpi-card-link-label">Review waste <ChevronRight size={14} aria-hidden="true" /></span>
             </button>
             <button type="button" className="kpi-card kpi-link-card positive" onClick={() => onNavigate('Savings Roadmap')} aria-label="Open savings roadmap">
               <div className="kpi-label">Potential savings</div>
-              <div className="kpi-value">{formatMoney(s.potentialSavingsMonth)}</div>
+              <div className="kpi-value"><CountUp value={s.potentialSavingsMonth} format={formatMoney} /></div>
               <div className="kpi-note">{percent(s.pctRecoverable)} of total bill · estimated / month</div>
               <span className="kpi-card-link-label">Open roadmap <ChevronRight size={14} aria-hidden="true" /></span>
             </button>

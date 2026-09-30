@@ -1,0 +1,133 @@
+/* Presentation polish. Imported last, so it is the final word on these rules and can be
+   reverted by removing the one import in main.tsx. Uses the shared tokens only; nothing
+   here changes what is shown, only how it looks and responds. */
+
+/* Headings break evenly and paragraphs never end on a lone word. */
+
+:root .app-shell.app-shell :is(h1, h2, h3, h4, .executive-kicker) {
+    text-wrap: balance;
+}
+
+:root .app-shell.app-shell :is(p, .kpi-note, .empty-state, .executive-narrative, .panel-lede) {
+    text-wrap: pretty;
+}
+
+/* Every pressable control answers the pointer. `scale` is used rather than `transform`
+   so it composes with the hover lift instead of replacing it. */
+
+:root .app-shell.app-shell :is(button, [role='button'], summary, .segmented button):not(:disabled):active {
+    scale: .98;
+}
+
+:root .app-shell.app-shell .kpi-link-card:not(:disabled):active {
+    scale: .99;
+    transform: translateY(0);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Any clickable card, not only the hero ones, lifts the same way. */
+
+:root .app-shell.app-shell :is(button, a).kpi-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--elevation-hover);
+}
+
+/* The entrance is staged in reading order. The panel itself fades in (report-workspace.css),
+   and the blocks inside it then settle one after another. Nearly every tab is one wrapper
+   holding its blocks, so it is the wrapper's children that are staggered. Capped so a long
+   page never feels slow. */
+
+@media (prefers-reduced-motion: no-preference) {
+    :root .app-shell.app-shell .tab-panel > * > * {
+        animation: polish-rise calc(var(--motion-duration-slow) + var(--motion-duration)) var(--ease-mechanical) both;
+    }
+
+    :root .app-shell.app-shell .tab-panel > * > :nth-child(2) { animation-delay: 50ms; }
+    :root .app-shell.app-shell .tab-panel > * > :nth-child(3) { animation-delay: 100ms; }
+    :root .app-shell.app-shell .tab-panel > * > :nth-child(4) { animation-delay: 150ms; }
+    :root .app-shell.app-shell .tab-panel > * > :nth-child(5) { animation-delay: 200ms; }
+    :root .app-shell.app-shell .tab-panel > * > :nth-child(n + 6) { animation-delay: 250ms; }
+}
+@keyframes polish-rise {
+    from {
+        opacity: 0;
+        transform: translateY(var(--space-2));
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* Key takeaways. The strip was a four-column grid whose background doubles as the divider
+   colour, so a fifth sentence left one cell showing as a solid grey block. A wrapping row
+   whose items share the remaining width cannot leave a hole at any count or width. The
+   status dot and chevron sit on the first line of a sentence that wraps, not beside its
+   middle. */
+
+:root .app-shell.app-shell .executive-takeaways {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+:root .app-shell.app-shell .executive-takeaways > .takeaway {
+    flex: 1 1 calc(380px * var(--ui-zoom, 1));
+    display: flex;
+}
+
+:root .app-shell.app-shell .takeaway > :is(button, div) {
+    align-items: flex-start;
+}
+
+:root .app-shell.app-shell .takeaway i {
+    margin-top: calc((1.35em - 7px) / 2);
+}
+
+:root .app-shell.app-shell .takeaway svg {
+    margin-top: calc((1.35em - 13px) / 2);
+}
+
+/* Nothing on the page is set below 12px. These were measured in the rendered report at
+   between 8px and 11.5px, which does not survive a projector or a customer's own screen. */
+
+:root .app-shell.app-shell.app-shell :is(
+    .top-service-name small,
+    .top-service-rank,
+    .top-service-share,
+    .region-ranking b,
+    .region-ranking strong,
+    .executive-signal-clear,
+    .category-pill strong,
+    .category-pill span,
+    .kpi-label,
+    .kpi-note,
+    .kpi-card-link-label,
+    .billing-metrics small,
+    .billing-metrics span,
+    .treemap-cell small,
+    .completeness-stamp span,
+    .completeness-stamp small,
+    .completeness-stamp strong,
+    .scope-stale-control span,
+    .scope-panel-title,
+    .subscription-select-count,
+    .report-context-details summary span,
+    .budget-table small,
+    .budget-table th > details > summary,
+    .budget-status,
+    .titlebar-button-label
+) {
+    font-size: 12px;
+}
+
+/* The headline figure is the subject of the page, so its card carries a faint accent edge
+   along the top rather than an extra border. */
+
+:root .app-shell.app-shell .executive-hero .exec-primary {
+    box-shadow: inset 0 1px 0 var(--color-accent-line);
+}
+
+:root .app-shell.app-shell .executive-hero .exec-primary:hover {
+    box-shadow: var(--elevation-hover), inset 0 1px 0 var(--color-accent-line);
+}

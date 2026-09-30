@@ -110,6 +110,7 @@ function useTheme(): [Theme, () => void] {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#F3F6FA' : '#0F1214');
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
 
