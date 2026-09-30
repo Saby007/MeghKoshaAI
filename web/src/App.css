@@ -12345,6 +12345,13 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* An older rule made the region panel span the full width, which dropped
+   it below the treemap and left a hole beside it. In the two-by-two every
+   panel takes one cell. */
+:root .app-shell.app-shell .executive-report .executive-visual-grid>* {
+    grid-column: auto;
+}
+
 /* On the Tags page the trend keeps the full width (it rotates its day
    labels when squeezed) and the tag-set donut follows it at full width. */
 :root .app-shell.app-shell .tag-trend-visuals {

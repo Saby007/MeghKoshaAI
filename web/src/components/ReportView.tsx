@@ -2238,14 +2238,10 @@ type TreemapNode = {
 };
 
 function CostTreemap({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
-  const [chosenSubscription, setSubscriptionId] = useState<string | null>(null);
+  /* Opens at subscription level even when there is only one, so the view
+     scales unchanged as more subscriptions are added; drill in from there. */
+  const [subscriptionId, setSubscriptionId] = useState<string | null>(null);
   const [resourceGroup, setResourceGroup] = useState<string | null>(null);
-  /* With a single subscription the top level was one box filling the panel.
-     Start one level down, at its resource groups, where there is something
-     to compare. */
-  const subscriptionIds = [...new Set(report.costHierarchy.map((item) => item.subscriptionId))];
-  const onlySubscription = subscriptionIds.length === 1 ? subscriptionIds[0] : null;
-  const subscriptionId = chosenSubscription ?? onlySubscription;
   const selectedSubscription = report.costHierarchy.find((item) => item.subscriptionId === subscriptionId);
   const visible = report.costHierarchy.filter((item) => (
     (!subscriptionId || item.subscriptionId === subscriptionId)
@@ -2263,7 +2259,9 @@ function CostTreemap({ report, formatMoney }: { report: FullReport; formatMoney:
       resource: resourceGroup ? item : undefined,
     });
   }
-  const nodes = [...nodesByKey.values()].sort((left, right) => right.spend - left.spend).slice(0, 24);
+  /* Groups that round to nothing drew full-size "$0" cells (flex-basis has a
+     16% floor), so a third of the map was empty groups. */
+  const nodes = [...nodesByKey.values()].filter((node) => node.spend >= 0.5).sort((left, right) => right.spend - left.spend).slice(0, 24);
   const total = nodes.reduce((sum, node) => sum + node.spend, 0);
   function selectNode(node: TreemapNode) {
     if (!subscriptionId) setSubscriptionId(node.key);
@@ -2274,8 +2272,8 @@ function CostTreemap({ report, formatMoney }: { report: FullReport; formatMoney:
       <header>
         <span>Spend hierarchy</span>
         <nav className="treemap-breadcrumb" aria-label="Spend hierarchy level">
-          {!onlySubscription && <button type="button" onClick={() => { setSubscriptionId(null); setResourceGroup(null); }}>Subscriptions</button>}
-          {subscriptionId && <>{!onlySubscription && <ChevronRight size={12} />}<button type="button" onClick={() => setResourceGroup(null)}>{onlySubscription ? 'Resource groups' : selectedSubscription?.subscriptionName ?? subscriptionId}</button></>}
+          <button type="button" onClick={() => { setSubscriptionId(null); setResourceGroup(null); }}>Subscriptions</button>
+          {subscriptionId && <><ChevronRight size={12} /><button type="button" onClick={() => setResourceGroup(null)}>{selectedSubscription?.subscriptionName ?? subscriptionId}</button></>}
           {resourceGroup && <><ChevronRight size={12} /><b>{resourceGroup}</b></>}
         </nav>
       </header>
