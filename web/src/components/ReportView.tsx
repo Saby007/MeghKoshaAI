@@ -645,7 +645,8 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           <span>{PRIMARY_NAV_LABELS[PRIMARY_NAV_ORDER.find((group) => PRIMARY_NAV_TABS[group].includes(tab)) ?? 'dashboard']}</span>
           <h1 id="report-page-heading" tabIndex={-1}>{tab}</h1>
         </div>
-        <span className="report-period-badge">{report.reportMetadata.period}</span>
+        {/* The period badge ("2026-08") repeated the cost window's From/To,
+            which sit directly above; removed so the dates appear once. */}
         <button
           className="focus-download-control"
           type="button"
@@ -653,7 +654,8 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           aria-label="Download FocusCost files"
           onClick={() => setShowFocusDownloads(true)}
         >
-          <Download size={17} />
+          <Download size={15} aria-hidden="true" />
+          <span className="titlebar-button-label">FOCUS files</span>
         </button>
         <button
           className="report-download-control"
@@ -663,7 +665,8 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           disabled={!snapshotId}
           onClick={() => setShowReportExports(true)}
         >
-          <FileCode2 size={17} />
+          <FileCode2 size={15} aria-hidden="true" />
+          <span className="titlebar-button-label">Reports</span>
         </button>
         <label className="currency-control">
           <span>Display currency</span>
@@ -681,43 +684,6 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           </select>
         </label>
       </div>
-      <details className="report-context-details" aria-label="Report context">
-        <summary>
-          <span>Report context</span>
-          <span>{snapshotId ? 'Saved snapshot' : 'Unsaved assessment'} · {report.subscriptionBreakdown.length} subscription{report.subscriptionBreakdown.length === 1 ? '' : 's'}</span>
-          {exchangeError && <span className="context-warning">Exchange rates unavailable</span>}
-        </summary>
-        <div className="report-context-body">
-          <dl className="report-context-metadata">
-            <div><dt>Assessment completed</dt><dd>{new Date(snapshotCreatedAt ?? report.reportMetadata.generatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</dd></div>
-            <div><dt>Billing period</dt><dd>{reportDate(report.reportMetadata.periodStart)} - {reportDate(report.reportMetadata.periodEnd)}</dd></div>
-            <div><dt>Cost basis</dt><dd>{report.reportMetadata.costBasis} · {sourceCurrency}</dd></div>
-          </dl>
-          <div className={`currency-provenance ${exchangeError ? 'has-error' : ''}`} role="status" aria-live="polite">
-        {loadingExchangeRates && <span>Loading ECB reference rates</span>}
-        {!loadingExchangeRates && exchangeError && (
-          <span>{sourceCurrency} billing values shown · {exchangeError}</span>
-        )}
-        {!loadingExchangeRates && exchangeRates && (
-          <>
-            <span>
-              {displayCurrency === sourceCurrency
-                ? `${sourceCurrency} billing currency · no conversion applied`
-                : `1 ${sourceCurrency} = ${conversionRate.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${displayCurrency}`}
-            </span>
-            <span>{exchangeRates.provider} · {reportDate(exchangeRates.publishedDate)}{exchangeRates.stale ? ' · cached rate' : ''}</span>
-            <a href={exchangeRates.providerUrl} target="_blank" rel="noreferrer">
-              Indicative rate <ExternalLink size={12} aria-hidden="true" />
-            </a>
-          </>
-        )}
-          </div>
-          {/* On the Executive Summary the overview already carries these
-              figures directly beneath this disclosure, so repeating them here
-              only duplicated the page. Other tabs keep them as context. */}
-          {tab !== 'Executive Summary' && <TopSummaryBar report={report} formatMoney={formatMoney} />}
-        </div>
-      </details>
       {activeRemediation && (
         <RemediationDialog
           finding={activeRemediation.finding}
@@ -752,7 +718,48 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           onClose={() => setShowCustomReportBuilder(false)}
         />
       )}
-      <CategorySpendPills report={report} formatMoney={formatMoney} activeTab={tab} onSelect={selectTab} />
+      {/* Report context rides at the end of the area navigation instead of
+          taking a band of its own above it; it opens as a popover. */}
+      <div className="report-subnav">
+        <CategorySpendPills report={report} formatMoney={formatMoney} activeTab={tab} onSelect={selectTab} />
+        <details className="report-context-details" aria-label="Report context">
+          <summary>
+            <span>Report context</span>
+            <span>{snapshotId ? 'Saved snapshot' : 'Unsaved assessment'} · {report.subscriptionBreakdown.length} subscription{report.subscriptionBreakdown.length === 1 ? '' : 's'}</span>
+            {exchangeError && <span className="context-warning">Exchange rates unavailable</span>}
+          </summary>
+          <div className="report-context-body">
+            <dl className="report-context-metadata">
+              <div><dt>Assessment completed</dt><dd>{new Date(snapshotCreatedAt ?? report.reportMetadata.generatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</dd></div>
+              <div><dt>Billing period</dt><dd>{reportDate(report.reportMetadata.periodStart)} - {reportDate(report.reportMetadata.periodEnd)}</dd></div>
+              <div><dt>Cost basis</dt><dd>{report.reportMetadata.costBasis} · {sourceCurrency}</dd></div>
+            </dl>
+            <div className={`currency-provenance ${exchangeError ? 'has-error' : ''}`} role="status" aria-live="polite">
+          {loadingExchangeRates && <span>Loading ECB reference rates</span>}
+          {!loadingExchangeRates && exchangeError && (
+            <span>{sourceCurrency} billing values shown · {exchangeError}</span>
+          )}
+          {!loadingExchangeRates && exchangeRates && (
+            <>
+              <span>
+                {displayCurrency === sourceCurrency
+                  ? `${sourceCurrency} billing currency · no conversion applied`
+                  : `1 ${sourceCurrency} = ${conversionRate.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${displayCurrency}`}
+              </span>
+              <span>{exchangeRates.provider} · {reportDate(exchangeRates.publishedDate)}{exchangeRates.stale ? ' · cached rate' : ''}</span>
+              <a href={exchangeRates.providerUrl} target="_blank" rel="noreferrer">
+                Indicative rate <ExternalLink size={12} aria-hidden="true" />
+              </a>
+            </>
+          )}
+            </div>
+            {/* On the Executive Summary the overview already carries these
+                figures directly beneath this disclosure, so repeating them here
+                only duplicated the page. Other tabs keep them as context. */}
+            {tab !== 'Executive Summary' && <TopSummaryBar report={report} formatMoney={formatMoney} />}
+          </div>
+        </details>
+      </div>
       <div className="dashboard-body">
         <div className="tab-panel" key={tab}>
           {tab === 'Executive Summary' && (

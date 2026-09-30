@@ -608,7 +608,10 @@ export default function App() {
             running={running}
             runningLabel={assessmentPhase === 'narrating' ? 'Generating narrative' : 'Collecting Azure data'}
             hasReport={report !== null}
-            periodLabel={report ? `${report.reportMetadata.periodStart} \u2013 ${report.reportMetadata.periodEnd}` : null}
+            /* The assessed period is shown by the cost window's From/To just
+               below; repeating it in the ribbon put the same dates on screen
+               twice. */
+            periodLabel={null}
             scopeChanged={scopeChanged}
             staleDays={staleDays}
             error={error}

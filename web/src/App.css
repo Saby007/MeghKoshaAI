@@ -12500,6 +12500,140 @@ body {
 :root .app-shell.app-shell .takeaway-warning i { background: var(--color-signal-amber, #e3b341); }
 :root .app-shell.app-shell .takeaway-risk i { background: var(--color-cost-increase); }
 
+
+/* The two download buttons were bare icons whose purpose was only in a
+   tooltip. They now carry a short visible label. */
+:root .app-shell.app-shell :is(.focus-download-control, .report-download-control) {
+    width: auto;
+    gap: 6px;
+    padding: 0 var(--space-3);
+}
+
+:root .app-shell.app-shell .titlebar-button-label {
+    font-size: calc(12px * var(--ui-zoom));
+    white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+    :root .app-shell.app-shell .titlebar-button-label {
+        display: none;
+    }
+    :root .app-shell.app-shell :is(.focus-download-control, .report-download-control) {
+        padding: 0;
+    }
+}
+
+
+/* ================================================================
+   Area navigation and report context share one row
+   ----------------------------------------------------------------
+   Report context was a band of its own between the title bar and
+   the area pills. It now sits at the end of the pills row and opens
+   as a popover, so the header loses a band without losing content.
+   ================================================================ */
+
+:root .app-shell.app-shell .report-subnav {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    border-bottom: var(--border-width) solid var(--color-ash-stroke);
+}
+
+:root .app-shell.app-shell .report-subnav .category-pill-row {
+    flex: 1;
+    min-width: 0;
+    border-bottom: 0;
+}
+
+:root .app-shell.app-shell .report-subnav .report-context-details {
+    position: relative;
+    flex: none;
+    border-bottom: 0;
+}
+
+:root .app-shell.app-shell .report-subnav .report-context-details>summary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: calc(5px * var(--ui-zoom)) var(--space-3);
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: 999px;
+    font-size: max(11px, calc(11.5px * var(--ui-zoom)));
+    white-space: nowrap;
+    list-style: none;
+}
+
+:root .app-shell.app-shell .report-subnav .report-context-details>summary::-webkit-details-marker {
+    display: none;
+}
+
+:root .app-shell.app-shell .report-subnav .report-context-details>summary>span:first-child {
+    color: var(--color-bone);
+}
+
+:root .app-shell.app-shell .report-subnav .report-context-details[open]>summary {
+    border-color: var(--color-control-stroke);
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell.app-shell .report-subnav .report-context-body {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 6px);
+    right: 0;
+    width: min(calc(720px * var(--ui-zoom)), 92vw);
+    padding: var(--space-4);
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+}
+
+@media (max-width: 760px) {
+    :root .app-shell.app-shell .report-subnav {
+        flex-wrap: wrap;
+    }
+}
+
+
+/* ================================================================
+   Minimum text size
+   ----------------------------------------------------------------
+   Successive compaction passes drove some labels to 9.5-10px, and the
+   treemap caption was 8px. Density should come from spacing, not from
+   type below comfortable reading size, so labels floor at 11px and
+   secondary notes at 11px. Headline figures are unaffected.
+   ================================================================ */
+
+:root .app-shell.app-shell :is(
+    .executive-hero .kpi-label,
+    .billing-metrics>*>span:first-child,
+    .scope-panel-title,
+    .scope-stale-control,
+    .category-pill>span,
+    .completeness-stamp :is(span, small)
+) {
+    font-size: max(11px, calc(11px * var(--ui-zoom)));
+}
+
+:root .app-shell.app-shell :is(
+    .executive-hero .kpi-note,
+    .billing-metrics small,
+    .kpi-card-link-label,
+    .subscription-select-menu .subscription-grid small,
+    .subscription-select-count
+) {
+    font-size: max(11px, calc(11px * var(--ui-zoom)));
+}
+
+:root .app-shell.app-shell .treemap-cell small {
+    font-size: 11px;
+}
+
+:root .app-shell.app-shell .takeaway>:is(button, div) {
+    font-size: max(13px, calc(13px * var(--ui-zoom)));
+}
+
 :root .app-shell.app-shell .budget-table td.cost-increase {
     color: var(--color-cost-increase);
 }
