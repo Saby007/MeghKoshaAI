@@ -53,7 +53,7 @@ import { billingDates, billingWindow } from '../report/billingHistory';
 import { tagDistribution } from '../report/tagDistribution';
 import { CostExportButton, CostFilters, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, ResourceCostTable, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
-import { costWindowDates, matchesCostFilter, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { costWindowDates, matchesCostFilter, monthCostWindow, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import { BudgetContext, BudgetDailyChart, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
 import { ServiceRetirements } from './ServiceRetirements';
 import { DayAxis, dayAxis, useChartWidth } from './TrendChart';
@@ -522,12 +522,14 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
      how it is mounted in tests and how a caller that does not want to own a
      window can still use it. Same contract as a React input with value vs
      defaultValue. */
-  const [uncontrolledCostWindow, setUncontrolledCostWindow] = useState<CostWindow>(() => presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend.days.map((day) => day.date), 30));
+  const defaultCostWindow = (value: FullReport) => monthCostWindow(value.reportMetadata.periodStart, value.reportMetadata.periodEnd)
+    ?? presetCostWindow(value.costDetails?.dates ?? value.dailyCostTrend.days.map((day) => day.date), 30);
+  const [uncontrolledCostWindow, setUncontrolledCostWindow] = useState<CostWindow>(() => defaultCostWindow(report));
   const costWindow = controlledCostWindow ?? uncontrolledCostWindow;
   const setCostWindow = onCostWindowChange ?? setUncontrolledCostWindow;
   const [costFilters, setCostFilters] = useState<CostFilter>({});
   useEffect(() => setCostFilters({}), [report]);
-  useEffect(() => setUncontrolledCostWindow(presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend.days.map((day) => day.date), 30)), [report]);
+  useEffect(() => setUncontrolledCostWindow(defaultCostWindow(report)), [report]);
   const anomalyState = useAnomalySummary(report);
   const budgetState = useBudgetSummary(report);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);

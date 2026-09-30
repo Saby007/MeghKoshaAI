@@ -3,7 +3,7 @@ import type { ErrorInfo, ReactNode } from 'react';
 import { ArrowRight, BarChart3, CalendarClock, Check, LoaderCircle, Lock, Maximize2, MessageSquareText, Moon, RefreshCw, Rows3, Settings2, ShieldCheck, Sun } from 'lucide-react';
 import { SubscriptionPicker, type Subscription } from './components/SubscriptionPicker';
 import { CostRangeControls } from './components/CostRangeControls';
-import { presetCostWindow, type CostWindow } from './report/costDetails';
+import { monthCostWindow, presetCostWindow, type CostWindow } from './report/costDetails';
 import { runCostAssessment, type StaleDays } from './collectors/costAssessment';
 import { getLatestReport, narrate, type CostAgentOutput } from './api';
 import { apiFetch, ApiIdentityRequiredError, initializeApiIdentity, redirectApiIdentity, signOutApiIdentity, IDENTITY_REQUIRED_EVENT, type VerifiedIdentity } from './apiIdentity';
@@ -272,7 +272,8 @@ export default function App() {
   const costWindowDatesAvailable = report ? report.costDetails?.dates ?? report.dailyCostTrend?.days?.map((day) => day.date) ?? [] : [];
   useEffect(() => {
     if (!report) return;
-    setCostWindow(presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend?.days?.map((day) => day.date) ?? [], 30));
+    const dates = report.costDetails?.dates ?? report.dailyCostTrend?.days?.map((day) => day.date) ?? [];
+    setCostWindow(monthCostWindow(report.reportMetadata.periodStart, report.reportMetadata.periodEnd) ?? presetCostWindow(dates, 30));
   }, [report]);
 
   useEffect(() => {
@@ -625,7 +626,7 @@ export default function App() {
               if (!enabled && loadingSnapshot) { pendingStartup.current?.abort(); setLoadingSnapshot(false); }
             }} /> Open saved report automatically</label>
             <button type="button" className="ghost-button" disabled={loadingSubscriptions || loadingSnapshot || running || !!identityError} onClick={() => setStartupVersion((value) => value + 1)}><RefreshCw size={15} aria-hidden="true" /> Open saved report</button>
-            {report && <CostRangeControls dates={costWindowDatesAvailable} value={costWindow} onChange={setCostWindow} />}
+            {report && <CostRangeControls dates={costWindowDatesAvailable} value={costWindow} onChange={setCostWindow} month={monthCostWindow(report.reportMetadata.periodStart, report.reportMetadata.periodEnd)} />}
           </div>
           {loadingSnapshot && <section className="saved-report-status"><span role="status"><LoaderCircle className="spin" size={18} aria-hidden="true" /> Opening saved report...</span><button type="button" className="ghost-button" onClick={() => { pendingStartup.current?.abort(); setLoadingSnapshot(false); }}>Skip saved report</button></section>}
           {(snapshotError || (error && !report)) && <section className="saved-report-status">
