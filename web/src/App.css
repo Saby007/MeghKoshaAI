@@ -5794,24 +5794,27 @@ body {
     outline: none;
 }
 
+/* Muted tints of the chart series colours (blue, green, cyan, amber,
+   violet) so the treemap reads as part of the same palette. The previous
+   brown, olive and mauve belonged to nothing else on the page. */
 .treemap-cell.tone-0 {
-    background: #4b2a1d;
+    background: #16324d;
 }
 
 .treemap-cell.tone-1 {
-    background: #2c4130;
+    background: #1d3a26;
 }
 
 .treemap-cell.tone-2 {
-    background: #263b43;
+    background: #173a40;
 }
 
 .treemap-cell.tone-3 {
-    background: #514321;
+    background: #3d3417;
 }
 
 .treemap-cell.tone-4 {
-    background: #443243;
+    background: #2e2547;
 }
 
 
@@ -5819,7 +5822,7 @@ body {
    canvas. Light theme gets pastel equivalents, same hue per tone. */
 
 :root[data-theme='light'] .treemap-cell.tone-0 {
-    background: #f7ddd0;
+    background: #dbe8f6;
 }
 
 :root[data-theme='light'] .treemap-cell.tone-1 {
@@ -12330,61 +12333,36 @@ body {
 
 
 /* ================================================================
-   Spend Distribution — three columns on wide screens
+   Spend Distribution — a balanced two-by-two
    ----------------------------------------------------------------
-   Six panels in a two-column grid, two of them forced full width,
-   stacked to 1,555px. On wide screens they now pack into three
-   columns: both donuts beside the monthly bars, the daily trend
-   beside the treemap, and the region map along the bottom. The DOM
-   order is unchanged; only the visual order moves.
+   Four panels: resource-type donut beside the monthly bars, treemap
+   beside the region map. Pairs are matched by height so neither row
+   leaves a void. The per-tag trend and tag-set donut moved to the
+   Cost by Tags page, where they are tag analysis rather than repeats.
    ================================================================ */
 
-@media (min-width: 1400px) {
-    :root .app-shell.app-shell .executive-visual-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    :root .app-shell.app-shell .executive-visual-grid>:nth-child(1) { order: 1; }
-    :root .app-shell.app-shell .executive-visual-grid>:nth-child(4) { order: 2; }
-    :root .app-shell.app-shell .executive-visual-grid>:nth-child(2) { order: 3; }
-
-    /* The trend measures its own container and rotates its day labels
-       when squeezed, so it keeps the full width. */
-    :root .app-shell.app-shell .executive-visual-grid>.daily-trend-panel-wide {
-        order: 4;
-        grid-column: 1 / -1;
-        min-height: 0;
-    }
-
-    /* Treemap and region map are close in height, so they pair on one
-       row without leaving a void under either. */
-    :root .app-shell.app-shell .executive-visual-grid>.executive-treemap-panel { order: 5; }
-
-    :root .app-shell.app-shell .executive-visual-grid>.executive-region-panel {
-        order: 6;
-        grid-column: span 2;
-    }
-
-    /* Six monthly bars fit a third-width panel comfortably; the 540px
-       floor was set for a narrower layout and forced a scrollbar here. */
-    :root .app-shell.app-shell .executive-visual-grid .monthly-chart {
-        min-width: 0;
-    }
-
-    /* A donut beside its legend needs less room once the panel is a
-       third of the width rather than half. */
-    :root .app-shell.app-shell .executive-visual-grid .donut-layout {
-        min-height: 0;
-        grid-template-columns: minmax(110px, .7fr) minmax(0, 1fr);
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-    }
-
-    :root .app-shell.app-shell .executive-visual-grid .donut-chart {
-        width: min(100%, 150px);
-    }
+:root .app-shell.app-shell .executive-report .executive-visual-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* On the Tags page the trend keeps the full width (it rotates its day
+   labels when squeezed) and the tag-set donut follows it at full width. */
+:root .app-shell.app-shell .tag-trend-visuals {
+    margin-bottom: var(--space-4);
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell .tag-trend-visuals>* {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 1050px) {
+    :root .app-shell.app-shell .executive-report .executive-visual-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
 
 /* ================================================================
    Anomaly block — no reserved height

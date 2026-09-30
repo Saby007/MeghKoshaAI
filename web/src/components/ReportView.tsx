@@ -1416,74 +1416,6 @@ function RemediationDialog({
   );
 }
 
-type TimeRangeDays = 7 | 30 | 60 | 90;
-type AnalysisRangeMode = TimeRangeDays | 'custom';
-const TIME_RANGE_OPTIONS: TimeRangeDays[] = [7, 30, 60, 90];
-
-// Global time-range control (ADO Task 781, comment 8538467, item 1). Drives the
-// Daily Cost Trend chart and the range KPI strip below it; extending this to every
-// other tab (many of which are point-in-time inventory findings, not time-series)
-// is a materially larger follow-up, not done here.
-function TimeRangeSelector({ mode, window, dates, onModeChange, onWindowChange }: {
-  mode: AnalysisRangeMode;
-  window: CostWindow;
-  dates: string[];
-  onModeChange: (value: AnalysisRangeMode) => void;
-  onWindowChange: (value: CostWindow) => void;
-}) {
-  const earliest = dates[0] ?? '';
-  const latest = dates.at(-1) ?? '';
-  return (
-    <div className="analysis-range-controls">
-      <div className="time-range-selector" role="group" aria-label="Time range">
-        {TIME_RANGE_OPTIONS.map((option) => (
-          <button
-            key={option}
-            type="button"
-            className={option === mode ? 'active' : ''}
-            aria-pressed={option === mode}
-            onClick={() => onModeChange(option)}
-          >
-            {option}d
-          </button>
-        ))}
-        <button type="button" className={mode === 'custom' ? 'active' : ''} aria-pressed={mode === 'custom'} onClick={() => onModeChange('custom')}>Custom</button>
-      </div>
-      {mode === 'custom' && (
-        <div className="billing-filters analysis-custom-period" role="group" aria-label="Custom analysis period">
-          <label className="billing-filter"><span>From (UTC)</span><input type="date" aria-label="Analysis period start" value={window.startDate} min={earliest} max={window.endDate || latest} disabled={!dates.length} onChange={(event) => {
-            const startDate = event.target.value;
-            onWindowChange({ startDate, endDate: window.endDate < startDate ? startDate : window.endDate });
-          }} /></label>
-          <label className="billing-filter"><span>To (UTC)</span><input type="date" aria-label="Analysis period end" value={window.endDate} min={window.startDate || earliest} max={latest} disabled={!dates.length} onChange={(event) => {
-            const endDate = event.target.value;
-            onWindowChange({ startDate: window.startDate > endDate ? endDate : window.startDate, endDate });
-          }} /></label>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RangeSpendSummary({ report, formatMoney, formatHourlyMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
-  const result = billingWindow(report, { rangeDays, startDate: costWindow.startDate, endDate: costWindow.endDate });
-  const avgDaily = result.totalCost === null ? null : result.totalCost / result.coveredDays;
-  return (
-    <div className="kpi-grid range-spend-kpi-grid">
-      <div className="kpi-card">
-        <div className="kpi-label">Spend, {rangeLabel.toLowerCase()}</div>
-        <div className="kpi-value">{result.totalCost === null ? 'Unavailable' : formatMoney(result.totalCost)}</div>
-        <div className="kpi-note">{result.coveredDays}/{result.days.length} covered export-calendar days</div>
-      </div>
-      <div className="kpi-card">
-        <div className="kpi-label">Average daily spend</div>
-        <div className="kpi-value">{avgDaily === null ? 'Unavailable' : formatMoney(avgDaily)}</div>
-        <div className="kpi-note">Average hourly: {result.averageHourlyCost === null ? 'Unavailable' : formatHourlyMoney(result.averageHourlyCost)}</div>
-      </div>
-    </div>
-  );
-}
-
 /* A categorised, collapsible block. The executive view previously ran as one
    continuous column of tables and charts separated only by full-bleed dividers,
    so nothing signalled where one subject ended and the next began. Grouping the
@@ -1593,13 +1525,8 @@ function ExecutiveSummaryTab({
   const s = report.executiveSummary;
   const metadata = report.reportMetadata;
   const completeness = report.completeness;
-  const analysisDates = useMemo(() => billingDates(report), [report]);
-  const [rangeMode, setRangeMode] = useState<AnalysisRangeMode>(30);
-  const [analysisWindow, setAnalysisWindow] = useState<CostWindow>(() => presetCostWindow(analysisDates, 30));
-  const rangeDays = costWindowDates(analysisWindow).length || 30;
-  const rangeLabel = rangeMode === 'custom'
-    ? `${reportDate(analysisWindow.startDate)} - ${reportDate(analysisWindow.endDate)}`
-    : `Last ${rangeMode} days`;
+  /* One window for the whole page: the report-wide cost window. */
+  const rangeDays = costWindowDates(costWindow).length || 30;
   const [costDetailsOpened, setCostDetailsOpened] = useState(true);
   const takeaways = useMemo(() => buildTakeaways({
     report,
@@ -1610,24 +1537,10 @@ function ExecutiveSummaryTab({
     window: costWindow,
     formatMoney,
   }), [report, budgetState, anomalyState.result, costWindow, formatMoney]);
-  // Shown on the collapsed "Spend over time" badge so the index row still
-  // carries its headline figure without opening the section.
-  const rangeTotal = useMemo(
-    () => billingWindow(report, { rangeDays, startDate: analysisWindow.startDate, endDate: analysisWindow.endDate }).totalCost,
-    [report, rangeDays, analysisWindow.startDate, analysisWindow.endDate],
-  );
   /* The daily figures sit at the end of the report rather than under the
      chart, so the day selection they drive is owned here and handed to the
      cost window instead of living inside it. */
   const [selectedDay, setSelectedDay] = useState<SelectedDay | null>(null);
-  useEffect(() => {
-    setRangeMode(30);
-    setAnalysisWindow(presetCostWindow(analysisDates, 30));
-  }, [report, analysisDates]);
-  function selectAnalysisRange(mode: AnalysisRangeMode) {
-    setRangeMode(mode);
-    if (mode !== 'custom') setAnalysisWindow(presetCostWindow(analysisDates, mode));
-  }
   return (
     <div className="panel executive-report">
       <DashboardSection
@@ -1728,7 +1641,7 @@ function ExecutiveSummaryTab({
         caption="Where the money goes, by type, application, tag and region"
         aside={<span className="dashboard-section-figure">{formatMoney(s.currentMonthlySpend)}</span>}
       >
-        <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
+        <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={costWindow} />
       </DashboardSection>
 
       <DashboardSection
@@ -1765,24 +1678,13 @@ function ExecutiveSummaryTab({
         <details className="overview-details cost-analysis-details" open onToggle={(event) => {
           if (event.currentTarget.open) setCostDetailsOpened(true);
         }}>
-      <summary>Explore costs and findings <span>Charts, hourly costs, subscriptions and evidence</span></summary>
+      <summary>Explore costs and findings <span>Signals, services, subscriptions and prioritised findings</span></summary>
       {costDetailsOpened && <>
-      <div className="analysis-scope-bar">
-        <span className="analysis-scope-label">Analysis range</span>
-        <TimeRangeSelector mode={rangeMode} window={analysisWindow} dates={analysisDates} onModeChange={selectAnalysisRange} onWindowChange={setAnalysisWindow} />
-      </div>
-
+      {/* This block had its own analysis range and embedded the hourly panel
+          with its own filter row: a third time control and a second set of
+          filters on one page, and a third copy of the daily series. The page
+          window now drives everything, and hourly cost lives on its own tab. */}
       <div className="report-section-stack">
-        <ReportSection
-          id="spend-over-time"
-          title="Spend over time"
-          caption="Range totals and hourly cost"
-          defaultOpen={false}
-          meta={rangeTotal === null ? rangeLabel : `${rangeLabel} · ${formatExactMoney(rangeTotal)}`}
-        >
-          <RangeSpendSummary report={report} formatMoney={formatExactMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
-          <HourlyCostPanel report={report} formatMoney={formatExactMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} embedded />
-        </ReportSection>
 
         {report.operationalSignals.length > 0 && (() => {
           /* The badge counted checks run, not issues found, so three clean
@@ -2308,8 +2210,14 @@ type TreemapNode = {
 };
 
 function CostTreemap({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
-  const [subscriptionId, setSubscriptionId] = useState<string | null>(null);
+  const [chosenSubscription, setSubscriptionId] = useState<string | null>(null);
   const [resourceGroup, setResourceGroup] = useState<string | null>(null);
+  /* With a single subscription the top level was one box filling the panel.
+     Start one level down, at its resource groups, where there is something
+     to compare. */
+  const subscriptionIds = [...new Set(report.costHierarchy.map((item) => item.subscriptionId))];
+  const onlySubscription = subscriptionIds.length === 1 ? subscriptionIds[0] : null;
+  const subscriptionId = chosenSubscription ?? onlySubscription;
   const selectedSubscription = report.costHierarchy.find((item) => item.subscriptionId === subscriptionId);
   const visible = report.costHierarchy.filter((item) => (
     (!subscriptionId || item.subscriptionId === subscriptionId)
@@ -2338,8 +2246,8 @@ function CostTreemap({ report, formatMoney }: { report: FullReport; formatMoney:
       <header>
         <span>Spend hierarchy</span>
         <nav className="treemap-breadcrumb" aria-label="Spend hierarchy level">
-          <button type="button" onClick={() => { setSubscriptionId(null); setResourceGroup(null); }}>Subscriptions</button>
-          {subscriptionId && <><ChevronRight size={12} /><button type="button" onClick={() => setResourceGroup(null)}>{selectedSubscription?.subscriptionName ?? subscriptionId}</button></>}
+          {!onlySubscription && <button type="button" onClick={() => { setSubscriptionId(null); setResourceGroup(null); }}>Subscriptions</button>}
+          {subscriptionId && <>{!onlySubscription && <ChevronRight size={12} />}<button type="button" onClick={() => setResourceGroup(null)}>{onlySubscription ? 'Resource groups' : selectedSubscription?.subscriptionName ?? subscriptionId}</button></>}
           {resourceGroup && <><ChevronRight size={12} /><b>{resourceGroup}</b></>}
         </nav>
       </header>
@@ -2427,7 +2335,10 @@ function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMon
             })}
         </svg>
         <div className="region-ranking">
-          {report.regionSpend.slice(0, 6).map((item) => (
+          {/* Every region with spend, so each dot on the map has its row - the
+              ranking stopped at six while the map drew seven, leaving the
+              seventh (Central India) as an unexplained dot. */}
+          {report.regionSpend.filter((item) => item.monthlySpend > 0).slice(0, 10).map((item) => (
             <span key={item.region}><b>{displayRegion(item.region)}</b><i><em style={{ width: `${Math.max(2, item.pctOfTotal * 100)}%` }} /></i><strong>{formatMoney(item.monthlySpend)}</strong></span>
           ))}
         </div>
@@ -2439,13 +2350,15 @@ function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMon
   );
 }
 
-function ExecutiveSpendVisuals({ report, formatMoney, formatHourlyMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
+function ExecutiveSpendVisuals({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow }) {
+  /* Four views of where the money goes, in a balanced two-by-two. The daily
+     per-tag trend repeated the comparison chart below it, and the tag-set
+     donut was 87% one slice; both belong with tag analysis and now live on
+     the Cost by Tags page, while the untagged share is stated as a takeaway. */
   return (
     <div className="executive-visual-grid">
       <SpendCategoryDonut report={report} formatMoney={formatMoney} />
       <MonthlySpendChart report={report} formatMoney={formatMoney} />
-      <DailySpendTrendChart report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={costWindow} rangeLabel={rangeLabel} />
-      <ApplicationHourlyCostDonut report={report} formatMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={costWindow} />
       <CostTreemap report={report} formatMoney={formatMoney} />
       <RegionSpendMap report={report} formatMoney={formatMoney} />
     </div>
@@ -4130,6 +4043,13 @@ function CostByTagsTab({
     <div className="panel">
       <h2 className="section-title">Cost by Tags/Application</h2>
       <p className="section-subtitle">Grouped by any FOCUS resource tag found (inherited from the resource group when a resource has no tag of its own), with a next-month forecast based on overall spend trend.</p>
+      {/* Moved here from the executive summary: the per-tag daily trend and
+          the tag-set distribution are tag analysis, and on the summary the
+          trend repeated the cost comparison chart. */}
+      <div className="executive-visual-grid tag-trend-visuals">
+        <DailySpendTrendChart report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={costWindowDates(costWindow).length || 30} costWindow={costWindow} rangeLabel={`${reportDate(costWindow.startDate)} - ${reportDate(costWindow.endDate)}`} />
+        <ApplicationHourlyCostDonut report={report} formatMoney={formatHourlyMoney} rangeDays={costWindowDates(costWindow).length || 30} costWindow={costWindow} />
+      </div>
       {!summary?.available || dimensions.length === 0 ? (
         <EvidenceState title="Tag evidence unavailable" detail={summary?.status ?? 'No resource or resource-group tags were present.'} />
       ) : (

@@ -144,47 +144,40 @@ it('surfaces the detailed visuals by default and keeps them mounted across toggl
   expect(details.open).toBe(true);
   const visuals = container.querySelector('.executive-visual-grid');
   expect(visuals).not.toBeNull();
-  expect(container.querySelector('.cost-analysis-details .billing-filters')).not.toBeNull();
+  // One window and one filter row for the page: the explorer no longer embeds a second set.
+  expect(container.querySelector('.cost-analysis-details .billing-filters')).toBeNull();
+  expect(container.querySelector('[aria-label="Time range"]')).toBeNull();
   // The overview carries the headline figures, so the report-context strip does not repeat them here.
   expect(container.querySelector('.report-context-details .summary-strip')).toBeNull();
   expect(container.textContent).not.toContain('Month to date');
   expect(container.querySelector('[aria-label="Report areas"]')?.tagName).toBe('NAV');
   expect(container.querySelector('[aria-pressed="true"]')?.textContent).toContain('Overview');
   expect(container.textContent).toContain('No prioritised findings in this snapshot');
-  expect(container.querySelector('[aria-label="Billing day filter"]')).not.toBeNull();
   await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')); });
   expect(container.querySelector('.executive-visual-grid')).toBe(visuals);
   expect(getCostAnomalies).toHaveBeenCalledOnce();
 });
 
-it('keeps daily trend labels aligned and applies a custom period to every executive cost view', async () => {
-  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
-  const details = container.querySelector<HTMLDetailsElement>('.cost-analysis-details')!;
-  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
+it('keeps daily trend labels aligned and applies the report cost window to the tag views', async () => {
+  const wide = { startDate: '2026-08-09', endDate: '2026-09-07' };
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" costWindow={wide} onCostWindowChange={vi.fn()} />));
+  await act(async () => button('Cost by Tags/Application').click());
 
-  const chart = container.querySelector<SVGElement>('[aria-label="Daily cost trend"]')!;
-  const labels = () => [...chart.querySelectorAll('text')].map((node) => node.textContent);
+  const chart = () => container.querySelector<SVGElement>('[aria-label="Daily cost trend"]')!;
+  const labels = () => [...chart().querySelectorAll('text')].map((node) => node.textContent);
   expect(labels()).toHaveLength(30);
   expect(labels().at(0)).toBe('08-09');
   expect(labels().at(-1)).toBe('09-07');
-  expect(chart.querySelectorAll('text[transform^="rotate(-60"]').length).toBe(30);
-  expect(chart.getAttribute('preserveAspectRatio')).toBeNull();
+  expect(chart().querySelectorAll('text[transform^="rotate(-60"]').length).toBe(30);
+  expect(chart().getAttribute('preserveAspectRatio')).toBeNull();
 
-  await act(async () => button('Custom').click());
-  const start = container.querySelector<HTMLInputElement>('[aria-label="Analysis period start"]')!;
-  const end = container.querySelector<HTMLInputElement>('[aria-label="Analysis period end"]')!;
-  expect(start.value).toBe('2026-08-09');
-  expect(end.value).toBe('2026-09-07');
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(start, '2026-09-01');
-    start.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-
+  const narrow = { startDate: '2026-09-01', endDate: '2026-09-07' };
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" costWindow={narrow} onCostWindowChange={vi.fn()} />));
   expect(labels()).toEqual(['09-01', '09-02', '09-03', '09-04', '09-05', '09-06', '09-07']);
-  expect(chart.querySelectorAll('text[transform]')).toHaveLength(0);
-  expect(container.querySelector('.range-spend-kpi-grid')?.textContent).toContain('7/7 covered export-calendar days');
+  expect(chart().querySelectorAll('text[transform]')).toHaveLength(0);
   const tagDonut = [...container.querySelectorAll<HTMLElement>('.executive-donut-panel')].find((section) => section.textContent?.includes('Average hourly cost by tag set'))!;
   expect(tagDonut.textContent).toContain('7 export days');
+  await act(async () => button('Cost by Hour').click());
   expect(container.querySelector('[aria-label="Cost by hour"]')?.textContent).toContain('2026-09-01 - 2026-09-07');
 });
 
