@@ -1698,6 +1698,15 @@ function ExecutiveSummaryTab({
       </DashboardSection>
 
       <DashboardSection
+        id="spend-distribution-overview"
+        title="Spend Distribution"
+        caption="Where the money goes, by type, application, tag and region"
+        aside={<span className="dashboard-section-figure">{formatMoney(s.currentMonthlySpend)}</span>}
+      >
+        <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
+      </DashboardSection>
+
+      <DashboardSection
         id="cost-comparison"
         title="Cost Comparison"
         caption="Selected period against the preceding one"
@@ -1748,16 +1757,6 @@ function ExecutiveSummaryTab({
         >
           <RangeSpendSummary report={report} formatMoney={formatExactMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
           <HourlyCostPanel report={report} formatMoney={formatExactMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} embedded />
-        </ReportSection>
-
-        <ReportSection
-          id="spend-distribution"
-          title="Spend distribution"
-          caption="Where the money goes, by type, tag and region"
-          defaultOpen={false}
-          meta={formatMoney(s.currentMonthlySpend)}
-        >
-          <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
         </ReportSection>
 
         {report.operationalSignals.length > 0 && (

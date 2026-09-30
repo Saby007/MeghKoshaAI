@@ -11938,13 +11938,83 @@ body {
 
 
 /* ================================================================
-   Executive summary — page rhythm
+   Executive summary — compact density
    ----------------------------------------------------------------
-   The page read as a pile rather than a document: a 5,000px column
-   in which every block announced itself at the same volume. These
-   rules give it a consistent beat and stop short tables from being
-   sliced mid-row, which is what made it look unfinished.
+   The section chrome was generous: 28px frames, 32px between
+   sections, 24px between blocks. Reasonable individually, but across
+   six sections it added roughly 500px of pure air and pushed the
+   substance apart. Tightened to a denser rhythm that still separates
+   ideas clearly.
    ================================================================ */
+
+:root .app-shell.app-shell .executive-report {
+    gap: calc(18px * var(--ui-zoom));
+}
+
+:root .app-shell.app-shell .dashboard-section-header {
+    padding: calc(18px * var(--ui-zoom)) calc(20px * var(--ui-zoom)) 0;
+    gap: var(--space-3);
+}
+
+:root .app-shell.app-shell .dashboard-section-body {
+    gap: calc(14px * var(--ui-zoom));
+    padding: calc(14px * var(--ui-zoom)) calc(20px * var(--ui-zoom)) calc(18px * var(--ui-zoom));
+}
+
+:root .app-shell.app-shell .dashboard-section-heading h2 {
+    font-size: calc(17px * var(--ui-zoom));
+}
+
+/* The headline figure beside a section title, for sections whose
+   aside is a number rather than a control. */
+:root .app-shell.app-shell .dashboard-section-figure {
+    font-variant-numeric: var(--nums);
+    font-weight: var(--weight-semi);
+    font-size: calc(19px * var(--ui-zoom));
+    letter-spacing: var(--tracking-heading-lg);
+    color: var(--color-bone);
+}
+
+/* The hero cells carried the most air, and the primary figure was
+   large enough to need less of it. */
+:root .app-shell.app-shell .executive-hero .kpi-card {
+    padding: calc(14px * var(--ui-zoom)) var(--space-4);
+}
+
+:root .app-shell.app-shell .executive-hero .exec-primary {
+    padding: calc(18px * var(--ui-zoom)) var(--space-4) calc(16px * var(--ui-zoom));
+}
+
+:root .app-shell.app-shell .executive-hero .exec-primary .kpi-value {
+    font-size: clamp(32px, 2.9vw, 44px);
+}
+
+:root .app-shell.app-shell .executive-hero-context .kpi-card {
+    padding: calc(10px * var(--ui-zoom)) var(--space-4);
+}
+
+/* Index rows: shorter, so six of them read as one list rather than
+   six stacked bars. */
+:root .app-shell.app-shell .report-section-stack {
+    gap: 1px;
+}
+
+:root .app-shell.app-shell .report-section-summary {
+    padding-block: calc(9px * var(--ui-zoom));
+}
+
+@media (max-width: 640px) {
+    :root .app-shell.app-shell .executive-report {
+        gap: var(--space-4);
+    }
+    :root .app-shell.app-shell .dashboard-section-header {
+        padding: var(--space-3) var(--space-3) 0;
+    }
+    :root .app-shell.app-shell .dashboard-section-body {
+        gap: var(--space-3);
+        padding: var(--space-3);
+    }
+}
 
 /* Budget tables are short by nature - a handful of budgets per scope.
    The shared table cap sliced the last row in half, which reads as
@@ -11963,12 +12033,6 @@ body {
 /* The six analysis sections are an index: uniform rows, each with its
    headline figure on the right. Give them a consistent height and
    divider so they scan as a list rather than six unrelated blocks. */
-:root .app-shell.app-shell .report-section-stack {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-}
-
 :root .app-shell.app-shell .report-section-meta {
     font-variant-numeric: var(--nums);
     white-space: nowrap;
