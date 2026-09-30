@@ -229,6 +229,27 @@ def test_top_services_are_ranked_from_positive_closed_period_contributors():
     assert report.top_services[0].pct_of_total == 0.6
 
 
+def test_top_services_fold_provider_names_that_differ_only_by_case():
+    report = build_full_report(
+        subscription_ids=["sub-1"],
+        subscription_names={"sub-1": "Sub One"},
+        per_sub_spend={"sub-1": 500.0},
+        resource_graph_rows={},
+        cost_by_resource_id={},
+        service_family_spend={},
+        advisor_recommendations=[],
+        untagged_counts={},
+        service_spend={
+            "Microsoft.App": 262.0,
+            "microsoft.app": 14.0,
+            "Microsoft.Search": 54.0,
+        },
+    )
+
+    assert [item.service_name for item in report.top_services] == ["Microsoft.App", "Microsoft.Search"]
+    assert report.top_services[0].monthly_spend == 276.0
+
+
 def test_executive_dashboard_and_storage_analysis_use_verified_dimensions():
     disk_id = "/subscriptions/sub-1/resourcegroups/rg/providers/microsoft.compute/disks/disk1"
     storage_id = "/subscriptions/sub-1/resourcegroups/rg/providers/microsoft.storage/storageaccounts/store1"

@@ -181,9 +181,27 @@ def _service_display_name(service_name: str) -> str:
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", short_name).replace("_", " ")
 
 
+def _merge_case_variants(service_spend: dict[str, float]) -> dict[str, float]:
+    """Fold provider names that differ only by case into one entry.
+
+    FOCUS exports carry both ``Microsoft.App`` and ``microsoft.app`` for the
+    same service, and ranking them separately listed Azure Container Apps
+    twice while pushing a genuine service out of the top ten. The spelling
+    kept is the one carrying the larger spend.
+    """
+    totals: dict[str, float] = {}
+    spelling: dict[str, tuple[str, float]] = {}
+    for name, spend in service_spend.items():
+        key = name.lower()
+        totals[key] = totals.get(key, 0.0) + spend
+        if key not in spelling or spend > spelling[key][1]:
+            spelling[key] = (name, spend)
+    return {spelling[key][0]: total for key, total in totals.items()}
+
+
 def _top_services(service_spend: dict[str, float], total_spend: float) -> list[ServiceSpendSummary]:
     contributors = sorted(
-        ((name, spend) for name, spend in service_spend.items() if spend > 0),
+        ((name, spend) for name, spend in _merge_case_variants(service_spend).items() if spend > 0),
         key=lambda item: (-item[1], item[0].lower()),
     )[:10]
     return [
