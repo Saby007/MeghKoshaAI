@@ -12597,6 +12597,74 @@ body {
 
 
 /* ================================================================
+   Collapsible sidebar
+   ================================================================ */
+
+:root .app-shell.app-shell .left-nav-sidebar {
+    position: relative;
+}
+
+:root .app-shell.app-shell .left-nav-collapse {
+    position: absolute;
+    z-index: 2;
+    top: var(--space-2);
+    right: var(--space-2);
+    display: inline-grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: var(--border-width) solid transparent;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--color-graphite-mid);
+    cursor: pointer;
+}
+
+:root .app-shell.app-shell .left-nav-collapse:hover {
+    border-color: var(--color-ash-stroke);
+    color: var(--color-bone);
+}
+
+/* Leave room for the toggle beside the page search. */
+:root .app-shell.app-shell .left-nav-sidebar:not(.is-collapsed) .report-nav-search {
+    margin-right: 30px;
+}
+
+@media (min-width: 1051px) {
+    :root .app-shell.app-shell .dashboard-frame:has(.left-nav-sidebar.is-collapsed) {
+        grid-template-columns: calc(52px * var(--ui-zoom)) minmax(0, 1fr);
+    }
+
+    :root .app-shell.app-shell .left-nav-sidebar.is-collapsed {
+        padding-top: calc(40px * var(--ui-zoom));
+    }
+
+    :root .app-shell.app-shell .left-nav-sidebar.is-collapsed .left-nav-collapse {
+        right: 50%;
+        transform: translateX(50%);
+    }
+
+    :root .app-shell.app-shell .left-nav-sidebar.is-collapsed :is(.report-nav-search, .left-nav-children, .report-nav-chevron, .left-nav-group-toggle>span, .report-nav-empty) {
+        display: none;
+    }
+
+    :root .app-shell.app-shell .left-nav-sidebar.is-collapsed .left-nav-group-toggle {
+        justify-content: center;
+        padding-inline: 0;
+    }
+}
+
+/* Below this width the sidebar is the mobile page menu; collapsing does not
+   apply there, so a remembered collapsed state cannot hide the menu. */
+@media (max-width: 1050px) {
+    :root .app-shell.app-shell .left-nav-collapse {
+        display: none;
+    }
+}
+
+
+/* ================================================================
    Minimum text size
    ----------------------------------------------------------------
    Successive compaction passes drove some labels to 9.5-10px, and the

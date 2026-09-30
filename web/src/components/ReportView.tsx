@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, Inbox, LayoutDashboard, LoaderCircle, Mail, Menu, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
+import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, Inbox, LayoutDashboard, LoaderCircle, Mail, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
 import worldMapUrl from '@svg-maps/world/world.svg?url';
 import {
   downloadCustomReport,
@@ -335,6 +335,15 @@ function SubscriptionReferences({ subscriptions }: { subscriptions: Subscription
 export function LeftNavSidebar({ activeTab, onSelect }: { activeTab: Tab; onSelect: (tab: Tab) => void }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<PrimaryNav>>(() => new Set(['dashboard', 'costManagement']));
   const [mobileOpen, setMobileOpen] = useState(false);
+  /* The sidebar held ~230px on every page but its menu ends about a third of
+     the way down. Collapsed, it keeps only the group icons and gives the
+     width to the report; the choice is remembered. */
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return window.localStorage.getItem('mkai-nav-collapsed') === 'true'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('mkai-nav-collapsed', String(collapsed)); } catch { /* storage unavailable */ }
+  }, [collapsed]);
   const [pageQuery, setPageQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const query = pageQuery.trim().toLocaleLowerCase();
@@ -352,7 +361,10 @@ export function LeftNavSidebar({ activeTab, onSelect }: { activeTab: Tab; onSele
     onSelect(page);
   }
   return (
-    <nav className={`left-nav-sidebar${mobileOpen ? ' is-open' : ''}`} aria-label="Report navigation">
+    <nav className={`left-nav-sidebar${mobileOpen ? ' is-open' : ''}${collapsed ? ' is-collapsed' : ''}`} aria-label="Report navigation">
+      <button type="button" className="left-nav-collapse" aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'} title={collapsed ? 'Expand navigation' : 'Collapse navigation'} aria-expanded={!collapsed} onClick={() => setCollapsed((value) => !value)}>
+        {collapsed ? <PanelLeftOpen size={16} aria-hidden="true" /> : <PanelLeftClose size={16} aria-hidden="true" />}
+      </button>
       <button type="button" className="report-nav-mobile-toggle" aria-label="Report pages" aria-expanded={mobileOpen} aria-controls="report-nav-groups" onClick={() => setMobileOpen((open) => !open)}>
         <Menu size={18} aria-hidden="true" /><span>{activeTab}</span><ChevronRight size={16} aria-hidden="true" />
       </button>
@@ -376,12 +388,21 @@ export function LeftNavSidebar({ activeTab, onSelect }: { activeTab: Tab; onSele
             aria-expanded={!!query || expandedGroups.has(group)}
             aria-controls={`report-nav-${group}`}
             disabled={!!query}
-            onClick={() => setExpandedGroups((current) => {
-              const next = new Set(current);
-              if (next.has(group)) next.delete(group);
-              else next.add(group);
-              return next;
-            })}
+            title={collapsed ? PRIMARY_NAV_LABELS[group] : undefined}
+            onClick={() => {
+              /* In the icon rail a group icon reopens the sidebar on that group. */
+              if (collapsed) {
+                setCollapsed(false);
+                setExpandedGroups((current) => new Set([...current, group]));
+                return;
+              }
+              setExpandedGroups((current) => {
+                const next = new Set(current);
+                if (next.has(group)) next.delete(group);
+                else next.add(group);
+                return next;
+              });
+            }}
           >
             <Icon className="report-nav-group-icon" size={16} aria-hidden="true" />
             <span>{PRIMARY_NAV_LABELS[group]}</span>

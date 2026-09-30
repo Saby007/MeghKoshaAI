@@ -48,6 +48,22 @@ it('collapses the mobile report menu after selecting a view', async () => {
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
 });
 
+it('collapses to an icon rail, reopens on the chosen group, and remembers the choice', async () => {
+  window.localStorage.removeItem('mkai-nav-collapsed');
+  await act(async () => root.render(<LeftNavSidebar activeTab="Executive Summary" onSelect={vi.fn()} />));
+  const nav = container.querySelector('.left-nav-sidebar')!;
+  const toggle = container.querySelector<HTMLButtonElement>('.left-nav-collapse')!;
+  expect(nav.classList.contains('is-collapsed')).toBe(false);
+  await act(async () => toggle.click());
+  expect(nav.classList.contains('is-collapsed')).toBe(true);
+  expect(toggle.getAttribute('aria-label')).toBe('Expand navigation');
+  expect(window.localStorage.getItem('mkai-nav-collapsed')).toBe('true');
+  await act(async () => button('Recommendations').click());
+  expect(nav.classList.contains('is-collapsed')).toBe(false);
+  expect(button('Recommendations').getAttribute('aria-expanded')).toBe('true');
+  window.localStorage.removeItem('mkai-nav-collapsed');
+});
+
 it('finds report pages inside collapsed groups and resets the search after selection', async () => {
   const onSelect = vi.fn();
   await act(async () => root.render(<LeftNavSidebar activeTab="Executive Summary" onSelect={onSelect} />));
