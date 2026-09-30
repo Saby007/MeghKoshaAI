@@ -125,10 +125,73 @@ export function ResourceCostTable({ details, window, previous, filters = {}, for
 /* The daily figures behind the chart. Extracted so the page can place
    them where it wants - they are reference data, not part of reading
    the chart - while still driving the same day drilldown. */
-export function DailySubscriptionValues({ details, window, filters = {}, formatMoney, onSelectDay }: { details?: CostDetailSummary; window: CostWindow; filters?: CostFilter; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void }) {
+export function DailySubscriptionValues({ details, window, filters = {}, formatMoney, onSelectDay, collapsible = true }: { details?: CostDetailSummary; window: CostWindow; filters?: CostFilter; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void; collapsible?: boolean }) {
   const series = dailySubscriptionCosts(details, window, filters);
   if (!series.length) return null;
-  return <details className="cost-daily-values"><summary>Daily subscription amounts</summary><div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Daily subscription comparison table"><table className="data-table billing-table"><thead><tr><th>Subscription</th><th>Date</th><th>Selected cost</th><th>Previous date</th><th>Previous cost</th></tr></thead><tbody>{series.flatMap((item) => item.days.map((day) => <tr key={`${item.subscriptionId}:${day.date}`}><th>{item.subscriptionName}</th><td>{onSelectDay ? <button type="button" className="finding-link" onClick={() => onSelectDay(day.date, day.previousDate, item.subscriptionId)}>{day.date}</button> : day.date}</td><td>{money(day.current, formatMoney)}</td><td>{day.previousDate}</td><td>{money(day.previous, formatMoney)}</td></tr>))}</tbody></table></div></details>;
+  const tables = <DailySubscriptionTables series={series} formatMoney={formatMoney} onSelectDay={onSelectDay} />;
+  if (!collapsible) return tables;
+  return <details className="cost-daily-values"><summary>Daily subscription amounts</summary>{tables}</details>;
+}
+
+/* One table per subscription. Repeating the subscription name on every
+   row turned the widest column into the least informative one, so the
+   name is promoted to a group header that also carries the period
+   total - and each row now states the change outright rather than
+   leaving the reader to subtract two columns in their head. */
+function DailySubscriptionTables({ series, formatMoney, onSelectDay }: { series: ReturnType<typeof dailySubscriptionCosts>; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void }) {
+  return <div className="daily-cost-groups">
+    {series.map((item) => {
+      const measured = item.days.filter((day) => day.current !== null && day.previous !== null);
+      const total = item.days.reduce((sum, day) => sum + (day.current ?? 0), 0);
+      const previousTotal = measured.reduce((sum, day) => sum + (day.previous ?? 0), 0);
+      const currentComparable = measured.reduce((sum, day) => sum + (day.current ?? 0), 0);
+      return <section className="daily-cost-group" key={item.subscriptionId}>
+        <header className="daily-cost-group-header">
+          <span className="daily-cost-group-name">{item.subscriptionName}</span>
+          <span className="daily-cost-group-total">
+            <span className="daily-cost-group-amount">{formatMoney(total)}</span>
+            {measured.length > 0 && <CostDelta current={currentComparable} previous={previousTotal} formatMoney={formatMoney} />}
+          </span>
+        </header>
+        <div className="billing-table-scroll" tabIndex={0} role="region" aria-label={`Daily cost for ${item.subscriptionName}`}>
+          <table className="data-table billing-table daily-cost-table">
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Cost</th>
+                <th scope="col">Change</th>
+                <th scope="col">Compared with</th>
+                <th scope="col">Previous cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {item.days.map((day) => (
+                <tr key={`${item.subscriptionId}:${day.date}`}>
+                  <th scope="row">{onSelectDay ? <button type="button" className="finding-link" onClick={() => onSelectDay(day.date, day.previousDate, item.subscriptionId)}>{day.date}</button> : day.date}</th>
+                  <td className="daily-cost-figure">{money(day.current, formatMoney)}</td>
+                  <td className="daily-cost-figure"><CostDelta current={day.current} previous={day.previous} formatMoney={formatMoney} /></td>
+                  <td className="daily-cost-reference">{day.previousDate}</td>
+                  <td className="daily-cost-figure daily-cost-reference">{money(day.previous, formatMoney)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>;
+    })}
+  </div>;
+}
+
+function CostDelta({ current, previous, formatMoney }: { current: number | null; previous: number | null; formatMoney: Formatter }) {
+  if (current === null || previous === null) return <span className="cost-delta is-flat">—</span>;
+  const difference = current - previous;
+  const rounded = Math.abs(difference) < 0.005 ? 0 : difference;
+  if (rounded === 0) return <span className="cost-delta is-flat">No change</span>;
+  const share = previous === 0 ? null : difference / previous;
+  return <span className={`cost-delta ${difference > 0 ? 'is-up' : 'is-down'}`}>
+    {difference > 0 ? '▲' : '▼'} {formatMoney(Math.abs(difference))}
+    {share !== null && <i>{Math.abs(share * 100).toFixed(1)}%</i>}
+  </span>;
 }
 
 export function CostComparisonChart({ details, window, filters = {}, formatMoney, onSelectDay, showDailyValues = true }: { details?: CostDetailSummary; window: CostWindow; filters?: CostFilter; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void; showDailyValues?: boolean }) {

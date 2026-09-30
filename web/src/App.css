@@ -711,8 +711,9 @@ body {
 .scope-ribbon-main {
     min-height: 58px;
     display: flex;
-    align-items: stretch;
-    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+    padding-left: 18px;
 }
 
 .scope-disclosure {
@@ -917,6 +918,10 @@ body {
     transition-delay: 0s;
 }
 
+.scope-ribbon.has-select-open {
+    overflow: visible;
+}
+
 .scope-panel-inner {
     padding: 14px 18px 16px;
     background: var(--color-carbon-lift);
@@ -927,7 +932,7 @@ body {
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 14px;
+    margin-bottom: 0;
     font-family: var(--font-geist-mono);
     font-size: 10px;
     letter-spacing: 0;
@@ -935,11 +940,40 @@ body {
     color: var(--color-warm-granite);
 }
 
-.scope-panel-controls,
+.scope-panel-title {
+    flex: none;
+    font-family: var(--font-geist-mono);
+    font-size: 10px;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--color-warm-granite);
+}
+
+.scope-modified {
+    flex: none;
+    padding: 1px 6px;
+    border: 1px solid rgba(238, 96, 24, 0.55);
+    border-radius: 3px;
+    font-family: var(--font-geist-mono);
+    font-size: 9px;
+    font-style: normal;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    color: var(--color-signal-orange);
+}
+
 .scope-stale-control {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 10px;
+    font-family: var(--font-geist-mono);
+    font-size: 10px;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--color-warm-granite);
 }
 
 .scope-stale-control select {
@@ -950,11 +984,6 @@ body {
     background: var(--color-carbon-lift);
     color: var(--color-bone);
     font: inherit;
-}
-
-.scope-bulk-actions {
-    display: flex;
-    gap: 8px;
 }
 
 .stale-table-scroll {
@@ -1415,39 +1444,164 @@ body {
     }
 }
 
-.scope-bulk-actions button {
+.subscription-select {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-geist);
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.subscription-select-trigger {
+    width: 100%;
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    border: 1px solid var(--color-ash-stroke);
+    border-radius: 4px;
+    background: var(--color-carbon-lift);
+    color: var(--color-bone);
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.subscription-select-trigger:hover:not(:disabled) {
+    border-color: var(--color-graphite-mid);
+}
+
+.subscription-select-trigger:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.subscription-select-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.subscription-select-count {
+    flex: none;
+    font-family: var(--font-geist-mono);
+    font-size: 9.5px;
+    color: var(--color-warm-granite);
+}
+
+.subscription-select-caret {
+    flex: none;
+    color: var(--color-warm-granite);
+    transition: transform 0.18s var(--ease-mechanical);
+}
+
+.subscription-select.is-open .subscription-select-caret {
+    transform: rotate(180deg);
+}
+
+.subscription-select-menu {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    padding: 4px;
+    border: 1px solid var(--color-ash-stroke);
+    border-radius: 4px;
+    background: var(--color-carbon-lift);
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5);
+}
+
+.subscription-select-menu[hidden] {
+    display: none;
+}
+
+.subscription-select-actions {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.subscription-select-actions button {
+    flex: 1;
+    height: 28px;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
-    padding: 7px 10px;
     border: 1px solid var(--color-ash-stroke);
-    border-radius: 3px;
-    background: transparent;
-    color: var(--color-pale-stone);
-    font-family: var(--font-geist-mono);
-    font-size: 10px;
-    letter-spacing: 0;
-    text-transform: uppercase;
-    cursor: pointer;
-}
-
-.scope-bulk-actions button:hover:not(:disabled) {
-    border-color: var(--color-pale-stone);
+    border-radius: 4px;
+    background: none;
     color: var(--color-bone);
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-.scope-bulk-actions button:disabled {
-    opacity: 0.35;
+.subscription-select-actions button:hover:not(:disabled) {
+    border-color: var(--color-graphite-mid);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.subscription-select-actions button:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
+}
+
+.scope-ribbon-main .subscription-skeleton {
+    flex: 1;
+}
+
+.scope-ribbon-main .empty-state {
+    flex: 1;
+    margin: 0;
+    text-transform: none;
+}
+
+.subscription-select-search {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 4px;
+    padding: 0 8px;
+    border: 1px solid var(--color-ash-stroke);
+    border-radius: 4px;
+    color: var(--color-warm-granite);
+}
+
+.subscription-select-search input {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    border: 0;
+    outline: none;
+    background: none;
+    color: var(--color-bone);
+    font-size: 12px;
+}
+
+.subscription-select-empty {
+    margin: 0;
+    padding: 10px;
+    font-size: 12px;
+    color: var(--color-warm-granite);
 }
 
 .subscription-grid {
     list-style: none;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     margin: 0;
     padding: 0;
+    max-height: 272px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .subscription-grid li {
@@ -1469,11 +1623,11 @@ body {
 }
 
 .subscription-grid label {
-    min-height: 62px;
+    min-height: 32px;
     display: flex;
     align-items: center;
-    gap: 11px;
-    padding: 10px 12px;
+    gap: 10px;
+    padding: 4px 10px;
     cursor: pointer;
 }
 
@@ -1485,8 +1639,8 @@ body {
 }
 
 .subscription-check {
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
     flex: none;
     display: grid;
     place-items: center;
@@ -1502,8 +1656,11 @@ body {
 
 .subscription-grid label>span:last-child {
     min-width: 0;
+    flex: 1;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 12px;
 }
 
 .subscription-grid strong {
@@ -1511,28 +1668,30 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--color-bone);
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 500;
 }
 
 .subscription-grid small {
+    flex: none;
+    margin-left: auto;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--font-geist-mono);
-    font-size: 9px;
+    font-size: 9.5px;
     letter-spacing: 0;
     color: var(--color-warm-granite);
 }
 
 .subscription-skeleton {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .subscription-skeleton i {
-    height: 62px;
+    height: 32px;
     border: 1px solid var(--color-carbon-lift);
     border-radius: 4px;
     background: var(--color-carbon-lift);
@@ -2754,12 +2913,6 @@ body {
         min-width: 122px;
         padding: 0 12px;
     }
-    .subscription-grid {
-        grid-template-columns: 1fr 1fr;
-    }
-    .subscription-skeleton {
-        grid-template-columns: 1fr 1fr;
-    }
     .currency-control>span {
         display: none;
     }
@@ -2844,40 +2997,36 @@ body {
     }
     .scope-ribbon-main {
         flex-direction: column;
-    }
-    .scope-disclosure {
-        padding: 13px 14px;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px 14px 0;
     }
     .scope-run-area {
         border-top: 1px solid var(--color-ash-stroke);
         border-left: 0;
         padding: 9px 12px;
+        margin: 0 -14px;
     }
     .scope-run-button {
         width: 100%;
     }
-    .scope-panel-header {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-    .scope-panel-controls {
+    .subscription-select {
         width: 100%;
-        align-items: stretch;
-        flex-direction: column;
     }
     .scope-stale-control {
         justify-content: space-between;
     }
-    .scope-bulk-actions {
-        width: 100%;
+    .subscription-grid label>span:last-child {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0;
     }
-    .scope-bulk-actions button {
-        flex: 1;
-        justify-content: center;
+    .subscription-grid small {
+        margin-left: 0;
+        max-width: 100%;
     }
-    .subscription-grid,
-    .subscription-skeleton {
-        grid-template-columns: 1fr;
+    .subscription-grid label {
+        min-height: 40px;
     }
     .assessment-progress {
         grid-template-columns: 36px minmax(0, 1fr);
@@ -11473,4 +11622,316 @@ body {
         0 0 0 1px rgb(79 168 245 / .10),
         0 18px 48px rgb(0 0 0 / .55),
         0 0 36px rgb(38 110 200 / .16);
+}
+
+
+/* ================================================================
+   Executive Summary hero
+   ----------------------------------------------------------------
+   Six equal cards strung across a wide screen read as a row of
+   receipts: nothing leads, so the eye has nowhere to land. This
+   makes it one enclosed surface divided by hairlines, with a single
+   dominant number, the two money outcomes beside it, and the
+   contextual counts demoted to a quiet strip underneath.
+   ================================================================ */
+
+:root .app-shell.app-shell .executive-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: 1px;
+    margin: 0;
+    background: var(--color-ash-stroke);
+    border: 1px solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell .executive-hero-money {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--color-ash-stroke);
+}
+
+:root .app-shell.app-shell .executive-hero-context {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--color-ash-stroke);
+}
+
+/* Every cell is flush inside the shared frame: no nested rounding,
+   no nested borders, no shadow. The hairline gaps do the dividing. */
+:root .app-shell.app-shell .executive-hero .kpi-card {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--color-surface);
+    padding: var(--space-4);
+    gap: 0;
+}
+
+:root .app-shell.app-shell .executive-hero .kpi-card:hover {
+    border: 0;
+    box-shadow: none;
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell.app-shell .executive-hero .kpi-label {
+    margin-bottom: var(--space-1);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 10px;
+    color: var(--color-graphite-mid);
+}
+
+/* The one number the page is actually about. */
+:root .app-shell.app-shell .executive-hero .exec-primary {
+    justify-content: center;
+    padding: var(--space-5) var(--space-5) var(--space-4);
+    text-align: left;
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--color-bone) 4%, var(--color-surface)) 0%,
+            var(--color-surface) 62%);
+}
+
+:root .app-shell.app-shell .executive-hero .exec-primary:hover {
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--color-bone) 7%, var(--color-surface)) 0%,
+            var(--color-surface-hover) 62%);
+}
+
+:root .app-shell.app-shell .executive-hero .exec-primary .kpi-value {
+    font-size: clamp(36px, 3.4vw, 52px);
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+}
+
+:root .app-shell.app-shell .executive-hero .exec-primary .kpi-note {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-top: var(--space-3);
+    font-size: 12px;
+}
+
+/* The headline figure stays neutral so it reads as the subject, not as
+   an alarm; the judgement lives in the pill next to it. */
+:root .app-shell.app-shell .executive-hero .exec-primary .kpi-value {
+    color: var(--color-bone);
+}
+
+:root .app-shell.app-shell .exec-delta {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: var(--weight-semi);
+    letter-spacing: 0;
+}
+
+:root .app-shell.app-shell .exec-delta.up {
+    color: var(--color-cost-increase);
+    background: color-mix(in srgb, var(--color-cost-increase) 14%, transparent);
+}
+
+:root .app-shell.app-shell .exec-delta.down {
+    color: var(--color-metric-green);
+    background: color-mix(in srgb, var(--color-metric-green) 14%, transparent);
+}
+
+:root .app-shell.app-shell .exec-delta-caption {
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell .executive-hero-money .kpi-value {
+    font-size: 26px;
+    line-height: 1.1;
+}
+
+/* Counts are reference material, not headline figures. */
+:root .app-shell.app-shell .executive-hero-context .kpi-card {
+    padding: var(--space-3) var(--space-4);
+}
+
+:root .app-shell.app-shell .executive-hero-context .kpi-value {
+    font-size: 17px;
+    line-height: 1.2;
+}
+
+:root .app-shell.app-shell .executive-hero-context .kpi-note {
+    font-size: 11px;
+}
+
+/* Grouped rather than stretched: pinning the link to the floor of a
+   tall cell opens a void that reads as unfinished. */
+:root .app-shell.app-shell .executive-hero .kpi-card-link-label {
+    margin-top: var(--space-3);
+    padding-top: 0;
+}
+
+:root .app-shell.app-shell .executive-hero-money .kpi-card {
+    justify-content: center;
+}
+
+@media (max-width: 1100px) {
+    :root .app-shell.app-shell .executive-hero {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    :root .app-shell.app-shell .executive-hero .exec-primary .kpi-value {
+        font-size: 38px;
+    }
+}
+
+@media (max-width: 640px) {
+    :root .app-shell.app-shell .executive-hero-money,
+    :root .app-shell.app-shell .executive-hero-context {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    :root .app-shell.app-shell .executive-hero .exec-primary {
+        padding: var(--space-4);
+    }
+}
+
+
+/* ================================================================
+   Daily Cost Breakdown
+   ----------------------------------------------------------------
+   The old table repeated the subscription name on every row, which
+   made the widest column the least informative one, and asked the
+   reader to subtract "selected cost" from "previous cost" themselves.
+   The name is now a group header carrying the period total, and the
+   change is stated per row.
+   ================================================================ */
+
+:root .app-shell.app-shell .daily-cost-groups {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+:root .app-shell.app-shell .daily-cost-group {
+    border: 1px solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell .daily-cost-group-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--color-ash-stroke);
+    background: var(--color-surface);
+}
+
+:root .app-shell.app-shell .daily-cost-group-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: var(--weight-semi);
+    color: var(--color-bone);
+}
+
+:root .app-shell.app-shell .daily-cost-group-total {
+    flex: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-2);
+}
+
+:root .app-shell.app-shell .daily-cost-group-amount {
+    font-variant-numeric: var(--nums);
+    font-weight: var(--weight-semi);
+    font-size: var(--font-size-md);
+    color: var(--color-bone);
+}
+
+/* Figures align on the decimal; reference columns recede so the two
+   columns that matter - cost and change - carry the row. */
+:root .app-shell.app-shell .daily-cost-table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+:root .app-shell.app-shell .daily-cost-table th:first-child {
+    width: 18%;
+}
+
+:root .app-shell.app-shell .daily-cost-table th:nth-child(2) {
+    width: 17%;
+}
+
+:root .app-shell.app-shell .daily-cost-table th:nth-child(3) {
+    width: 24%;
+}
+
+:root .app-shell.app-shell .daily-cost-table th:nth-child(4) {
+    width: 21%;
+}
+
+:root .app-shell.app-shell .daily-cost-table th:nth-child(5) {
+    width: 20%;
+}
+
+:root .app-shell.app-shell .daily-cost-table :is(td, th) {
+    white-space: nowrap;
+}
+
+:root .app-shell.app-shell .daily-cost-figure {
+    text-align: right;
+    font-variant-numeric: var(--nums);
+}
+
+:root .app-shell.app-shell .daily-cost-reference {
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell .daily-cost-table thead th:not(:first-child) {
+    text-align: right;
+}
+
+:root .app-shell.app-shell .daily-cost-table thead th:nth-child(4) {
+    text-align: left;
+}
+
+:root .app-shell.app-shell .cost-delta {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    font-variant-numeric: var(--nums);
+}
+
+:root .app-shell.app-shell .cost-delta.is-up {
+    color: var(--color-cost-increase);
+}
+
+:root .app-shell.app-shell .cost-delta.is-down {
+    color: var(--color-metric-green);
+}
+
+:root .app-shell.app-shell .cost-delta.is-flat {
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell .cost-delta i {
+    font-style: normal;
+    font-size: var(--font-size-xs);
+    opacity: 0.75;
+}
+
+@media (max-width: 640px) {
+    :root .app-shell.app-shell .daily-cost-group-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-1);
+    }
 }

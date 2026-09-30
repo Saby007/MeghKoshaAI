@@ -132,19 +132,17 @@ it('checks service retirements only on request and distinguishes failed sources 
   expect(container.textContent).not.toContain('No resource-specific retirements were returned');
 });
 
-it('keeps the overview compact and mounts detailed visuals only on demand without dropping evidence', async () => {
+it('surfaces the detailed visuals by default and keeps them mounted across toggles', async () => {
   await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
   const details = container.querySelector<HTMLDetailsElement>('.cost-analysis-details')!;
-  expect(details.open).toBe(false);
-  expect(container.querySelector('.executive-visual-grid')).toBeNull();
-  expect(container.querySelector('.cost-analysis-details .billing-filters')).toBeNull();
+  expect(details.open).toBe(true);
+  const visuals = container.querySelector('.executive-visual-grid');
+  expect(visuals).not.toBeNull();
+  expect(container.querySelector('.cost-analysis-details .billing-filters')).not.toBeNull();
   expect(container.textContent).toContain('Assessed month');
   expect(container.textContent).not.toContain('Month to date');
   expect(container.querySelector('[aria-label="Spend by category"]')?.tagName).toBe('NAV');
   expect(container.querySelector('[aria-pressed="true"]')?.textContent).toContain('All spend');
-  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
-  const visuals = container.querySelector('.executive-visual-grid');
-  expect(visuals).not.toBeNull();
   expect(container.textContent).toContain('No prioritised findings in this snapshot');
   expect(container.querySelector('[aria-label="Billing day filter"]')).not.toBeNull();
   await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')); });

@@ -602,6 +602,17 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
     maximumFractionDigits: 4,
   });
   const formatHourlyMoney: MoneyFormatter = (value) => hourlyFormatter.format(value * conversionRate);
+  // Daily subscription figures sit between the two: whole dollars make the
+  // arithmetic look broken ($32 - $7 printing as $24) and four decimals are
+  // noise at that size, so they get a fixed two.
+  const exactFormatter = new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: displayCurrency,
+    currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const formatExactMoney: MoneyFormatter = (value) => exactFormatter.format(value * conversionRate);
   const currencyNames = new Intl.DisplayNames(undefined, { type: 'currency' });
   const currencyOptions = exchangeRates ? Object.keys(exchangeRates.rates).sort() : [sourceCurrency];
 
@@ -744,6 +755,7 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
               onOpenFinding={openFinding}
               formatMoney={formatMoney}
               formatHourlyMoney={formatHourlyMoney}
+              formatExactMoney={formatExactMoney}
               displayCurrency={displayCurrency}
               anomalyState={anomalyState}
               onOpenAnomalies={() => selectTab('Cost Anomalies')}
@@ -1446,7 +1458,7 @@ function TimeRangeSelector({ mode, window, dates, onModeChange, onWindowChange }
   );
 }
 
-function RangeSpendSummary({ report, formatMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
+function RangeSpendSummary({ report, formatMoney, formatHourlyMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
   const result = billingWindow(report, { rangeDays, startDate: costWindow.startDate, endDate: costWindow.endDate });
   const avgDaily = result.totalCost === null ? null : result.totalCost / result.coveredDays;
   return (
@@ -1459,7 +1471,7 @@ function RangeSpendSummary({ report, formatMoney, rangeDays, costWindow, rangeLa
       <div className="kpi-card">
         <div className="kpi-label">Average daily spend</div>
         <div className="kpi-value">{avgDaily === null ? 'Unavailable' : formatMoney(avgDaily)}</div>
-        <div className="kpi-note">Average hourly: {result.averageHourlyCost === null ? 'Unavailable' : formatMoney(result.averageHourlyCost)}</div>
+        <div className="kpi-note">Average hourly: {result.averageHourlyCost === null ? 'Unavailable' : formatHourlyMoney(result.averageHourlyCost)}</div>
       </div>
     </div>
   );
@@ -1542,6 +1554,7 @@ function ExecutiveSummaryTab({
   onOpenFinding,
   formatMoney,
   formatHourlyMoney,
+  formatExactMoney,
   displayCurrency,
   anomalyState,
   onOpenAnomalies,
@@ -1558,6 +1571,7 @@ function ExecutiveSummaryTab({
   onOpenFinding: (category: string) => void;
   formatMoney: MoneyFormatter;
   formatHourlyMoney: MoneyFormatter;
+  formatExactMoney: MoneyFormatter;
   displayCurrency: string;
   anomalyState: AnomalyState;
   onOpenAnomalies: () => void;
@@ -1579,7 +1593,7 @@ function ExecutiveSummaryTab({
   const rangeLabel = rangeMode === 'custom'
     ? `${reportDate(analysisWindow.startDate)} - ${reportDate(analysisWindow.endDate)}`
     : `Last ${rangeMode} days`;
-  const [costDetailsOpened, setCostDetailsOpened] = useState(false);
+  const [costDetailsOpened, setCostDetailsOpened] = useState(true);
   /* The daily figures sit at the end of the report rather than under the
      chart, so the day selection they drive is owned here and handed to the
      cost window instead of living inside it. */
@@ -1606,48 +1620,61 @@ function ExecutiveSummaryTab({
           </div>
         }
       >
-        <div className="kpi-grid executive-hero-grid">
-          <button type="button" className={`kpi-card kpi-link-card ${s.spendChangePercentage === null || s.spendChangePercentage === 0 ? '' : s.spendChangePercentage > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()} onClick={() => onNavigate('History')} aria-label="Open cost history">
+        <div className="executive-hero">
+          <button type="button" className={`kpi-card kpi-link-card exec-primary ${s.spendChangePercentage === null || s.spendChangePercentage === 0 ? '' : s.spendChangePercentage > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()} onClick={() => onNavigate('History')} aria-label="Open cost history">
             <div className="kpi-label">Total monthly spend</div>
             <div className="kpi-value">{formatMoney(s.currentMonthlySpend)}</div>
             <div className="kpi-note">
               {s.spendChangePercentage === null
                 ? `${completeness.availableSubscriptions} complete exports · comparison accrues next month`
-                : `${s.spendChangePercentage >= 0 ? '▲' : '▼'} ${Math.abs(s.spendChangePercentage * 100).toFixed(1)}% vs previous complete month`}
+                : (
+                  <>
+                    <span className={`exec-delta ${s.spendChangePercentage >= 0 ? 'up' : 'down'}`}>
+                      {s.spendChangePercentage >= 0 ? '▲' : '▼'} {Math.abs(s.spendChangePercentage * 100).toFixed(1)}%
+                    </span>
+                    <span className="exec-delta-caption">vs previous complete month</span>
+                  </>
+                )}
             </div>
             <span className="kpi-card-link-label">Open history <ChevronRight size={14} aria-hidden="true" /></span>
           </button>
-          <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open stale and orphaned resources">
-            <div className="kpi-label">Estimated wastage</div>
-            <div className="kpi-value">{formatMoney(s.estimatedWastageMonth)}</div>
-            <div className="kpi-note">{percent(s.pctWastage)} of total · includes billed cost at risk</div>
-            <span className="kpi-card-link-label">Review waste <ChevronRight size={14} aria-hidden="true" /></span>
-          </button>
-          <button type="button" className="kpi-card kpi-link-card positive" onClick={() => onNavigate('Savings Roadmap')} aria-label="Open savings roadmap">
-            <div className="kpi-label">Potential savings</div>
-            <div className="kpi-value">{formatMoney(s.potentialSavingsMonth)}</div>
-            <div className="kpi-note">{percent(s.pctRecoverable)} of total bill · estimated / month</div>
-            <span className="kpi-card-link-label">Open roadmap <ChevronRight size={14} aria-hidden="true" /></span>
-          </button>
-          <div className="kpi-card">
-            <div className="kpi-label">{s.idleReviewCandidates == null ? 'Active resources' : 'Other billed resources'}</div>
-            <div className="kpi-value">{s.activeResources.toLocaleString()}</div>
-            <div className="kpi-note">Cost-bearing resources across {completeness.availableSubscriptions} subscriptions</div>
+
+          <div className="executive-hero-money">
+            <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open stale and orphaned resources">
+              <div className="kpi-label">Estimated wastage</div>
+              <div className="kpi-value">{formatMoney(s.estimatedWastageMonth)}</div>
+              <div className="kpi-note">{percent(s.pctWastage)} of total · includes billed cost at risk</div>
+              <span className="kpi-card-link-label">Review waste <ChevronRight size={14} aria-hidden="true" /></span>
+            </button>
+            <button type="button" className="kpi-card kpi-link-card positive" onClick={() => onNavigate('Savings Roadmap')} aria-label="Open savings roadmap">
+              <div className="kpi-label">Potential savings</div>
+              <div className="kpi-value">{formatMoney(s.potentialSavingsMonth)}</div>
+              <div className="kpi-note">{percent(s.pctRecoverable)} of total bill · estimated / month</div>
+              <span className="kpi-card-link-label">Open roadmap <ChevronRight size={14} aria-hidden="true" /></span>
+            </button>
           </div>
-          <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open confirmed idle resources">
-            <div className="kpi-label">{s.idleReviewCandidates == null ? 'Idle resources (legacy)' : 'Confirmed idle resources'}</div>
-            <div className="kpi-value">{s.idleResources.toLocaleString()}</div>
-            {s.idleReviewCandidates != null && <div className="kpi-note">{s.idleReviewCandidates.toLocaleString()} candidates require evidence or owner review</div>}
-            <div className="kpi-note">{percent(s.idleResourcePercentage)} of assessed active + idle resources</div>
-            <span className="kpi-card-link-label">Review resources <ChevronRight size={14} aria-hidden="true" /></span>
-          </button>
-          <div className="kpi-card">
-            <div className="kpi-label">Advisor score</div>
-            <div className="kpi-value">{report.advisorScore.score === null ? '—' : `${report.advisorScore.score.toFixed(0)} / 100`}</div>
-            <div className="kpi-note">
-              {report.advisorScore.monthlyChange === null
-                ? report.advisorScore.status
-                : `${report.advisorScore.monthlyChange >= 0 ? '▲' : '▼'} ${Math.abs(report.advisorScore.monthlyChange).toFixed(1)} pts this month`}
+
+          <div className="executive-hero-context">
+            <div className="kpi-card">
+              <div className="kpi-label">{s.idleReviewCandidates == null ? 'Active resources' : 'Other billed resources'}</div>
+              <div className="kpi-value">{s.activeResources.toLocaleString()}</div>
+              <div className="kpi-note">Cost-bearing resources across {completeness.availableSubscriptions} subscriptions</div>
+            </div>
+            <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open confirmed idle resources">
+              <div className="kpi-label">{s.idleReviewCandidates == null ? 'Idle resources (legacy)' : 'Confirmed idle resources'}</div>
+              <div className="kpi-value">{s.idleResources.toLocaleString()}</div>
+              {s.idleReviewCandidates != null && <div className="kpi-note">{s.idleReviewCandidates.toLocaleString()} candidates require evidence or owner review</div>}
+              <div className="kpi-note">{percent(s.idleResourcePercentage)} of assessed active + idle resources</div>
+              <span className="kpi-card-link-label">Review resources <ChevronRight size={14} aria-hidden="true" /></span>
+            </button>
+            <div className="kpi-card">
+              <div className="kpi-label">Advisor score</div>
+              <div className="kpi-value">{report.advisorScore.score === null ? '—' : `${report.advisorScore.score.toFixed(0)} / 100`}</div>
+              <div className="kpi-note">
+                {report.advisorScore.monthlyChange === null
+                  ? report.advisorScore.status
+                  : `${report.advisorScore.monthlyChange >= 0 ? '▲' : '▼'} ${Math.abs(report.advisorScore.monthlyChange).toFixed(1)} pts this month`}
+              </div>
             </div>
           </div>
         </div>
@@ -1695,7 +1722,7 @@ function ExecutiveSummaryTab({
       >
         <AnomalyOverview state={anomalyState} onOpenDetails={onOpenAnomalies} formatMoney={formatMoney} />
 
-        <details className="overview-details cost-analysis-details" onToggle={(event) => {
+        <details className="overview-details cost-analysis-details" open onToggle={(event) => {
           if (event.currentTarget.open) setCostDetailsOpened(true);
         }}>
       <summary>Explore costs and findings <span>Charts, hourly costs, subscriptions and evidence</span></summary>
@@ -1712,7 +1739,7 @@ function ExecutiveSummaryTab({
           caption="Range totals and hourly cost"
           meta={rangeLabel}
         >
-          <RangeSpendSummary report={report} formatMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
+          <RangeSpendSummary report={report} formatMoney={formatExactMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
           <HourlyCostPanel report={report} formatMoney={formatHourlyMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} embedded />
         </ReportSection>
 
@@ -1891,7 +1918,8 @@ function ExecutiveSummaryTab({
           details={report.costDetails}
           window={costWindow}
           filters={costFilters}
-          formatMoney={formatHourlyMoney}
+          formatMoney={formatExactMoney}
+          collapsible={false}
           onSelectDay={(date, previousDate, subscriptionId) => setSelectedDay({ date, previousDate, subscriptionId })}
         />
       </DashboardSection>
