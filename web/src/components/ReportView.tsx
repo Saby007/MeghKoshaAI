@@ -44,20 +44,20 @@ import type {
   RecommendationTerm,
   ReservationResourceType,
   SubscriptionReference,
+  TagDimensionCost,
 } from '../report/models';
 import { CATEGORY_DISPLAY_NAMES } from '../findings/categories';
 import { SqlOptimization } from './SqlOptimization';
 import { BillingHistoryTab, HourlyCostPanel } from './BillingHistory';
 import { AICostAlerts, AnomalyOverview, useAnomalySummary, type AnomalyState } from './AnomalyOverview';
 import { billingDates, billingWindow } from '../report/billingHistory';
-import { tagDistribution } from '../report/tagDistribution';
 import { CostExportButton, CostFilters, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, ResourceCostTable, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
-import { costWindowDates, matchesCostFilter, monthCostWindow, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
-import { BudgetContext, BudgetDailyChart, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
+import { costWindowDates, matchesCostFilter, monthCostWindow, presetCostWindow, previousCostWindow, sameTagKey, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { BudgetContext, BudgetDailyChart, budgetTargetsTag, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
 import { buildTakeaways, ExecutiveTakeaways } from './ExecutiveTakeaways';
 import { ServiceRetirements } from './ServiceRetirements';
-import { DayAxis, dayAxis, useChartWidth } from './TrendChart';
+import { DailyBarChart, DayAxis, dayAxis, useChartWidth } from './TrendChart';
 import { BRAND_NAME } from '../brand';
 import './executive-analysis.css';
 import './region-map.css';
@@ -815,9 +815,6 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
               report={report}
               formatMoney={formatHourlyMoney}
               details={report.costDetails}
-              costWindow={costWindow}
-              costFilters={costFilters}
-              onCostFiltersChange={setCostFilters}
               displayCurrency={displayCurrency}
             />
           )}
@@ -906,7 +903,7 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           {tab === 'Cost by Tags/Application' && (
             <CostByTagsTab
               report={report}
-              formatMoney={formatMoney}
+              formatMoney={formatExactMoney}
               formatHourlyMoney={formatHourlyMoney}
               displayCurrency={displayCurrency}
               costWindow={costWindow}
@@ -2010,225 +2007,6 @@ function MonthlySpendChart({ report, formatMoney }: { report: FullReport; format
     </section>
   );
 }
-function ApplicationHourlyCostDonut({ report, formatMoney, rangeDays, costWindow }: { report: FullReport; formatMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow }) {
-  const { available, signed, total, days, items } = tagDistribution(report.tagDailyCostTrend, rangeDays, costWindow);
-  const radius = 48;
-  const circumference = 2 * Math.PI * radius;
-  let cumulative = 0;
-  const segments = items.map((item, index) => {
-    const share = total > 0 ? item.avgHourly / total : 0;
-    const segment = { ...item, share, offset: cumulative, color: TREND_SERIES_PALETTE[index % TREND_SERIES_PALETTE.length] };
-    cumulative += share;
-    return segment;
-  });
-  return (
-    <section className="executive-visual executive-donut-panel">
-      <header><span>Average hourly cost by tag set · {days} export days</span><strong>{available ? `${formatMoney(total)}/hr` : 'Unavailable'}</strong></header>
-      {available && !signed && total > 0 ? (
-        <div className="donut-layout">
-          <div className="donut-chart">
-            <svg viewBox="0 0 120 120" role="img" aria-label="Average hourly cost by non-overlapping tag set">
-              <circle className="donut-track" cx="60" cy="60" r={radius} />
-              {segments.map((segment) => (
-                <circle
-                  className="donut-segment"
-                  cx="60"
-                  cy="60"
-                  r={radius}
-                  key={segment.tagValue}
-                  style={{ stroke: segment.color }}
-                  strokeDasharray={`${segment.share * circumference} ${circumference}`}
-                  strokeDashoffset={-segment.offset * circumference}
-                  transform="rotate(-90 60 60)"
-                >
-                  <title>{`${segment.tagValue} — ${formatMoney(segment.avgHourly)}/hr (${percent(segment.share)})`}</title>
-                </circle>
-              ))}
-            </svg>
-            <span><strong>{segments.length}</strong><small>tag sets</small></span>
-          </div>
-          <div className="spend-legend">
-            {segments.map((segment) => (
-              <span key={segment.tagValue}>
-                <i style={{ background: segment.color }} />
-                <b>{segment.tagValue}</b>
-                <strong>{formatMoney(segment.avgHourly)}/hr</strong>
-                <small>{percent(segment.share)}</small>
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : signed ? <div className="spend-legend">{items.map(item => <span key={item.tagValue}><b>{item.tagValue}</b><strong>{formatMoney(item.avgHourly)}/hr</strong></span>)}</div>
-        : <p className="visual-empty">{available ? 'No net cost in the selected export window.' : 'Non-overlapping tag distribution is unavailable for this snapshot.'}</p>}
-    </section>
-  );
-}
-
-// Merged daily spend trend: always shows the tenant-wide total, plus any
-// user-added per-application (tag-value) series overlaid in distinct colors.
-const TREND_SERIES_PALETTE = [
-  'var(--color-metric-green)',
-  'var(--color-category-networking)',
-  'var(--color-category-databases)',
-  'var(--color-category-ai)',
-  'var(--color-periwinkle-glow)',
-];
-
-function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
-  const [selectedValues, setSelectedValues] = useState<string[]>([]);
-  const chartFrame = useRef<HTMLDivElement>(null);
-  const measuredWidth = useChartWidth(chartFrame, 480);
-  const tagTrend = report.tagDailyCostTrend;
-  const availableToAdd = tagTrend.availableTagValues.filter((value) => !selectedValues.includes(value) && tagTrend.series.some(item => item.tagValue === value));
-
-  const previousWindow = previousCostWindow(costWindow);
-  const currentDays = report.dailyCostTrend.days.filter((day) => day.date >= costWindow.startDate && day.date <= costWindow.endDate);
-  const previousDays = report.dailyCostTrend.days.filter((day) => day.date >= previousWindow.startDate && day.date <= previousWindow.endDate);
-  const dateToSlot = new Map(currentDays.map((day, index) => [day.date, index]));
-
-  const appSeries = selectedValues.map((value, index) => {
-    const match = tagTrend.series.find((item) => item.tagValue === value);
-    return {
-      key: value,
-      label: value,
-      color: TREND_SERIES_PALETTE[index % TREND_SERIES_PALETTE.length],
-      days: (match?.days ?? []).filter((day) => dateToSlot.has(day.date)),
-    };
-  });
-
-  const maximum = Math.max(
-    ...currentDays.map((day) => day.totalCost),
-    ...previousDays.map((day) => day.totalCost),
-    ...appSeries.flatMap((item) => item.days.map((day) => day.totalCost)),
-    0.01,
-  );
-    const dates = currentDays.map((day) => day.date);
-    const baseWidth = Math.max(currentDays.length * 34, measuredWidth);
-  const height = 240;
-  const padX = 28;
-  const padY = 24;
-    const axis = dayAxis(dates, baseWidth, padX, padX, Math.max(1, dates.length - 1));
-    const width = axis.width;
-    const chartHeight = height + axis.extraHeight;
-  const baselineY = height - padY;
-  const stepX = currentDays.length > 1 ? (width - padX * 2) / (currentDays.length - 1) : 0;
-
-  function xForSlot(slot: number): number {
-    return padX + slot * stepX;
-  }
-  function yFor(value: number): number {
-    return baselineY - (value / maximum) * (height - padY * 2);
-  }
-  function pathFor(points: { x: number; y: number }[]): string {
-    return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
-  }
-
-  const currentPoints = currentDays.map((day, index) => ({ x: xForSlot(index), y: yFor(day.totalCost), day }));
-  // Right-align the previous window so its most recent day sits under the current
-  // window's most recent day, even if there isn't enough history for a full window.
-  const previousOffset = currentDays.length - previousDays.length;
-  const previousPoints = previousDays.map((day, index) => ({ x: xForSlot(previousOffset + index), y: yFor(day.totalCost), day }));
-  const areaPath = currentPoints.length > 0
-    ? `${pathFor(currentPoints)} L ${currentPoints[currentPoints.length - 1].x.toFixed(1)} ${baselineY} L ${currentPoints[0].x.toFixed(1)} ${baselineY} Z`
-    : '';
-  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => ({
-    value: maximum * fraction,
-    y: yFor(maximum * fraction),
-  }));
-
-  return (
-    <section className="executive-visual executive-history-panel daily-trend-panel-wide">
-      <header>
-        <span>Daily spend &amp; average hourly cost, per tag — {rangeLabel} vs the preceding {rangeDays} days</span>
-        <small>{report.dailyCostTrend.statusMessage} {tagTrend.statusMessage}</small>
-      </header>
-      <div className="daily-trend-controls">
-        <div className="daily-trend-legend">
-          <span className="daily-trend-legend-item">
-            <i style={{ background: 'var(--color-signal-orange)' }} aria-hidden="true" />
-            This period
-          </span>
-          {previousPoints.length > 0 && (
-            <span className="daily-trend-legend-item">
-              <i className="dashed" aria-hidden="true" />
-              Previous period
-            </span>
-          )}
-          {appSeries.map((item) => (
-            <span className="daily-trend-legend-item" key={item.key}>
-              <i style={{ background: item.color }} aria-hidden="true" />
-              {item.label}
-              <button
-                type="button"
-                onClick={() => setSelectedValues((current) => current.filter((value) => value !== item.key))}
-                aria-label={`Remove ${item.label}`}
-              >
-                <X size={11} />
-              </button>
-            </span>
-          ))}
-        </div>
-        {availableToAdd.length > 0 && (
-          <select
-            className="resource-hourly-picker"
-            value=""
-            onChange={(event) => {
-              if (event.target.value) setSelectedValues((current) => [...current, event.target.value]);
-            }}
-            aria-label="Add tag"
-          >
-            <option value="">+ Add tag</option>
-            {availableToAdd.map((value) => (
-              <option value={value} key={value}>{value}</option>
-            ))}
-          </select>
-        )}
-      </div>
-      {currentPoints.length > 0 ? (
-        <div className="daily-line-chart-scroll">
-          <div className="daily-line-chart-axis-labels" style={{ height }}>
-            {yTicks.slice().reverse().map((tick) => (
-              <span key={tick.value}>{formatMoney(tick.value)}</span>
-            ))}
-          </div>
-          <div className="daily-line-chart-main" ref={chartFrame}>
-            <svg className="daily-line-chart" viewBox={`0 0 ${width} ${chartHeight}`} width={width} height={chartHeight} style={{ width: `${width}px`, minWidth: `${width}px` }} role="img" aria-label="Daily cost trend">
-              {yTicks.map((tick) => (
-                <line key={tick.value} className="daily-line-chart-grid" x1={padX} x2={width - padX} y1={tick.y} y2={tick.y} />
-              ))}
-              <path d={areaPath} className="daily-line-chart-area" />
-              {previousPoints.length > 0 && (
-                <path d={pathFor(previousPoints)} className="daily-line-chart-path daily-line-chart-path-previous" />
-              )}
-              <path d={pathFor(currentPoints)} className="daily-line-chart-path" style={{ stroke: 'var(--color-signal-orange)' }} />
-              {currentPoints.map((point) => (
-                <circle className="daily-line-chart-point" key={point.day.date} cx={point.x} cy={point.y} r={3} style={{ fill: 'var(--color-signal-orange)' }}>
-                  <title>{`This period · ${reportDate(point.day.date)}: ${formatMoney(point.day.totalCost)} total (${formatHourlyMoney(point.day.averageHourlyCost)}/hr average)`}</title>
-                </circle>
-              ))}
-              {appSeries.map((item) => {
-                const points = item.days.map((day) => ({ x: xForSlot(dateToSlot.get(day.date) ?? 0), y: yFor(day.totalCost), day }));
-                if (points.length === 0) return null;
-                return (
-                  <g key={item.key}>
-                    <path d={pathFor(points)} className="daily-line-chart-path" style={{ stroke: item.color }} />
-                    {points.map((point) => (
-                      <circle className="daily-line-chart-point" key={`${item.key}-${point.day.date}`} cx={point.x} cy={point.y} r={3} style={{ fill: item.color }}>
-                        <title>{`${item.label} · ${reportDate(point.day.date)}: ${formatMoney(point.day.totalCost)} total (${formatHourlyMoney(point.day.averageHourlyCost)}/hr average)`}</title>
-                      </circle>
-                    ))}
-                  </g>
-                );
-              })}
-              <DayAxis dates={dates} xFor={xForSlot} y={baselineY + (axis.rotated ? 14 : 18)} rotated={axis.rotated} />
-            </svg>
-          </div>
-        </div>
-      ) : <p className="visual-empty">Daily FOCUS export history is not available.</p>}
-    </section>
-  );
-}
-
 type TreemapNode = {
   key: string;
   label: string;
@@ -3961,7 +3739,15 @@ function CostByTagsTab({
   snapshotId: string | null;
 }) {
   const summary = report.tagCosts;
-  const dimensions = summary?.dimensions ?? [];
+  /* Most explanatory key first. The API now orders them this way, but saved
+     snapshots written before it did are alphabetical - which opened this page on
+     `Action`, one value and 3% of spend. Sorted here too so an old snapshot opens
+     on its most useful key; stable, so the API's own order is kept on ties. */
+  const dimensions = useMemo(() => {
+    const allocated = (item: TagDimensionCost) => item.allocatedCost
+      ?? item.rows.reduce((total, row) => total + row.monthlyCost, 0);
+    return [...(summary?.dimensions ?? [])].sort((left, right) => allocated(right) - allocated(left));
+  }, [summary?.dimensions]);
   const [selectedKey, setSelectedKey] = useState<string>(dimensions[0]?.tagKey ?? '');
   const [selectedValue, setSelectedValue] = useState<string | null>(null);
   const [breakdown, setBreakdown] = useState<CostDimension>('service');
@@ -3970,7 +3756,23 @@ function CostByTagsTab({
   const activeValue = dimension?.tagKey === selectedKey && allRows.some((row) => row.value === selectedValue)
     ? selectedValue : null;
   const rows = activeValue === null ? allRows : allRows.filter((row) => row.value === activeValue);
-  const maxCost = Math.max(...allRows.map((row) => row.monthlyCost), 1);
+  /* Bars compare each value against everything the key covers, unallocated spend
+     included, not against the largest value present. Scaling to the largest row made
+     every single-value key draw one full-width bar, which reads as "this tag accounts
+     for all of it" when on this estate the widest of them accounts for 5%. */
+  const dimensionAllocated = dimension?.allocatedCost
+    ?? allRows.reduce((total, row) => total + row.monthlyCost, 0);
+  const dimensionTotal = dimensionAllocated + (dimension?.unallocatedCost ?? 0);
+  const barBasis = Math.max(dimensionTotal, ...allRows.map((row) => row.monthlyCost), 1);
+  /* A key's share of total spend, for the picker and the header. Computed here when a
+     snapshot predates the API carrying it, so an older report still gets the context. */
+  const coverageOf = (item: TagDimensionCost) => {
+    if (typeof item.coverage === 'number' && item.coverage > 0) return item.coverage;
+    const allocated = item.allocatedCost
+      ?? item.rows.reduce((total, row) => total + row.monthlyCost, 0);
+    const total = summary?.totalSpend ?? 0;
+    return total > 0 ? allocated / total : 0;
+  };
   /* Selecting a tag key and value here scopes the breakdowns below, so the two
      halves of this page answer the same question rather than sitting side by
      side unaware of each other.
@@ -3982,37 +3784,44 @@ function CostByTagsTab({
      selection. An inherited value is kept only while it belongs to the key
      actually being shown. */
   const pageTagKey = dimension?.tagKey;
-  const inheritedTagValue = pageTagKey && costFilters.tagKey?.toLowerCase() === pageTagKey.toLowerCase()
+  const inheritedTagValue = pageTagKey && costFilters.tagKey && sameTagKey(costFilters.tagKey, pageTagKey)
     ? costFilters.tagValue
     : undefined;
   const scopedFilters: CostFilter = pageTagKey
     ? { ...costFilters, tagKey: pageTagKey, tagValue: activeValue === null ? inheritedTagValue : activeValue }
     : costFilters;
-  /* Budgets are matched against the rows the selection actually covers, not
-     against the tag string, so a budget scoped by resource group still shows
-     up when that group is what carries the tag. A budget whose subscription
-     carries none of the selected spend is not reported as covering it. */
-  const taggedBudgets = useMemo(() => {
-    if (!budgetState || report.costDetails?.status !== 'complete') return [];
-    const scopedRows = report.costDetails.rows.filter((row) => matchesCostFilter(row, scopedFilters));
-    return relateBudgets(budgetState.budgets, scopedRows, scopedFilters, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [budgetState?.budgets, report.costDetails, JSON.stringify(scopedFilters)]);
-  const scopeLabel = activeValue === null
-    ? `all ${dimension?.tagKey ?? 'tag'} values`
-    : `${dimension?.tagKey} = ${activeValue || '(empty)'}`;
+  /* The graph and budgets answer "how is this application doing", so they appear
+     only once a key and a value are both chosen. For a key alone they described
+     every value at once - a question the table above already answers better. */
+  const selectionMade = pageTagKey !== undefined && activeValue !== null;
+  const scopeLabel = `${dimension?.tagKey ?? 'tag'} = ${activeValue || '(empty)'}`;
+  /* Only budgets whose own filter names this key and value. Budgets that merely
+     contain the spend - subscription-wide ones, or ones filtered on a different tag
+     that happens to sit on the same resources - are left out entirely: they are not
+     this application's budget, and listing them implied they were. */
+  const allocatedBudgets = useMemo(() => {
+    if (!budgetState || !selectionMade || !pageTagKey) return [];
+    return budgetState.budgets
+      .filter((budget) => budgetTargetsTag(budget.filter, pageTagKey, activeValue ?? ''))
+      .map((budget) => ({ budget, relation: 'Matching budget filter' }));
+  }, [budgetState, selectionMade, pageTagKey, activeValue]);
   const subscriptionNames = useMemo(
     () => new Map(report.subscriptionBreakdown.map((row) => [row.subscriptionId.toLowerCase(), row.subscriptionName])),
     [report.subscriptionBreakdown],
   );
-  /* A budget whose own filter targets this spend is an allocation for it. One
-     that merely contains it - a subscription-wide budget, or one whose filter
-     Azure would not return in an evaluable form - governs everything in its
-     subscription, so it matches every tag equally. Listing both as one set
-     made the same budgets appear whichever tag was selected, which reads as
-     "these are this application's budgets" when they are nothing of the kind. */
-  const allocatedBudgets = taggedBudgets.filter((item) => item.relation === 'Matching budget filter');
-  const containingBudgets = taggedBudgets.filter((item) => item.relation !== 'Matching budget filter');
+  /* The selection's own daily spend, from the same cost rows the budgets and the
+     breakdown read, so all three agree on what "this application" cost. */
+  const selectionDates = costWindowDates(costWindow);
+  const selectionValues = useMemo(() => {
+    if (!selectionMade || report.costDetails?.status !== 'complete') return [];
+    const rows = report.costDetails.rows.filter((row) => matchesCostFilter(row, scopedFilters));
+    return selectionDates.map((date) => {
+      const covered = rows.filter((row) => row.dailyCosts[date] !== undefined);
+      return covered.length ? covered.reduce((sum, row) => sum + row.dailyCosts[date], 0) : null;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionMade, report.costDetails, JSON.stringify(scopedFilters), costWindow.startDate, costWindow.endDate]);
+  const selectionTotal = selectionValues.reduce<number>((sum, value) => sum + (value ?? 0), 0);
   /* Picking a day on a budget chart asks "what did this application run that
      day", so the answer is resource-level and stays inside the selection. */
   const [budgetDay, setBudgetDay] = useState<{ key: string; date: string } | null>(null);
@@ -4068,14 +3877,7 @@ function CostByTagsTab({
   return (
     <div className="panel">
       <h2 className="section-title">Cost by Tags/Application</h2>
-      <p className="section-subtitle">Grouped by any FOCUS resource tag found (inherited from the resource group when a resource has no tag of its own), with a next-month forecast based on overall spend trend.</p>
-      {/* Moved here from the executive summary: the per-tag daily trend and
-          the tag-set distribution are tag analysis, and on the summary the
-          trend repeated the cost comparison chart. */}
-      <div className="executive-visual-grid tag-trend-visuals">
-        <DailySpendTrendChart report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={costWindowDates(costWindow).length || 30} costWindow={costWindow} rangeLabel={`${reportDate(costWindow.startDate)} - ${reportDate(costWindow.endDate)}`} />
-        <ApplicationHourlyCostDonut report={report} formatMoney={formatHourlyMoney} rangeDays={costWindowDates(costWindow).length || 30} costWindow={costWindow} />
-      </div>
+      <p className="section-subtitle">Pick a tag key, then a value, to see what that application costs, its daily spend and the budget that tracks it.</p>
       {!summary?.available || dimensions.length === 0 ? (
         <EvidenceState title="Tag evidence unavailable" detail={summary?.status ?? 'No resource or resource-group tags were present.'} />
       ) : (
@@ -4087,8 +3889,12 @@ function CostByTagsTab({
                 setSelectedKey(event.target.value);
                 setSelectedValue(null);
               }}>
+                {/* Each key's share of spend sits in its own option. The list is
+                    ordered by it, so the most explanatory key is both first and
+                    visibly first - without this a reader had to open all fifteen
+                    to learn that the best of them covers 5%. */}
                 {dimensions.map((item) => (
-                  <option value={item.tagKey} key={item.tagKey}>{item.tagKey}</option>
+                  <option value={item.tagKey} key={item.tagKey}>{item.tagKey} · {percent(coverageOf(item))} of spend</option>
                 ))}
               </select>
             </label>
@@ -4111,6 +3917,18 @@ function CostByTagsTab({
               </select>
             </label>
           </div>
+          {/* What the selected key does and does not explain, stated before the table
+              rather than as a footnote after it. The table lists only tagged values, so
+              on an estate that is mostly untagged it showed a short list of small
+              numbers with no indication that it was describing a few percent of the
+              bill. */}
+          <p className="tag-cost-coverage">
+            <strong>{dimension?.tagKey}</strong> explains {formatMoney(dimensionAllocated)} of {formatMoney(summary?.totalSpend ?? 0)}
+            {' '}({percent(coverageOf(dimension!))}) across {allRows.length === 1 ? '1 value' : `${allRows.length} values`}.
+            {dimension && dimension.unallocatedCost > 0 && (
+              <> {formatMoney(dimension.unallocatedCost)} carries no <strong>{dimension.tagKey}</strong> tag and cannot be attributed.</>
+            )}
+          </p>
           <div className="tag-cost-table-scroll" role="region" aria-label="Tag cost breakdown" tabIndex={0}>
             <table className="report-table app-cost-table">
               <thead>
@@ -4125,69 +3943,72 @@ function CostByTagsTab({
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.value}>
-                    <td>{row.value}</td>
+                    <td>{row.value || '(empty)'}</td>
                     <td className="num">{formatMoney(row.monthlyCost)}</td>
                     <td className="num">{percent(row.pctOfTotal)}</td>
                     <td className="num">{row.forecastNextMonth === null ? '—' : formatMoney(row.forecastNextMonth)}</td>
                     <td>
                       <span className="app-cost-bar-track">
-                        <span className="app-cost-bar-fill" style={{ width: `${Math.min(100, (row.monthlyCost / maxCost) * 100)}%` }} />
+                        <span className="app-cost-bar-fill" style={{ width: `${Math.min(100, (row.monthlyCost / barBasis) * 100)}%` }} />
                       </span>
                     </td>
                   </tr>
                 ))}
+                {/* Untagged spend as a row, so the table sums to the key's whole
+                    footprint. Marked as not-a-value rather than listed as one: it is
+                    the absence of the tag, and sorting or filtering it alongside real
+                    values would invite treating it as an application. */}
+                {activeValue === null && dimension && dimension.unallocatedCost > 0 && (
+                  <tr className="tag-cost-unallocated">
+                    <td><em>No {dimension.tagKey} tag</em></td>
+                    <td className="num">{formatMoney(dimension.unallocatedCost)}</td>
+                    <td className="num">{percent(summary?.totalSpend ? dimension.unallocatedCost / summary.totalSpend : 0)}</td>
+                    <td className="num">—</td>
+                    <td>
+                      <span className="app-cost-bar-track">
+                        <span className="app-cost-bar-fill is-unallocated" style={{ width: `${Math.min(100, (dimension.unallocatedCost / barBasis) * 100)}%` }} />
+                      </span>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
-          {dimension && dimension.unallocatedCost > 0 && (
-            <p className="section-subtitle">{formatMoney(dimension.unallocatedCost)}/mo has no {dimension.tagKey} tag value.</p>
-          )}
         </>
       )}
 
-      {/* The budget that governs this tag, if one does.
-
-          Answered on this page rather than by sending the reader to the budget
-          tab, because "is this application within budget" is the question the
-          tag selection raises. A subscription-wide budget is reported as such:
-          it bears on the tag but is not an allocation for it. */}
-      {budgetState && (
-        <section className="tag-cost-budgets" aria-label={`Budgets covering ${dimension?.tagKey ?? 'the selected tag'}`}>
-          <h3 className="section-title">Budget for this selection</h3>
-          {budgetState.loading ? (
-            <p role="status">Checking subscription budgets...</p>
-          ) : budgetState.error ? (
-            <p role="alert">{budgetState.error}</p>
+      {/* Graph and budget for one application, only once one is chosen. Budgets
+          appear only when their own filter names this key and value; none is
+          listed otherwise, rather than offering wider budgets as a stand-in. */}
+      {selectionMade ? (
+        <section className="tag-selection" aria-label={`Daily spend and budget for ${scopeLabel}`}>
+          <header className="cost-section-heading">
+            <h3 className="section-title">{scopeLabel}</h3>
+            <span className="tag-selection-total">{formatMoney(selectionTotal)} in the selected period</span>
+          </header>
+          {report.costDetails?.status === 'complete' ? (
+            <DailyBarChart
+              dates={selectionDates}
+              values={selectionValues}
+              seriesName={`${scopeLabel} daily cost`}
+              formatMoney={formatMoney}
+              ariaLabel={`Daily cost for ${scopeLabel}`}
+              emptyMessage={`No daily cost evidence covers ${scopeLabel} in the selected period.`}
+            />
           ) : (
-            <>
-              {allocatedBudgets.length === 0 ? (
-                <EvidenceState
-                  title={`No budget is scoped to ${scopeLabel}`}
-                  detail={containingBudgets.length
-                    ? `No Azure budget filters on ${scopeLabel}. The subscription-wide budgets below include this spend but are not an allocation for it.`
-                    : `No Azure budget in the assessed subscriptions matches ${scopeLabel}. Create one on the Budgets page to track this spend against a limit.`}
-                />
-              ) : (
-                <>
-                  <p className="section-subtitle">{allocatedBudgets.length === 1 ? 'One budget is' : `${allocatedBudgets.length} budgets are`} scoped to {scopeLabel}.</p>
-                  {allocatedBudgets.slice(0, 3).map(budgetCard)}
-                  {allocatedBudgets.length > 3 && <p className="section-subtitle">{allocatedBudgets.length - 3} further scoped {allocatedBudgets.length - 3 === 1 ? 'budget is' : 'budgets are'} listed on the Budgets page.</p>}
-                </>
-              )}
-              {containingBudgets.length > 0 && (
-                <details className="wider-budgets">
-                  <summary>
-                    {containingBudgets.length} wider {containingBudgets.length === 1 ? 'budget includes' : 'budgets include'} this spend
-                    <span>Not an allocation for {scopeLabel}</span>
-                  </summary>
-                  <p className="billing-provenance">These govern their whole subscription, so they bear on every tag with spend there and do not change as the selection changes. Each chart below is still limited to {scopeLabel}.</p>
-                  {containingBudgets.slice(0, 3).map(budgetCard)}
-                  {containingBudgets.length > 3 && <p className="section-subtitle">{containingBudgets.length - 3} further wider {containingBudgets.length - 3 === 1 ? 'budget is' : 'budgets are'} listed on the Budgets page.</p>}
-                </details>
-              )}
-            </>
+            <p className="section-subtitle">Daily cost detail is not available in this report.</p>
+          )}
+          {budgetState?.loading && <p role="status">Checking subscription budgets...</p>}
+          {budgetState?.error && <p role="alert">{budgetState.error}</p>}
+          {allocatedBudgets.length > 0 && (
+            <div className="tag-cost-budgets">
+              <h4 className="tag-selection-subhead">{allocatedBudgets.length === 1 ? 'Budget' : `${allocatedBudgets.length} budgets`} for {scopeLabel}</h4>
+              {allocatedBudgets.map(budgetCard)}
+            </div>
           )}
         </section>
+      ) : dimensions.length > 0 && (
+        <p className="tag-selection-hint">Choose a value for <strong>{dimension?.tagKey ?? 'this tag'}</strong> above to see its daily spend and budget.</p>
       )}
 
       {/* Where the tagged money actually went. Scoped by the tag selection

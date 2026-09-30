@@ -754,13 +754,26 @@ def _tag_cost_summary(
         ]
         if not rows:
             continue
+        allocated = sum(row.monthly_cost for row in rows)
         dimensions.append(
             TagDimensionCost(
                 tagKey=tag_key,
                 unallocatedCost=_round2(values.get("Unallocated", 0.0)),
+                # What this key actually explains, so the reader can choose one on the
+                # evidence rather than by opening each in turn. Carried per dimension
+                # because it is a property of the key, not of any row under it.
+                allocatedCost=_round2(allocated),
+                coverage=(allocated / total_spend) if total_spend else 0.0,
                 rows=rows,
             )
         )
+    # Most explanatory key first. Alphabetical order put `Action` at the top of this
+    # estate -- one value, 3.0% of spend -- so the page opened on its least informative
+    # dimension and said nothing about the 97% that key leaves unallocated, while
+    # `Workload` at 5.3% sat ninth in a list of fifteen. Ordering by what a key explains
+    # makes the default selection the most useful one rather than an accident of naming.
+    # Ties keep alphabetical order so the list is stable between runs.
+    dimensions.sort(key=lambda item: (-item.allocated_cost, item.tag_key.lower()))
     return TagCostSummary(
         available=bool(dimensions),
         status=(

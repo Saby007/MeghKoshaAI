@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { comparisonDate, isCalendarMonth, monthCostWindow, previousCostWindow } from './costDetails';
+import { compareCostGroups, comparisonDate, isCalendarMonth, monthCostWindow, previousCostWindow } from './costDetails';
+import type { CostDetailRow, CostDetailSummary } from './models';
 
 describe('calendar-month cost windows', () => {
   it('recognises whole calendar months only', () => {
@@ -32,5 +33,20 @@ describe('calendar-month cost windows', () => {
     expect(monthCostWindow('2026-08-01', '2026-08-31')).toEqual({ startDate: '2026-08-01', endDate: '2026-08-31' });
     expect(monthCostWindow('', '2026-08-31')).toBeNull();
     expect(monthCostWindow('2026-08-31', '2026-08-01')).toBeNull();
+  });
+});
+
+describe('grouping cost rows', () => {
+  const row = (id: string, group: string, cost: number): CostDetailRow => ({
+    detailId: id, subscriptionId: 'sub-1', subscriptionName: 'Sub', resourceId: `/subscriptions/sub-1/resourceGroups/${group}/providers/x/y/${id}`,
+    resourceName: id, resourceType: 'x/y', resourceGroup: group, serviceName: 'Svc', region: 'eastus', tags: {}, tagAttributionSource: '',
+    dailyCosts: { '2026-08-05': cost },
+  });
+  const details: CostDetailSummary = { status: 'complete', statusMessage: '', costBasis: '', granularity: 'daily', dates: ['2026-08-05'],
+    rows: [row('a', 'SRE', 12), row('b', 'sre', 1), row('c', 'tub', 4)] };
+
+  it('treats resource group names that differ only in case as one group', () => {
+    const groups = compareCostGroups(details, { startDate: '2026-08-05', endDate: '2026-08-05' }, {}, 'resourceGroup');
+    expect(groups.map((group) => [group.name, group.current])).toEqual([['SRE', 13], ['tub', 4]]);
   });
 });

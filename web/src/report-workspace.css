@@ -666,6 +666,30 @@
     overflow-wrap: anywhere;
 }
 
+/* What the selected key explains, before the table rather than after it. */
+.tag-cost-coverage {
+    color: var(--color-pale-stone);
+    font-size: var(--font-size-sm);
+    margin: 0 0 var(--space-3);
+}
+
+.tag-cost-coverage strong {
+    color: inherit;
+    font-weight: 600;
+}
+
+/* Untagged spend is the absence of a value, not one of them: it reads quieter than
+   the rows above it and its bar is drawn in a neutral tone so it cannot be mistaken
+   for an application with that much spend. */
+.tag-cost-unallocated td {
+    color: var(--color-pale-stone);
+}
+
+.app-cost-bar-fill.is-unallocated {
+    background: var(--color-pale-stone);
+    opacity: 0.45;
+}
+
 
 /* Preserve the current dark/orange and light/Azure identities without the
    expensive backdrop blur or purple highlights leaking into the light theme. */

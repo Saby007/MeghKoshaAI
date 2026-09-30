@@ -73,8 +73,17 @@ export function comparisonDate(window: CostWindow, index: number): string {
   return shiftCostDate(previous.startDate, index);
 }
 
+/* Tag keys as the report shows them are normalised by the API: `azd-env-name`
+   becomes "Azd Env Name". Comparing that display form with the raw key on a cost
+   row matched nothing, so every key containing a hyphen or underscore produced an
+   empty chart and no budgets. Both sides are folded the same way here. */
+export function sameTagKey(left: string, right: string): boolean {
+  const fold = (key: string) => key.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+  return fold(left) === fold(right);
+}
+
 export function costTagValue(row: CostDetailRow, key: string): string | undefined {
-  return Object.entries(row.tags).find(([name]) => name.toLowerCase() === key.toLowerCase())?.[1];
+  return Object.entries(row.tags).find(([name]) => sameTagKey(name, key))?.[1];
 }
 
 export function matchesCostFilter(row: CostDetailRow, filter: CostFilter): boolean {
@@ -120,7 +129,11 @@ export function compareCostGroups(details: CostDetailSummary | undefined, window
         : dimension === 'region' ? row.region : dimension === 'resourceGroup' ? row.resourceGroup : costTagValue(row, filter.tagKey ?? '') ?? null;
     const name = dimension === 'resource' ? row.resourceName || 'Unattributed charge'
       : dimension === 'subscription' ? row.subscriptionName : value ?? 'Untagged';
-    const key = JSON.stringify([row.subscriptionId, value]);
+    /* Azure resource ids and resource group names are case-insensitive, and FOCUS
+       exports carry both spellings (`SRE` and `sre`), so grouping on the raw text
+       split one resource group into two rows with half the cost each. */
+    const folded = dimension === 'resource' || dimension === 'resourceGroup' ? value?.toLowerCase() ?? null : value;
+    const key = JSON.stringify([row.subscriptionId.toLowerCase(), folded]);
     const group = groups.get(key) ?? { id: key, name, subscriptionId: row.subscriptionId, subscriptionName: row.subscriptionName, current: 0, previous: 0, sources: [] };
     group.sources.push(row);
     for (const [day, amount] of Object.entries(row.dailyCosts)) {

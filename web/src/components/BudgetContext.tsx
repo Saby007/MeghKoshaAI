@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { listBudgets } from '../api';
 import type { Budget, CostDetailRow, CostDetailSummary, FullReport } from '../report/models';
-import { costTagValue, costWindowDates, matchesCostFilter, type CostFilter, type CostWindow } from '../report/costDetails';
+import { costTagValue, costWindowDates, matchesCostFilter, sameTagKey, type CostFilter, type CostWindow } from '../report/costDetails';
 import { DailyBarChart } from './TrendChart';
 
 export type BudgetState = { budgets: Budget[]; loading: boolean; error: string | null; refresh: () => void };
@@ -81,6 +81,37 @@ export function budgetFilterMatches(expression: unknown, row: CostDetailRow): bo
   if (kind === 'tags') { const value = costTagValue(row, name); return value === undefined ? false : values.includes(value); }
   const value = dimensions[name.toLowerCase()];
   return value === undefined ? null : values.some((expected) => expected.toLowerCase() === value.toLowerCase());
+}
+
+/* Whether a budget's own filter selects a tag key and value.
+
+   Asked of the budget's filter, never of the resources a selection covers. Testing
+   rows instead made a `Contact` budget read as "scoped to Action = Do Not Delete",
+   because the same resources happened to carry both tags - so every tag on the page
+   listed the same budgets, which is the opposite of what the page claims to show.
+
+   An `and` qualifies when any branch names the tag: the budget is then scoped to this
+   application, possibly narrower. An `or` qualifies only when every branch names it,
+   since otherwise the budget also covers spend outside the selection. */
+export function budgetTargetsTag(expression: unknown, key: string, value: string): boolean {
+  if (!expression || typeof expression !== 'object' || Array.isArray(expression)) return false;
+  const filter = expression as Record<string, unknown>;
+  const kinds = Object.keys(filter);
+  if (kinds.length !== 1) return false;
+  const [kind] = kinds;
+  const body = filter[kind];
+  if (kind === 'and' || kind === 'or') {
+    if (!Array.isArray(body) || !body.length) return false;
+    const results = body.map((condition) => budgetTargetsTag(condition, key, value));
+    return kind === 'and' ? results.includes(true) : results.every(Boolean);
+  }
+  if (kind !== 'tags' || !body || typeof body !== 'object') return false;
+  const { name, operator, values } = body as Record<string, unknown>;
+  return typeof name === 'string'
+    && sameTagKey(name, key)
+    && operator === 'In'
+    && Array.isArray(values)
+    && values.includes(value);
 }
 
 export function useBudgetSummary(report: Pick<FullReport, 'subscriptionBreakdown' | 'reportMetadata'>): BudgetState {

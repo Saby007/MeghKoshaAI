@@ -12352,17 +12352,39 @@ body {
     grid-column: auto;
 }
 
-/* On the Tags page the trend keeps the full width (it rotates its day
-   labels when squeezed) and the tag-set donut follows it at full width. */
-:root .app-shell.app-shell .tag-trend-visuals {
-    margin-bottom: var(--space-4);
+/* The Tags page's graph and budgets for one selected application. */
+:root .app-shell.app-shell .tag-selection {
+    margin: var(--space-4) 0;
+    padding: var(--space-4);
     border: var(--border-width) solid var(--color-ash-stroke);
     border-radius: var(--radius-md);
-    overflow: hidden;
 }
 
-:root .app-shell.app-shell .tag-trend-visuals>* {
-    grid-column: 1 / -1;
+:root .app-shell.app-shell .tag-selection .cost-section-heading {
+    align-items: baseline;
+    margin-bottom: var(--space-3);
+}
+
+:root .app-shell.app-shell .tag-selection .section-title {
+    margin: 0;
+}
+
+.tag-selection-total {
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-pale-stone);
+}
+
+.tag-selection-subhead {
+    margin: var(--space-4) 0 var(--space-2);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.tag-selection-hint {
+    margin: var(--space-4) 0;
+    font-size: 13px;
+    color: var(--color-pale-stone);
 }
 
 @media (max-width: 1050px) {
@@ -12752,4 +12774,78 @@ body {
 :root .app-shell.app-shell .report-section-meta {
     font-variant-numeric: var(--nums);
     white-space: nowrap;
+}
+
+/* ================================================================
+   History: breakdown controls, trend, then a two-day comparison.
+   ================================================================ */
+:root .app-shell.app-shell .history-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    margin: 12px 0 16px;
+}
+
+:root .app-shell.app-shell .history-compare {
+    margin: 0 0 16px;
+    padding: 16px;
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+}
+
+:root .app-shell.app-shell .history-compare .cost-section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+:root .app-shell.app-shell .history-compare .billing-metrics {
+    margin: 12px 0;
+}
+
+:root .app-shell.app-shell .history-compare-table th[scope="row"] small {
+    display: block;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--color-pale-stone);
+}
+
+:root .app-shell.app-shell .history-compare-table td.num {
+    font-variant-numeric: tabular-nums;
+}
+
+:root .app-shell.app-shell .history-compare-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--color-pale-stone);
+}
+
+/* The comparison is paged by "Show more", so its own scroll region would
+   only clip the page it has already chosen to show. */
+:root .app-shell.app-shell .history-compare .billing-table-scroll {
+    max-height: none;
+}
+
+/* The arrow is a background image, so text must stop short of it. With 8px of
+   right padding a long subscription or service name ran over the arrow and hid
+   it, and the control read as a text box. */
+:root .app-shell.app-shell .cost-detail-filters select {
+    padding-right: 28px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+/* History's breakdown toggle sits on the same row as its filters, level with
+   the selects rather than with their labels. */
+:root .app-shell.app-shell .history-controls .history-breakdown {
+    align-self: flex-end;
 }

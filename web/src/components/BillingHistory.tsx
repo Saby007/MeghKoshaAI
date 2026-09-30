@@ -3,8 +3,8 @@ import { ArrowLeftRight, CalendarDays, Clock3 } from 'lucide-react';
 import { billingDates, billingTags, billingWindow, compareBillingDates, DEFAULT_BUSINESS_CALENDAR, validBusinessCalendar, type BusinessCalendar, type BillingDayFilter, type BillingTimeFilter, type BillingSource } from '../report/billingHistory';
 import { CostExportButton, CostFilters, ResourceCostTable } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
-import { DailyBarChart, DailyTrendChart, useTopGroupSeries } from './TrendChart';
-import { matchesCostFilter, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { DailyBarChart } from './TrendChart';
+import { compareCostGroups, matchesCostFilter, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import type { CostDetailSummary } from '../report/models';
 import { BudgetContext, type BudgetState } from './BudgetContext';
 
@@ -25,88 +25,154 @@ function TagFilter({ report, value, onChange }: { report: BillingSource; value: 
   );
 }
 
-export function BillingHistoryTab({ report, formatMoney, details, costWindow, costFilters, onCostFiltersChange, displayCurrency = '' }: {
+/* The ways History can split cost. Tags are deliberately absent: History answers
+   "what changed between two days", and tag attribution is incomplete and
+   non-additive, so a tag split cannot be read as a breakdown of the day's bill. */
+const HISTORY_DIMENSIONS: { id: CostDimension; label: string; noun: string }[] = [
+  { id: 'subscription', label: 'Subscription', noun: 'subscription' },
+  { id: 'service', label: 'Service', noun: 'service' },
+  { id: 'resourceGroup', label: 'Resource group', noun: 'resource group' },
+  { id: 'resource', label: 'Resource', noun: 'resource' },
+];
+const HISTORY_PAGE = 15;
+/* History covers the whole assessed scope. It has no filters of its own, so it
+   does not inherit the page-wide ones either - a filter set on another page would
+   otherwise narrow these totals with nothing on screen to say so. */
+const ALL: CostFilter = {};
+
+export function BillingHistoryTab({ report, formatMoney, details, displayCurrency = '' }: {
   report: BillingSource; formatMoney: Formatter;
-  details?: CostDetailSummary; costWindow?: CostWindow;
-  costFilters?: CostFilter; onCostFiltersChange?: (value: CostFilter) => void;
+  details?: CostDetailSummary;
   displayCurrency?: string;
 }) {
   const dates = useMemo(() => billingDates(report), [report]);
   const [baselineDate, setBaselineDate] = useState(() => dates.at(-2) ?? dates.at(-1) ?? '');
   const [comparisonDate, setComparisonDate] = useState(() => dates.at(-1) ?? '');
-  const [tagId, setTagId] = useState('');
-  const [breakdown, setBreakdown] = useState<CostDimension>('service');
+  const [dimension, setDimension] = useState<CostDimension>('subscription');
+  const [limit, setLimit] = useState(HISTORY_PAGE);
   useEffect(() => {
     const nextDates = billingDates(report);
     setBaselineDate(nextDates.at(-2) ?? nextDates.at(-1) ?? '');
     setComparisonDate(nextDates.at(-1) ?? '');
-    setTagId('');
   }, [report]);
-  const comparison = useMemo(() => compareBillingDates(report, baselineDate, comparisonDate, tagId), [report, baselineDate, comparisonDate, tagId]);
-  const rows = useMemo(() => billingTags(report).filter((tag) => !tagId || tag.id === tagId).map((tag) => ({
-    ...tag, ...compareBillingDates(report, baselineDate, comparisonDate, tag.id),
-  })), [report, baselineDate, comparisonDate, tagId]);
+  useEffect(() => setLimit(HISTORY_PAGE), [dimension, baselineDate, comparisonDate]);
+  const detailed = details?.status === 'complete';
+  const available = useMemo(() => new Set(detailed ? details!.dates : []), [details, detailed]);
+
+  /* Day totals from the same rows the table below splits, so the headline and
+     the table always add up to the same figure. Without resource detail the
+     report's daily trend still answers the unfiltered total. */
+  const dayTotal = (date: string): number | null => {
+    if (!date) return null;
+    if (detailed) {
+      if (!available.has(date)) return null;
+      return details!.rows.reduce((sum, row) => sum + (row.dailyCosts[date] ?? 0), 0);
+    }
+    return compareBillingDates(report, date, date, '').baseline;
+  };
+  const baseline = dayTotal(baselineDate);
+  const comparison = dayTotal(comparisonDate);
+  const delta = baseline === null || comparison === null ? null : comparison - baseline;
+  const percentChange = delta === null || !baseline ? null : (delta / Math.abs(baseline)) * 100;
+
+  /* One row per group, the two days side by side, largest movement first - the
+     point of comparing two days is to find what moved. */
+  const groups = useMemo(() => {
+    if (!detailed || !baselineDate || !comparisonDate) return [];
+    return compareCostGroups(details, { startDate: comparisonDate, endDate: comparisonDate }, ALL, dimension, { startDate: baselineDate, endDate: baselineDate })
+      .filter((group) => (group.current ?? 0) !== 0 || (group.previous ?? 0) !== 0)
+      .sort((left, right) => Math.abs(right.delta ?? 0) - Math.abs(left.delta ?? 0) || Math.abs(right.current ?? 0) - Math.abs(left.current ?? 0));
+  }, [details, detailed, baselineDate, comparisonDate, dimension]);
+  const visible = groups.slice(0, limit);
+  /* The subscription under each name tells apart same-named services or groups
+     in different subscriptions; with one subscription in view it is just noise. */
+  const multipleSubscriptions = new Set(groups.map((group) => group.subscriptionId)).size > 1;
+  const noun = HISTORY_DIMENSIONS.find((item) => item.id === dimension)!.noun;
+  const heading = HISTORY_DIMENSIONS.find((item) => item.id === dimension)!.label;
   const change = (value: number | null) => value === null ? 'Unavailable' : `${value > 0 ? '+' : ''}${formatMoney(value)}`;
-  const filters = costFilters ?? {};
-  const trend = useTopGroupSeries({ details, window: costWindow ?? { startDate: '', endDate: '' }, filters, dimension: breakdown });
-  const showDetail = Boolean(details && costWindow);
+  const tone = (value: number | null) => value === null || value === 0 ? '' : value > 0 ? 'cost-increase' : 'cost-decrease';
+  const percent = (value: number | null, base: number | null) => value === null ? base === 0 ? 'New' : '—' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+
   return (
     <section className="billing-history" aria-label="Billing history comparison">
       <header className="billing-heading">
         <div><CalendarDays size={18} aria-hidden="true" /><h2>History</h2></div>
         <span>Daily billed cost · UTC</span>
       </header>
-      <div className="billing-filters">
-        <label className="billing-filter"><span>Baseline</span><input type="date" aria-label="Baseline billing date" min={dates[0]} max={dates.at(-1)} value={baselineDate} onChange={(event) => setBaselineDate(event.target.value)} disabled={!dates.length} /></label>
-        <button type="button" className="billing-swap ghost-button" aria-label="Swap billing dates" title="Swap billing dates" disabled={!dates.length} onClick={() => { setBaselineDate(comparisonDate); setComparisonDate(baselineDate); }}><ArrowLeftRight size={16} /></button>
-        <label className="billing-filter"><span>Compare with</span><input type="date" aria-label="Comparison billing date" min={dates[0]} max={dates.at(-1)} value={comparisonDate} onChange={(event) => setComparisonDate(event.target.value)} disabled={!dates.length} /></label>
-        <TagFilter report={report} value={tagId} onChange={setTagId} />
-      </div>
-      <div className="billing-metrics">
-        <div><span>Baseline cost</span><output aria-label="Baseline cost">{moneyOrUnavailable(comparison.baseline, formatMoney)}</output><small>{baselineDate || 'No billing date'}</small></div>
-        <div><span>Comparison cost</span><output aria-label="Comparison cost">{moneyOrUnavailable(comparison.comparison, formatMoney)}</output><small>{comparisonDate || 'No billing date'}</small></div>
-        <div><span>Change</span><output aria-label="Billing cost change" className={comparison.delta === null || comparison.delta === 0 ? '' : comparison.delta > 0 ? 'cost-increase' : 'cost-decrease'}>{change(comparison.delta)}</output><small>{comparison.percentChange === null ? comparison.baseline === 0 ? 'N/A (zero baseline)' : 'Percentage unavailable' : `${comparison.percentChange > 0 ? '+' : ''}${comparison.percentChange.toFixed(1)}%`}</small></div>
-      </div>
-      {!dates.length || comparison.baseline === null || comparison.comparison === null ? <p className="billing-coverage" role="status">Billing evidence is unavailable for one or both selected dates.</p> : null}
-      <p className="billing-provenance">{report.dailyCostTrend.statusMessage}</p>
-      {rows.length > 0 && (
-        <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Tag billing comparison">
-          <table className="data-table billing-table">
-            <caption>Tag-attributed charges (non-additive)</caption>
-            <thead><tr><th scope="col">Tag</th><th scope="col">{baselineDate || 'Baseline'}</th><th scope="col">{comparisonDate || 'Comparison'}</th><th scope="col">Change</th></tr></thead>
-            <tbody>{rows.map((row) => <tr key={row.id}><th scope="row">{row.label}</th><td>{moneyOrUnavailable(row.baseline, formatMoney)}</td><td>{moneyOrUnavailable(row.comparison, formatMoney)}</td><td className={row.delta === null || row.delta === 0 ? '' : row.delta > 0 ? 'cost-increase' : 'cost-decrease'}>{change(row.delta)}</td></tr>)}</tbody>
-          </table>
-        </div>
-      )}
-      {!rows.length && <p className="billing-provenance">Tag history is unavailable for this snapshot.</p>}
 
-      {showDetail && (
-        <section className="billing-detail" aria-label="Historical cost by dimension">
-          <header className="billing-heading">
-            <div><h3>Historical cost detail</h3></div>
-            <span>{costWindow!.startDate} – {costWindow!.endDate}</span>
-          </header>
-          <p className="billing-provenance">Daily billed cost across the report range. The chart tracks the five largest groups and both views follow the filters below.</p>
-          {onCostFiltersChange && <CostFilters details={details} value={filters} onChange={onCostFiltersChange} />}
-          <DailyTrendChart
-            dates={trend.dates}
-            series={trend.series}
-            formatMoney={formatMoney}
-            ariaLabel="Historical daily cost by group"
-            emptyMessage="No daily cost evidence matches the selected range and filters."
-          />
-          <GroupedCostBreakdown
-            details={details}
-            window={costWindow!}
-            filters={filters}
-            formatMoney={formatMoney}
-            displayCurrency={displayCurrency}
-            dimension={breakdown}
-            onDimensionChange={setBreakdown}
-            label="Historical cost breakdown"
-          />
-        </section>
-      )}
+      <div className="history-controls">
+        <div className="segmented history-breakdown" role="group" aria-label="History breakdown">
+          {HISTORY_DIMENSIONS.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              aria-pressed={dimension === item.id}
+              className={dimension === item.id ? 'active' : ''}
+              disabled={!detailed}
+              onClick={() => setDimension(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <section className="history-compare" aria-label="Compare two days">
+        <header className="cost-section-heading"><h3>Compare two days</h3></header>
+        <div className="billing-filters">
+          <label className="billing-filter"><span>Baseline</span><input type="date" aria-label="Baseline billing date" min={dates[0]} max={dates.at(-1)} value={baselineDate} onChange={(event) => setBaselineDate(event.target.value)} disabled={!dates.length} /></label>
+          <button type="button" className="billing-swap ghost-button" aria-label="Swap billing dates" title="Swap billing dates" disabled={!dates.length} onClick={() => { setBaselineDate(comparisonDate); setComparisonDate(baselineDate); }}><ArrowLeftRight size={16} /></button>
+          <label className="billing-filter"><span>Compare with</span><input type="date" aria-label="Comparison billing date" min={dates[0]} max={dates.at(-1)} value={comparisonDate} onChange={(event) => setComparisonDate(event.target.value)} disabled={!dates.length} /></label>
+        </div>
+        <div className="billing-metrics">
+          <div><span>Baseline cost</span><output aria-label="Baseline cost">{moneyOrUnavailable(baseline, formatMoney)}</output><small>{baselineDate ? dateLabel(baselineDate) : 'No billing date'}</small></div>
+          <div><span>Comparison cost</span><output aria-label="Comparison cost">{moneyOrUnavailable(comparison, formatMoney)}</output><small>{comparisonDate ? dateLabel(comparisonDate) : 'No billing date'}</small></div>
+          <div><span>Change</span><output aria-label="Billing cost change" className={tone(delta)}>{change(delta)}</output><small>{percentChange === null ? baseline === 0 ? 'N/A (zero baseline)' : 'Percentage unavailable' : `${percentChange > 0 ? '+' : ''}${percentChange.toFixed(1)}%`}</small></div>
+        </div>
+        {!dates.length || baseline === null || comparison === null ? <p className="billing-coverage" role="status">Billing evidence is unavailable for one or both selected dates.</p> : null}
+
+        {!detailed ? (
+          <p className="billing-provenance">{details?.statusMessage ?? `Resource cost detail is not in this snapshot, so the day cannot be broken down by ${noun}.`}</p>
+        ) : groups.length === 0 ? (
+          baseline !== null && comparison !== null && <p className="billing-provenance" role="status">No {noun} charges match these dates and filters.</p>
+        ) : (
+          <>
+            <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Two-day cost comparison">
+              <table className="report-table app-cost-table history-compare-table">
+                <thead>
+                  <tr>
+                    <th scope="col">{heading}</th>
+                    <th scope="col" className="num">{baselineDate} ({displayCurrency})</th>
+                    <th scope="col" className="num">{comparisonDate} ({displayCurrency})</th>
+                    <th scope="col" className="num">Change</th>
+                    <th scope="col" className="num">%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((group) => (
+                    <tr key={group.id}>
+                      <th scope="row">{group.name}{dimension !== 'subscription' && multipleSubscriptions && <small>{group.subscriptionName}</small>}</th>
+                      <td className="num">{moneyOrUnavailable(group.previous, formatMoney)}</td>
+                      <td className="num">{moneyOrUnavailable(group.current, formatMoney)}</td>
+                      <td className={`num ${tone(group.delta)}`}>{change(group.delta)}</td>
+                      <td className={`num ${tone(group.delta)}`}>{percent(group.percentage, group.previous)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="history-compare-foot">
+              <span>{groups.length.toLocaleString()} {groups.length === 1 ? noun : `${noun}s`} with cost on either day · largest change first</span>
+              {groups.length > visible.length && (
+                <button type="button" className="ghost-button" onClick={() => setLimit((value) => value + 25)}>
+                  Show more ({(groups.length - visible.length).toLocaleString()} remaining)
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+      <p className="billing-provenance">{report.dailyCostTrend.statusMessage}</p>
     </section>
   );
 }

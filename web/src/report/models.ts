@@ -209,6 +209,10 @@ export type TagValueCost = {
 export type TagDimensionCost = {
   tagKey: string;
   unallocatedCost: number;
+  /** What this key explains, and that as a share of total spend. Optional: snapshots
+      written before the API carried them omit both. */
+  allocatedCost?: number;
+  coverage?: number;
   rows: TagValueCost[];
 };
 
