@@ -12441,6 +12441,87 @@ body {
     color: var(--color-graphite-mid);
 }
 
+
+/* ================================================================
+   Key takeaways
+   ----------------------------------------------------------------
+   The executive summary opened with figures and no conclusions. These
+   lines state what the figures mean, each one derived from a number
+   shown further down, in two columns of plain sentences.
+   ================================================================ */
+
+:root .app-shell.app-shell .executive-takeaways {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(calc(380px * var(--ui-zoom)), 1fr));
+    gap: 1px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border: var(--border-width) solid var(--color-ash-stroke);
+    border-radius: var(--radius-md);
+    background: var(--color-ash-stroke);
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell .takeaway>:is(button, div) {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: calc(8px * var(--ui-zoom)) var(--space-4);
+    border: 0;
+    background: var(--color-surface);
+    color: var(--color-bone);
+    font: inherit;
+    font-size: calc(12.5px * var(--ui-zoom));
+    line-height: 1.35;
+    text-align: left;
+}
+
+:root .app-shell.app-shell .takeaway>button {
+    cursor: pointer;
+    transition: background-color var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell .takeaway>button:hover {
+    background: var(--color-surface-hover);
+}
+
+:root .app-shell.app-shell .takeaway>button:focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: calc(var(--focus-width) * -1);
+}
+
+:root .app-shell.app-shell .takeaway span {
+    flex: 1;
+    min-width: 0;
+}
+
+:root .app-shell.app-shell .takeaway svg {
+    flex: none;
+    color: var(--color-graphite-mid);
+    opacity: 0;
+    transition: opacity var(--press-duration) var(--press-ease);
+}
+
+:root .app-shell.app-shell .takeaway>button:hover svg,
+:root .app-shell.app-shell .takeaway>button:focus-visible svg {
+    opacity: 1;
+}
+
+:root .app-shell.app-shell .takeaway i {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell .takeaway-good i { background: var(--color-metric-green); }
+:root .app-shell.app-shell .takeaway-warning i { background: var(--color-signal-amber, #e3b341); }
+:root .app-shell.app-shell .takeaway-risk i { background: var(--color-cost-increase); }
+
 :root .app-shell.app-shell .budget-table td.cost-increase {
     color: var(--color-cost-increase);
 }

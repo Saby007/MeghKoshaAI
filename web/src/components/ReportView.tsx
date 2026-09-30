@@ -55,6 +55,7 @@ import { CostExportButton, CostFilters, CostWindowOverview, DailySubscriptionVal
 import { GroupedCostBreakdown } from './CostBreakdown';
 import { costWindowDates, matchesCostFilter, monthCostWindow, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import { BudgetContext, BudgetDailyChart, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
+import { buildTakeaways, ExecutiveTakeaways } from './ExecutiveTakeaways';
 import { ServiceRetirements } from './ServiceRetirements';
 import { DayAxis, dayAxis, useChartWidth } from './TrendChart';
 import { BRAND_NAME } from '../brand';
@@ -1592,6 +1593,15 @@ function ExecutiveSummaryTab({
     ? `${reportDate(analysisWindow.startDate)} - ${reportDate(analysisWindow.endDate)}`
     : `Last ${rangeMode} days`;
   const [costDetailsOpened, setCostDetailsOpened] = useState(true);
+  const takeaways = useMemo(() => buildTakeaways({
+    report,
+    budgets: budgetState && !budgetState.loading && !budgetState.error
+      ? relateBudgets(budgetState.budgets, report.costDetails?.rows ?? [], {}).map(({ budget }) => budget)
+      : [],
+    anomalySignals: anomalyState.result?.status === 'ready' ? anomalyState.result.anomalies.length : null,
+    window: costWindow,
+    formatMoney,
+  }), [report, budgetState, anomalyState.result, costWindow, formatMoney]);
   // Shown on the collapsed "Spend over time" badge so the index row still
   // carries its headline figure without opening the section.
   const rangeTotal = useMemo(
@@ -1624,6 +1634,15 @@ function ExecutiveSummaryTab({
           </div>
         }
       >
+        <ExecutiveTakeaways
+          items={takeaways}
+          onNavigate={(target) => {
+            /* Budgets have their own section further down this page; the rest
+               are report areas of their own. */
+            if (target === 'Budgets') document.querySelector('[data-dashboard-section="budget-context"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            else onNavigate(target);
+          }}
+        />
         <div className="executive-hero">
           <button type="button" className={`kpi-card kpi-link-card exec-primary ${s.spendChangePercentage === null || s.spendChangePercentage === 0 ? '' : s.spendChangePercentage > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()} onClick={() => onNavigate('History')} aria-label="Open cost history">
             <div className="kpi-label">Total monthly spend</div>
