@@ -131,3 +131,15 @@
 :root .app-shell.app-shell .executive-hero .exec-primary:hover {
     box-shadow: var(--elevation-hover), inset 0 1px 0 var(--color-accent-line);
 }
+
+/* The scope controls sit at the right of the ribbon, alongside the report status and the
+   update button, rather than at the left. The first item takes the free space, so the
+   group stays together at any width, and the run area no longer claims it separately. */
+
+:root .app-shell.app-shell .scope-ribbon-main > :first-child {
+    margin-left: auto;
+}
+
+:root .app-shell.app-shell .scope-ribbon-main .scope-run-area {
+    margin-left: 0;
+}
