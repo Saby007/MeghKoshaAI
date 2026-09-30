@@ -193,12 +193,29 @@ it('shows no graph or budget for a key alone and charts the chosen value over th
   expect(container.querySelector('[aria-label="Cost by hour"]')?.textContent).toContain('2026-09-01 - 2026-09-07');
 });
 
+it('ranks tag keys and states what one explains from its rows, not from a stored zero', async () => {
+  // A snapshot written before the API carried the figure holds 0, not a missing value.
+  const staleSnapshot = {
+    ...tagReportFixture,
+    tagCosts: {
+      ...tagReportFixture.tagCosts,
+      dimensions: tagReportFixture.tagCosts.dimensions.map((item) => ({ ...item, allocatedCost: 0, coverage: 0 })),
+    },
+  };
+  await act(async () => root.render(<ReportView report={staleSnapshot} narration={null} snapshotId="visual-report-1" />));
+  await act(async () => button('Cost by Tags/Application').click());
+  expect([...tagSelect('Tag key').options].map((option) => option.textContent)).toEqual(['Environment', 'Team']);
+  const explains = container.querySelector('.tag-cost-coverage')!.textContent!;
+  expect(explains).toContain('Environment explains $250.00 of $250.00');
+  expect(explains).not.toContain('%');
+});
+
 it('filters tag costs by the selected key and value without changing financial evidence', async () => {
   await act(async () => root.render(<ReportView report={tagReportFixture} narration={null} snapshotId="visual-report-1" />));
   await act(async () => button('Cost by Tags/Application').click());
   // Keys open most-explanatory first: Environment (250) before Team (200).
   expect([...tagSelect('Tag key').options].map((option) => option.value)).toEqual(['Environment', 'Team']);
-  await chooseTagOption('Tag key', 'Team · 80.0% of spend');
+  await chooseTagOption('Tag key', 'Team');
   expect(tagSelect('Tag value')).not.toBeNull();
   expect([...tagSelect('Tag value').options].map((option) => option.textContent)).toEqual(['All values', 'Platform', 'Sales']);
   const table = container.querySelector('.app-cost-table')!;
@@ -215,7 +232,7 @@ it('filters tag costs by the selected key and value without changing financial e
   await chooseTagOption('Tag value', 'All values');
   expect(tagValueRows(table)).toHaveLength(2);
   await chooseTagOption('Tag value', 'Sales');
-  await chooseTagOption('Tag key', 'Environment · 100.0% of spend');
+  await chooseTagOption('Tag key', 'Environment');
   expect([...tagSelect('Tag value').options].map((option) => option.textContent)).toEqual(['All values', 'Production']);
   expect(tagSelect('Tag value').selectedOptions[0].textContent).toBe('All values');
   expect(tagValueRows(table)).toHaveLength(1);
@@ -226,7 +243,7 @@ it('filters tag costs by the selected key and value without changing financial e
 it('falls back to all values after report changes and allows selecting values on the fallback key', async () => {
   await act(async () => root.render(<ReportView report={tagReportFixture} narration={null} snapshotId="visual-report-1" />));
   await act(async () => button('Cost by Tags/Application').click());
-  await chooseTagOption('Tag key', 'Team · 80.0% of spend');
+  await chooseTagOption('Tag key', 'Team');
   await chooseTagOption('Tag value', 'Sales');
   const team = tagReportFixture.tagCosts.dimensions[0];
   const refreshedReport = { ...tagReportFixture, tagCosts: {

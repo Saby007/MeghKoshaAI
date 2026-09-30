@@ -3722,6 +3722,14 @@ function GovernanceTab({ report }: { report: FullReport }) {
   );
 }
 
+/* What a tag key explains is the sum of its rows. The API sends the same figure, but a
+   snapshot written before it did carries 0 rather than omitting it, so anything that
+   trusts the stored value shows "explains $0.00" above a table of real spend and cannot
+   rank the keys. */
+function allocatedOf(item: TagDimensionCost): number {
+  return item.rows.reduce((total, row) => total + row.monthlyCost, 0);
+}
+
 function CostByTagsTab({
   report,
   formatMoney,
@@ -3744,15 +3752,14 @@ function CostByTagsTab({
   snapshotId: string | null;
 }) {
   const summary = report.tagCosts;
-  /* Most explanatory key first. The API now orders them this way, but saved
-     snapshots written before it did are alphabetical - which opened this page on
-     `Action`, one value and 3% of spend. Sorted here too so an old snapshot opens
-     on its most useful key; stable, so the API's own order is kept on ties. */
-  const dimensions = useMemo(() => {
-    const allocated = (item: TagDimensionCost) => item.allocatedCost
-      ?? item.rows.reduce((total, row) => total + row.monthlyCost, 0);
-    return [...(summary?.dimensions ?? [])].sort((left, right) => allocated(right) - allocated(left));
-  }, [summary?.dimensions]);
+  /* Most explanatory key first. Saved snapshots written before the API ordered them this
+     way are alphabetical - which opened this page on `Action`, one value and 3% of
+     spend. Sorted here so every snapshot opens on its most useful key; stable, so the
+     API's own order is kept on ties. */
+  const dimensions = useMemo(
+    () => [...(summary?.dimensions ?? [])].sort((left, right) => allocatedOf(right) - allocatedOf(left)),
+    [summary?.dimensions],
+  );
   const [selectedKey, setSelectedKey] = useState<string>(dimensions[0]?.tagKey ?? '');
   const [selectedValue, setSelectedValue] = useState<string | null>(null);
   const [breakdown, setBreakdown] = useState<CostDimension>('service');
@@ -3765,19 +3772,9 @@ function CostByTagsTab({
      included, not against the largest value present. Scaling to the largest row made
      every single-value key draw one full-width bar, which reads as "this tag accounts
      for all of it" when on this estate the widest of them accounts for 5%. */
-  const dimensionAllocated = dimension?.allocatedCost
-    ?? allRows.reduce((total, row) => total + row.monthlyCost, 0);
+  const dimensionAllocated = dimension ? allocatedOf(dimension) : 0;
   const dimensionTotal = dimensionAllocated + (dimension?.unallocatedCost ?? 0);
   const barBasis = Math.max(dimensionTotal, ...allRows.map((row) => row.monthlyCost), 1);
-  /* A key's share of total spend, for the picker and the header. Computed here when a
-     snapshot predates the API carrying it, so an older report still gets the context. */
-  const coverageOf = (item: TagDimensionCost) => {
-    if (typeof item.coverage === 'number' && item.coverage > 0) return item.coverage;
-    const allocated = item.allocatedCost
-      ?? item.rows.reduce((total, row) => total + row.monthlyCost, 0);
-    const total = summary?.totalSpend ?? 0;
-    return total > 0 ? allocated / total : 0;
-  };
   /* Selecting a tag key and value here scopes the breakdowns below, so the two
      halves of this page answer the same question rather than sitting side by
      side unaware of each other.
@@ -3894,12 +3891,8 @@ function CostByTagsTab({
                 setSelectedKey(event.target.value);
                 setSelectedValue(null);
               }}>
-                {/* Each key's share of spend sits in its own option. The list is
-                    ordered by it, so the most explanatory key is both first and
-                    visibly first - without this a reader had to open all fifteen
-                    to learn that the best of them covers 5%. */}
                 {dimensions.map((item) => (
-                  <option value={item.tagKey} key={item.tagKey}>{item.tagKey} · {percent(coverageOf(item))} of spend</option>
+                  <option value={item.tagKey} key={item.tagKey}>{item.tagKey}</option>
                 ))}
               </select>
             </label>
@@ -3929,7 +3922,7 @@ function CostByTagsTab({
               bill. */}
           <p className="tag-cost-coverage">
             <strong>{dimension?.tagKey}</strong> explains {formatMoney(dimensionAllocated)} of {formatMoney(summary?.totalSpend ?? 0)}
-            {' '}({percent(coverageOf(dimension!))}) across {allRows.length === 1 ? '1 value' : `${allRows.length} values`}.
+            {' '}across {allRows.length === 1 ? '1 value' : `${allRows.length} values`}.
             {dimension && dimension.unallocatedCost > 0 && (
               <> {formatMoney(dimension.unallocatedCost)} carries no <strong>{dimension.tagKey}</strong> tag and cannot be attributed.</>
             )}
