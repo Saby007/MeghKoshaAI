@@ -480,20 +480,23 @@ function CategorySpendPills({
   const domainEntries = CATEGORY_PILL_DOMAINS.map(({ domain, label }) => ({
     domain,
     label,
-    spend: report.domains[domain]?.domainSpendMonth ?? 0,
     tab: DOMAIN_TABS[domain],
   }));
-  const domainTotal = domainEntries.reduce((sum, item) => sum + item.spend, 0);
-  const otherSpend = Math.max(report.executiveSummary.currentMonthlySpend - domainTotal, 0);
+  /* These are the optimisation areas, not a spend breakdown. Each domain's
+     spend is what that tab assesses (Compute = virtual machines), which is a
+     narrower set than the billing category of the same name - Container Apps
+     bills as compute but is not assessed by the Compute tab. Printing both
+     figures on one page produced "Compute $15" beside "Compute $313", so the
+     strip navigates and the spend-by-resource-type chart owns the numbers. */
   return (
-    <nav className="category-pill-row" aria-label="Spend by category">
+    <nav className="category-pill-row" aria-label="Report areas">
       <button
         type="button"
         aria-pressed={activeTab === 'Executive Summary'}
         className={`category-pill ${activeTab === 'Executive Summary' ? 'active' : ''}`}
         onClick={() => onSelect('Executive Summary')}
       >
-        <span>All spend</span>
+        <span>Overview</span>
         <strong>{formatMoney(report.executiveSummary.currentMonthlySpend)}</strong>
       </button>
       {domainEntries.map((item) => (
@@ -501,19 +504,12 @@ function CategorySpendPills({
           key={item.domain}
           type="button"
           aria-pressed={activeTab === item.tab}
-          className={`category-pill ${activeTab === item.tab ? 'active' : ''}`}
+          className={`category-pill category-pill-nav ${activeTab === item.tab ? 'active' : ''}`}
           onClick={() => onSelect(item.tab)}
         >
           <span>{item.label}</span>
-          <strong>{formatMoney(item.spend)}</strong>
         </button>
       ))}
-      {otherSpend > 0 && (
-        <div className="category-pill category-pill-static">
-          <span>Other services</span>
-          <strong>{formatMoney(otherSpend)}</strong>
-        </div>
-      )}
     </nav>
   );
 }

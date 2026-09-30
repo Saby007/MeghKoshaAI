@@ -30,15 +30,15 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 
 it('keeps the same visible category navigation across report tab switches', async () => {
   await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
-  const navigation = container.querySelector('[aria-label="Spend by category"]')!;
+  const navigation = container.querySelector('[aria-label="Report areas"]')!;
   expect(navigation.closest('details')).toBeNull();
   await act(async () => button('History').click());
-  expect(container.querySelector('[aria-label="Spend by category"]')).toBe(navigation);
+  expect(container.querySelector('[aria-label="Report areas"]')).toBe(navigation);
   expect(navigation.closest('details')).toBeNull();
   await act(async () => navigation.querySelectorAll<HTMLButtonElement>('button')[1].click());
   expect(navigation.querySelector('[aria-pressed="true"]')?.textContent).toContain('Compute');
   expect(container.querySelector('#report-page-heading')?.textContent).toBe('Compute Optimization');
-  expect(container.querySelectorAll('[aria-label="Spend by category"]')).toHaveLength(1);
+  expect(container.querySelectorAll('[aria-label="Report areas"]')).toHaveLength(1);
 });
 
 it('navigates actionable cost overview cards and leaves informational cards static', async () => {
@@ -141,8 +141,8 @@ it('surfaces the detailed visuals by default and keeps them mounted across toggl
   expect(container.querySelector('.cost-analysis-details .billing-filters')).not.toBeNull();
   expect(container.textContent).toContain('Assessed month');
   expect(container.textContent).not.toContain('Month to date');
-  expect(container.querySelector('[aria-label="Spend by category"]')?.tagName).toBe('NAV');
-  expect(container.querySelector('[aria-pressed="true"]')?.textContent).toContain('All spend');
+  expect(container.querySelector('[aria-label="Report areas"]')?.tagName).toBe('NAV');
+  expect(container.querySelector('[aria-pressed="true"]')?.textContent).toContain('Overview');
   expect(container.textContent).toContain('No prioritised findings in this snapshot');
   expect(container.querySelector('[aria-label="Billing day filter"]')).not.toBeNull();
   await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')); });
