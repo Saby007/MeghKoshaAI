@@ -143,3 +143,55 @@
 :root .app-shell.app-shell .scope-ribbon-main .scope-run-area {
     margin-left: 0;
 }
+
+/* In the stacked sign-in layout the strapline box moves to the left edge but its two lines
+   stayed right-aligned inside it, so the first line began 54px in from the second. */
+
+@media (max-width: 1100px) {
+    :root .signin-production .signin-strapline {
+        align-items: flex-start;
+    }
+}
+
+/* A tag key is a literal name, not a word in the sentence, so it is set apart as one. */
+
+:root .app-shell.app-shell .tag-key-chip {
+    padding: 1px var(--space-2);
+    border: var(--border-width) solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    background: var(--glass-bg-strong);
+    color: var(--color-bone);
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: .92em;
+}
+
+/* The month-over-month chart on the executive summary has narrow columns (48px minimum),
+   so it fits a half-width card. Its shared 540px floor pushed the latest month out of view
+   at laptop widths. The rate-optimisation chart keeps the floor; its columns need it. */
+
+:root .app-shell.app-shell .executive-visual .monthly-chart {
+    min-width: 0;
+}
+
+/* Nothing is set below 12px in the optimisation, anomaly and roadmap views either. */
+
+:root .app-shell.app-shell.app-shell :is(
+    .anomaly-chart-header span,
+    .anomaly-chart-header strong,
+    .anomaly-source-note,
+    .anomaly-contributor b,
+    .anomaly-contributor small,
+    .immediate-actions-summary span,
+    .immediate-actions-summary small,
+    .metric-coverage header span,
+    .metric-coverage header strong,
+    .metric-coverage b,
+    .metric-coverage span,
+    .live-badge,
+    .immediate-actions-summary b,
+    .ai-opportunities header span,
+    .ai-opportunities header strong,
+    .ai-opportunities p
+) {
+    font-size: 12px;
+}

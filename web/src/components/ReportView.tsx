@@ -3250,7 +3250,18 @@ function StaleResourcesTab({
     <div className="panel">
       <h2 className="section-title">Stale and Orphaned Resources</h2>
       <p className="section-subtitle">
-        Inventory threshold {report.reportMetadata.staleDays} days · protected tags {report.reportMetadata.protectedTagKeys.join(', ') || 'none'}
+        Inventory threshold {report.reportMetadata.staleDays} days ·{' '}
+        {report.reportMetadata.protectedTagKeys.length === 0
+          ? 'no protected tags'
+          : (
+            <>
+              resources tagged{' '}
+              {report.reportMetadata.protectedTagKeys.map((key, index) => (
+                <Fragment key={key}>{index > 0 && ', '}<code className="tag-key-chip">{key}</code></Fragment>
+              ))}{' '}
+              are excluded
+            </>
+          )}
       </p>
       <div className="kpi-grid stale-kpi-grid">
         <div className="kpi-card risk">
