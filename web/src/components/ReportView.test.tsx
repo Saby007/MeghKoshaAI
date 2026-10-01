@@ -102,6 +102,9 @@ it('drills from a selected period into day resources, preserves the range for an
   await act(async () => drilldown.querySelector<HTMLButtonElement>('[aria-label^="Check VM availability"]')!.click());
   expect(drilldown.textContent).toContain('12.00 h observed (partial)');
   expect(drilldown.textContent).toContain('720/1440 minutes');
+  // A non-zero spike count is red, not the amber used for a mere warning.
+  expect(container.querySelector('.period-anomaly-link strong')?.className).toBe('metric-count-risk');
+  expect(container.querySelector('.period-anomaly-link strong')?.className).not.toContain('warn');
   await act(async () => container.querySelector<HTMLButtonElement>('.period-anomaly-link')!.click());
   expect(container.querySelector('[aria-label="Selected period anomalies"]')?.textContent).toContain('finance-vm');
   // The 7-day window supplied above is what the anomalies tab compares against.
@@ -316,6 +319,46 @@ const renderTagBudgets = async (budgets: unknown[]) => {
   await act(async () => button('Cost by Tags/Application').click());
 };
 
+const dayBar = (date: string) => container.querySelector<HTMLButtonElement>(`.tag-selection .cost-bar-hit[title^="${date}"]`);
+const dayContributors = () => container.querySelector('.tag-day-drilldown');
+
+it('makes the application graph clickable and lists that day\'s contributors, with no budget needed', async () => {
+  await renderTagBudgets([]);
+  // A key alone has no graph, so nothing to click yet.
+  expect(container.querySelector('.tag-selection')).toBeNull();
+
+  await chooseTagOption('Tag value', 'Finance');
+  expect(container.querySelector('.tag-cost-budgets')).toBeNull();
+  expect(dayContributors()).toBeNull();
+
+  await act(async () => dayBar('2026-09-07')!.click());
+  const contributors = dayContributors()!;
+  expect(contributors.getAttribute('aria-label')).toBe('Contributors on 2026-09-07 for application = Finance');
+  // The resources behind that day, inside the selected application only.
+  expect(contributors.textContent).toContain('finance-vm');
+  expect(contributors.textContent).not.toContain('shared-disk');
+  expect(dayBar('2026-09-07')!.getAttribute('aria-pressed')).toBe('true');
+
+  // The same day again, or Close, puts it away.
+  await act(async () => dayBar('2026-09-07')!.click());
+  expect(dayContributors()).toBeNull();
+  await act(async () => dayBar('2026-09-06')!.click());
+  expect(dayContributors()!.getAttribute('aria-label')).toContain('2026-09-06');
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close day contributors"]')!.click());
+  expect(dayContributors()).toBeNull();
+});
+
+it('drops the chosen day when the application changes, so one application\'s day is never shown for another', async () => {
+  await renderTagBudgets([]);
+  await chooseTagOption('Tag value', 'Finance');
+  await act(async () => dayBar('2026-09-07')!.click());
+  expect(dayContributors()).not.toBeNull();
+  await chooseTagOption('Tag value', 'Platform');
+  expect(dayContributors()).toBeNull();
+  await act(async () => dayBar('2026-09-07')!.click());
+  expect(dayContributors()!.textContent).toContain('shared-disk');
+  expect(dayContributors()!.textContent).not.toContain('finance-vm');
+});
 it('lists only budgets whose own filter names the chosen key and value', async () => {
   const contactBudget = { ...financeBudget, name: 'Contact budget', filter: { tags: { name: 'contact', operator: 'In', values: ['Finance'] } } };
   await renderTagBudgets([financeBudget, subscriptionWideBudget, foreignSubscriptionBudget, contactBudget]);

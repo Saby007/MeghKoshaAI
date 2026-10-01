@@ -3838,9 +3838,14 @@ function CostByTagsTab({
   /* Picking a day on a budget chart asks "what did this application run that
      day", so the answer is resource-level and stays inside the selection. */
   const [budgetDay, setBudgetDay] = useState<{ key: string; date: string } | null>(null);
+  /* The same question asked of the application's own graph: the day picked there, whether or
+     not any budget tracks this application. */
+  const [selectionDay, setSelectionDay] = useState<string | null>(null);
   useEffect(() => {
     setBudgetDay(null);
+    setSelectionDay(null);
   }, [selectedKey, activeValue, costWindow.startDate, costWindow.endDate]);
+  const selectionDayTotal = selectionDay === null ? null : selectionValues[selectionDates.indexOf(selectionDay)] ?? null;
   const budgetCard = ({ budget, relation }: { budget: Budget; relation: string }) => {
     const status = budgetThreshold(budget);
     const key = `${budget.subscriptionId}:${budget.name}`;
@@ -4003,9 +4008,27 @@ function CostByTagsTab({
               formatMoney={formatMoney}
               ariaLabel={`Daily cost for ${scopeLabel}`}
               emptyMessage={`No daily cost evidence covers ${scopeLabel} in the selected period.`}
+              selectedDate={selectionDay}
+              onSelectDate={(date) => setSelectionDay((value) => value === date ? null : date)}
             />
           ) : (
             <p className="section-subtitle">Daily cost detail is not available in this report.</p>
+          )}
+          {selectionDay && report.costDetails?.status === 'complete' && (
+            <section className="budget-day-drilldown tag-day-drilldown" aria-label={`Contributors on ${selectionDay} for ${scopeLabel}`}>
+              <header className="cost-section-heading">
+                <h4>Contributors on {reportDate(selectionDay)} · {scopeLabel}{selectionDayTotal !== null && <> · {formatMoney(selectionDayTotal)}</>}</h4>
+                <button type="button" className="ghost-button" onClick={() => setSelectionDay(null)} aria-label="Close day contributors">Close</button>
+              </header>
+              <ResourceCostTable
+                details={report.costDetails}
+                window={{ startDate: selectionDay, endDate: selectionDay }}
+                previous={previousCostWindow({ startDate: selectionDay, endDate: selectionDay })}
+                filters={scopedFilters}
+                formatMoney={formatHourlyMoney}
+                snapshotId={snapshotId}
+              />
+            </section>
           )}
           {budgetState?.loading && <p role="status">Checking subscription budgets...</p>}
           {budgetState?.error && <p role="alert">{budgetState.error}</p>}
