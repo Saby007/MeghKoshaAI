@@ -1669,15 +1669,6 @@ function ExecutiveSummaryTab({
       </DashboardSection>
 
       <DashboardSection
-        id="spend-distribution-overview"
-        title="Spend Distribution"
-        caption="Where the money goes, by type, application, tag and region"
-        aside={<span className="dashboard-section-figure">{formatMoney(s.currentMonthlySpend)}</span>}
-      >
-        <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={costWindow} />
-      </DashboardSection>
-
-      <DashboardSection
         id="cost-comparison"
         title="Cost Comparison"
         caption="Selected period against the preceding one"
@@ -1699,6 +1690,15 @@ function ExecutiveSummaryTab({
           selectedDay={selectedDay}
           onSelectDay={setSelectedDay}
         />
+      </DashboardSection>
+
+      <DashboardSection
+        id="spend-distribution-overview"
+        title="Spend Distribution"
+        caption="Where the money goes, by type, application, tag and region"
+        aside={<span className="dashboard-section-figure">{formatMoney(s.currentMonthlySpend)}</span>}
+      >
+        <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={costWindow} />
       </DashboardSection>
 
       <DashboardSection

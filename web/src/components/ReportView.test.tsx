@@ -34,6 +34,13 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 
+it('puts the cost comparison above the spend distribution on the executive summary', async () => {
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
+  const order = [...container.querySelectorAll('[data-dashboard-section]')].map((section) => section.getAttribute('data-dashboard-section'));
+  expect(order.indexOf('cost-comparison')).toBeGreaterThan(-1);
+  expect(order.indexOf('cost-comparison')).toBeLessThan(order.indexOf('spend-distribution-overview'));
+  expect(order.indexOf('cost-overview')).toBeLessThan(order.indexOf('cost-comparison'));
+});
 it('keeps the same visible category navigation across report tab switches', async () => {
   await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
   const navigation = container.querySelector('[aria-label="Report areas"]')!;
