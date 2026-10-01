@@ -212,3 +212,169 @@
         justify-content: flex-end;
     }
 }
+
+
+/* ================================================================
+   Report navigation
+   ----------------------------------------------------------------
+   Desktop only: the stacked layout below 900px keeps its own rules.
+   The rail is one continuous column rather than a block that stops
+   partway down the page, groups read as groups (icon tile, hairline
+   between them), pages hang off a guide line, and the current page is
+   marked by a lit bar on that line rather than only a tinted row.
+   ================================================================ */
+
+@media (min-width: 901px) {
+    /* The column colour is painted by the frame, so it reaches the bottom of the page. The
+       sidebar itself is sticky and only as tall as its menu, which left a visible seam. */
+
+    :root .app-shell.app-shell.app-shell .dashboard-frame {
+        --nav-width: 232px;
+        --nav-surface: color-mix(in srgb, var(--color-obsidian-canvas) 45%, var(--color-surface));
+        background-image: linear-gradient(to right, var(--nav-surface) 0, var(--nav-surface) var(--nav-width), transparent var(--nav-width));
+    }
+
+    :root .app-shell.app-shell.app-shell .dashboard-frame:has(.left-nav-sidebar.is-collapsed) {
+        --nav-width: calc(52px * var(--ui-zoom, 1));
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar {
+        background:
+            radial-gradient(120% 220px at 0 0, color-mix(in srgb, var(--color-signal-orange) 9%, transparent), transparent 70%);
+        scrollbar-width: thin;
+        scrollbar-color: var(--scrollbar-thumb) transparent;
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .report-nav-groups {
+        gap: var(--space-2);
+    }
+
+    /* Search: a quiet field that lights up when it is used. */
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .report-nav-search {
+        min-height: calc(36px * var(--ui-zoom, 1));
+        padding: 0 var(--space-3);
+        border-color: var(--glass-border);
+        border-radius: var(--radius-md);
+        background: var(--glass-bg);
+        color: var(--color-graphite-mid);
+        transition: border-color var(--motion-duration) var(--ease-glass), box-shadow var(--motion-duration) var(--ease-glass), background-color var(--motion-duration) var(--ease-glass), color var(--motion-duration) var(--ease-glass);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .report-nav-search:hover {
+        background: var(--glass-bg-strong);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .report-nav-search:focus-within {
+        outline: none;
+        border-color: var(--color-accent-line);
+        background: var(--glass-bg-strong);
+        color: var(--color-signal-orange);
+        box-shadow: 0 0 0 3px var(--color-accent-glow);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .report-nav-search input {
+        font-size: var(--font-size-sm);
+    }
+
+    /* Groups: the icon sits in a tinted tile, the label is a plain overline. */
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-group + .left-nav-group {
+        padding-top: var(--space-2);
+        border-top: var(--border-width) solid color-mix(in srgb, var(--color-ash-stroke) 55%, transparent);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-group-toggle {
+        min-height: calc(34px * var(--ui-zoom, 1));
+        padding: 0 var(--space-2);
+        gap: var(--space-3);
+        font-size: var(--font-size-xs);
+        letter-spacing: .09em;
+        color: var(--color-graphite-mid);
+        transition: color var(--motion-duration) var(--ease-glass), background-color var(--motion-duration) var(--ease-glass);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-group-toggle:hover:not(:disabled) {
+        color: var(--color-bone);
+        background: var(--color-surface-hover);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-group-toggle .report-nav-group-icon {
+        box-sizing: content-box;
+        flex: none;
+        padding: 5px;
+        border-radius: var(--radius-sm);
+        background: color-mix(in srgb, var(--color-signal-orange) 13%, transparent);
+        color: var(--color-signal-orange);
+        transition: background-color var(--motion-duration) var(--ease-glass);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-group-toggle:hover:not(:disabled) .report-nav-group-icon {
+        background: color-mix(in srgb, var(--color-signal-orange) 22%, transparent);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .report-nav-chevron {
+        opacity: .65;
+    }
+
+    /* Pages hang off a guide line that runs from the middle of the group's icon tile. */
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-children {
+        margin: 2px 0 var(--space-1) calc(var(--space-2) + 13px);
+        padding-left: var(--space-3);
+        border-left: var(--border-width) solid color-mix(in srgb, var(--color-ash-stroke) 75%, transparent);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-children button {
+        position: relative;
+        min-height: calc(34px * var(--ui-zoom, 1));
+        margin-block: 1px;
+        padding: 0 var(--space-3);
+        font-size: var(--font-size-sm);
+        font-weight: var(--weight-medium);
+        color: var(--color-pale-stone);
+        transition: background-color var(--motion-duration) var(--ease-glass), color var(--motion-duration) var(--ease-glass);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-children button:hover:not(.active) {
+        background: var(--color-surface-hover);
+        color: var(--color-bone);
+    }
+
+    /* The current page: a gradient that fades out to the right, and a lit bar on the guide line. */
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-children button.active {
+        background: linear-gradient(90deg, color-mix(in srgb, var(--color-signal-orange) 20%, transparent), color-mix(in srgb, var(--color-signal-orange) 4%, transparent));
+        color: var(--color-signal-orange);
+        font-weight: var(--weight-semi);
+        box-shadow: none;
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-children button.active::before {
+        content: '';
+        position: absolute;
+        top: 7px;
+        bottom: 7px;
+        left: calc(-1 * var(--space-3) - 1px);
+        width: 3px;
+        border-radius: 3px;
+        background: var(--color-signal-orange);
+        box-shadow: 0 0 10px var(--color-accent-glow);
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar .left-nav-collapse {
+        border-color: var(--glass-border);
+        background: var(--glass-bg);
+    }
+
+    /* Collapsed to the icon rail: only the tiles remain, centred, with no hairlines. */
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar.is-collapsed .left-nav-group + .left-nav-group {
+        padding-top: 0;
+        border-top: 0;
+    }
+
+    :root .app-shell.app-shell.app-shell .left-nav-sidebar.is-collapsed .left-nav-group-toggle {
+        padding-inline: 0;
+    }
+}

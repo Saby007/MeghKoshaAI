@@ -334,7 +334,9 @@ function SubscriptionReferences({ subscriptions }: { subscriptions: Subscription
 // Persistent left-side navigation (overrides the earlier "top-only nav, no left
 // sidebar" decision per explicit ADO Task 781 instruction, comment 8538467, item 8).
 export function LeftNavSidebar({ activeTab, onSelect }: { activeTab: Tab; onSelect: (tab: Tab) => void }) {
-  const [expandedGroups, setExpandedGroups] = useState<Set<PrimaryNav>>(() => new Set(['dashboard', 'costManagement']));
+  /* Every group starts open: with two of six open, ten of the nineteen pages were hidden and the
+     rail's lower half was empty. A group the reader closes stays closed. */
+  const [expandedGroups, setExpandedGroups] = useState<Set<PrimaryNav>>(() => new Set(PRIMARY_NAV_ORDER));
   const [mobileOpen, setMobileOpen] = useState(false);
   /* The sidebar held ~230px on every page but its menu ends about a third of
      the way down. Collapsed, it keeps only the group icons and gives the
@@ -354,7 +356,8 @@ export function LeftNavSidebar({ activeTab, onSelect }: { activeTab: Tab; onSele
   })).filter(({ pages }) => pages.length > 0);
   useEffect(() => {
     const activeGroup = PRIMARY_NAV_ORDER.find((group) => PRIMARY_NAV_TABS[group].includes(activeTab));
-    if (activeGroup) setExpandedGroups(new Set(['dashboard', 'costManagement', activeGroup]));
+    // Opening a page reveals its group, but does not reset the others.
+    if (activeGroup) setExpandedGroups((current) => current.has(activeGroup) ? current : new Set([...current, activeGroup]));
   }, [activeTab]);
   function selectPage(page: Tab) {
     setPageQuery('');

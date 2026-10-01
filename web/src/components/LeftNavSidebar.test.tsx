@@ -28,8 +28,18 @@ it('expands and collapses navigation branches and selects billing pages', async 
   expect(onSelect).toHaveBeenCalledWith('Cost by Hour');
 });
 
-it('reveals an active child when navigation changes from another view', async () => {
+it('opens every group at first', async () => {
   await act(async () => root.render(<LeftNavSidebar activeTab="Executive Summary" onSelect={vi.fn()} />));
+  const toggles = [...container.querySelectorAll<HTMLButtonElement>('.left-nav-group-toggle')];
+  expect(toggles).toHaveLength(6);
+  expect(toggles.every((item) => item.getAttribute('aria-expanded') === 'true')).toBe(true);
+});
+
+it('keeps a group the reader closed shut when another page opens, but reveals it for its own page', async () => {
+  await act(async () => root.render(<LeftNavSidebar activeTab="Executive Summary" onSelect={vi.fn()} />));
+  await act(async () => button('Recommendations').click());
+  expect(button('Recommendations').getAttribute('aria-expanded')).toBe('false');
+  await act(async () => root.render(<LeftNavSidebar activeTab="History" onSelect={vi.fn()} />));
   expect(button('Recommendations').getAttribute('aria-expanded')).toBe('false');
   await act(async () => root.render(<LeftNavSidebar activeTab="Azure SQL Optimization" onSelect={vi.fn()} />));
   expect(button('Recommendations').getAttribute('aria-expanded')).toBe('true');
