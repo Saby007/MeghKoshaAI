@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, CheckCheck, ChevronDown, LoaderCircle, Play, RefreshCw, Search, X } from 'lucide-react';
-import type { StaleDays } from '../collectors/costAssessment';
 
 export type Subscription = { subscriptionId: string; displayName: string; state?: string };
 
@@ -13,13 +12,13 @@ type SubscriptionPickerProps = {
   hasReport: boolean;
   periodLabel: string | null;
   scopeChanged: boolean;
-  staleDays: StaleDays;
   error: string | null;
   onToggle: (subscriptionId: string) => void;
   onSelectAll: () => void;
   onClearAll: () => void;
-  onStaleDaysChange: (days: StaleDays) => void;
   onRun: () => void;
+  /* Shown in the same row, between the subscription picker and the run controls. */
+  children?: ReactNode;
 };
 
 export function SubscriptionPicker({
@@ -31,13 +30,12 @@ export function SubscriptionPicker({
   hasReport,
   periodLabel,
   scopeChanged,
-  staleDays,
   error,
   onToggle,
   onSelectAll,
   onClearAll,
-  onStaleDaysChange,
   onRun,
+  children,
 }: SubscriptionPickerProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [filter, setFilter] = useState('');
@@ -167,18 +165,7 @@ export function SubscriptionPicker({
           </div>
         )}
 
-        <label className="scope-stale-control">
-          <span>Stale threshold</span>
-          <select
-            value={staleDays}
-            disabled={running}
-            onChange={(event) => onStaleDaysChange(Number(event.target.value) as StaleDays)}
-          >
-            {[7, 14, 30, 60, 90, 180, 365].map((days) => (
-              <option value={days} key={days}>{days} days</option>
-            ))}
-          </select>
-        </label>
+        {children && <div className="scope-range">{children}</div>}
 
         <div className="scope-run-area">
           {periodLabel && <span className="scope-period">{periodLabel}</span>}

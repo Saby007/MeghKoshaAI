@@ -2576,7 +2576,7 @@
     animation: workspace-reveal var(--motion-duration) ease-out both;
 }
 
-.app-shell :is(.scope-period, .scope-status, .scope-stale-control, .scope-label, .scope-summary, .report-period-badge, .report-context-details summary, .kpi-note, .summary-tile small, .billing-provenance) {
+.app-shell :is(.scope-period, .scope-status, .scope-label, .scope-summary, .report-period-badge, .report-context-details summary, .kpi-note, .summary-tile small, .billing-provenance) {
     font-family: var(--font-geist);
     font-size: var(--font-size-sm);
     line-height: 1.5;
@@ -2595,21 +2595,6 @@
 .app-shell .report-page-title :is(h1, span) {
     color: inherit;
     font-weight: 600;
-}
-
-.saved-report-controls {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-4);
-    padding: var(--space-2) var(--space-4);
-    font-size: var(--font-size-sm);
-}
-
-.saved-report-controls label {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
 }
 
 .signin-screen.signin-production {

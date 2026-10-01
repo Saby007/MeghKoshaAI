@@ -70,7 +70,7 @@
     padding-block: var(--space-4);
 }
 
-.app-shell :is(.cost-window-overview, .subscription-cost-breakdown, .period-cost-anomalies, .hourly-cost-panel, .required-tag-costs, .saved-report-controls) .ghost-button {
+.app-shell :is(.cost-window-overview, .subscription-cost-breakdown, .period-cost-anomalies, .hourly-cost-panel, .required-tag-costs) .ghost-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -86,11 +86,11 @@
     cursor: pointer;
 }
 
-.app-shell :is(.cost-window-overview, .subscription-cost-breakdown, .period-cost-anomalies, .hourly-cost-panel, .required-tag-costs, .saved-report-controls) .ghost-button:hover {
+.app-shell :is(.cost-window-overview, .subscription-cost-breakdown, .period-cost-anomalies, .hourly-cost-panel, .required-tag-costs) .ghost-button:hover {
     background: var(--color-surface-hover);
 }
 
-.app-shell :is(.cost-window-overview, .subscription-cost-breakdown, .period-cost-anomalies, .hourly-cost-panel, .required-tag-costs, .saved-report-controls) .ghost-button:disabled {
+.app-shell :is(.cost-window-overview, .subscription-cost-breakdown, .period-cost-anomalies, .hourly-cost-panel, .required-tag-costs) .ghost-button:disabled {
     cursor: default;
     opacity: .65;
 }

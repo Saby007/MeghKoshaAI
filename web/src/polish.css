@@ -109,7 +109,6 @@
     .completeness-stamp span,
     .completeness-stamp small,
     .completeness-stamp strong,
-    .scope-stale-control span,
     .scope-panel-title,
     .subscription-select-count,
     .report-context-details summary span,
@@ -194,4 +193,22 @@
     .ai-opportunities p
 ) {
     font-size: 12px;
+}
+
+/* The scope bar is one band. With the date controls in it the row needs about 1,400px, so
+   below that the date controls take their own line inside the same band instead of being
+   squeezed until they wrap inside themselves. The run controls keep the top right. */
+
+@media (max-width: 1419px) {
+    :root .app-shell.app-shell .scope-ribbon-main {
+        flex-wrap: wrap;
+        row-gap: var(--space-1);
+    }
+
+    :root .app-shell.app-shell .scope-ribbon-main > .scope-range {
+        order: 1;
+        flex: 1 0 100%;
+        display: flex;
+        justify-content: flex-end;
+    }
 }

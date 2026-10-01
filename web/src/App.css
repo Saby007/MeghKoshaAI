@@ -963,29 +963,6 @@ body {
     color: var(--color-signal-orange);
 }
 
-.scope-stale-control {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-family: var(--font-geist-mono);
-    font-size: 10px;
-    letter-spacing: 0;
-    text-transform: uppercase;
-    white-space: nowrap;
-    color: var(--color-warm-granite);
-}
-
-.scope-stale-control select {
-    height: 32px;
-    padding: 0 26px 0 9px;
-    border: 1px solid var(--color-ash-stroke);
-    border-radius: 3px;
-    background: var(--color-carbon-lift);
-    color: var(--color-bone);
-    font: inherit;
-}
-
 .stale-table-scroll {
     width: 100%;
     overflow-x: auto;
@@ -3012,9 +2989,6 @@ body {
     }
     .subscription-select {
         width: 100%;
-    }
-    .scope-stale-control {
-        justify-content: space-between;
     }
     .subscription-grid label>span:last-child {
         flex-direction: column;
@@ -8543,16 +8517,7 @@ body {
     padding-block: var(--space-2);
 }
 
-:root .app-shell .saved-report-controls {
-    gap: var(--space-3);
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--font-size-xs);
-}
-
-/* A secondary utility strip should not carry the same visual weight as
-   the scope bar above it. Muted, tight, and out of the way until wanted. */
-
-:root .app-shell .saved-report-controls label {
+:root .app-shell .scope-range label {
     color: var(--color-warm-granite);
 }
 
@@ -9033,7 +8998,7 @@ body {
    as well.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.app-header, .scope-ribbon, .saved-report-controls) {
+:root .app-shell.app-shell :is(.app-header, .scope-ribbon) {
     padding-inline: var(--space-6);
 }
 
@@ -9447,29 +9412,27 @@ body {
 
 
 /* ================================================================
-   Cost window in the saved-report strip
+   Cost window in the scope bar
    ----------------------------------------------------------------
    The window applies to every tab that reads it, so it is presented
    once here rather than repeated inside four of them. The picker was
    written for a full-width row inside a panel - stacked labels and
-   date fields that grow to fill - which inside this strip wrapped
-   onto three lines and pushed it to 161px tall. In the strip it
-   becomes a compact inline row instead: labels beside their fields,
-   fields sized to their content, and the whole group sitting at the
-   trailing edge so "Open saved report" keeps the leading position.
+   date fields that grow to fill - which in the bar wrapped onto three
+   lines. Here it is a compact inline row instead: labels beside their
+   fields, fields sized to their content.
    It still wraps on a narrow viewport, and the 44px controls keep
    their touch size.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell .saved-report-controls .cost-range-controls {
+:root .app-shell.app-shell .scope-range .cost-range-controls {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: var(--space-2);
-    margin: 0 0 0 auto;
+    margin: 0;
 }
 
-:root .app-shell.app-shell .saved-report-controls .cost-range-controls .billing-filter {
+:root .app-shell.app-shell .scope-range .cost-range-controls .billing-filter {
     flex: 0 0 auto;
     flex-direction: row;
     align-items: center;
@@ -9477,7 +9440,7 @@ body {
     max-width: none;
 }
 
-:root .app-shell.app-shell .saved-report-controls .cost-range-controls .billing-filter input {
+:root .app-shell.app-shell .scope-range .cost-range-controls .billing-filter input {
     width: auto;
     min-height: var(--control-height);
 }
@@ -9485,17 +9448,11 @@ body {
 /* The validation message is a sentence, not a field: it takes the
    whole row rather than being squeezed between two date inputs. */
 
-:root .app-shell.app-shell .saved-report-controls .cost-range-controls [role='alert'] {
+:root .app-shell.app-shell .scope-range .cost-range-controls [role='alert'] {
     flex-basis: 100%;
     margin: 0;
     color: var(--color-error);
     font-size: var(--font-size-xs);
-}
-
-@media (max-width: 640px) {
-    :root .app-shell.app-shell .saved-report-controls .cost-range-controls {
-        margin-inline-start: 0;
-    }
 }
 
 
@@ -12044,14 +12001,6 @@ body {
     min-height: calc(42px * var(--ui-zoom));
 }
 
-/* The saved-report strip is a utility row, not a peer of the scope
-   bar: smaller type, muted, and no longer claiming a full band. */
-:root .app-shell.app-shell .saved-report-controls {
-    gap: var(--space-3);
-    padding: calc(5px * var(--ui-zoom)) var(--space-3);
-    font-size: var(--font-size-xs);
-}
-
 :root .app-shell.app-shell .dashboard-titlebar {
     padding-block: calc(8px * var(--ui-zoom));
 }
@@ -12706,7 +12655,6 @@ body {
     .executive-hero .kpi-label,
     .billing-metrics>*>span:first-child,
     .scope-panel-title,
-    .scope-stale-control,
     .category-pill>span,
     .completeness-stamp :is(span, small)
 ) {
