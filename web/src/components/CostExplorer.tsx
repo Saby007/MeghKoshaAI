@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Activity, ArrowRight, Download, TriangleAlert, X } from 'lucide-react';
 import { downloadCostDetailReport, getResourceAvailability, type ResourceAvailability } from '../api';
 import { countTone } from './AnomalyOverview';
@@ -125,25 +125,105 @@ export function ResourceCostTable({ details, window, previous, filters = {}, for
 /* The daily figures behind the chart. Extracted so the page can place
    them where it wants - they are reference data, not part of reading
    the chart - while still driving the same day drilldown. */
-export function DailySubscriptionValues({ details, window, filters = {}, formatMoney, onSelectDay }: { details?: CostDetailSummary; window: CostWindow; filters?: CostFilter; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void }) {
+export function DailySubscriptionValues({ details, window, filters = {}, formatMoney, onSelectDay, collapsible = true, defaultOpen = false }: { details?: CostDetailSummary; window: CostWindow; filters?: CostFilter; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void; collapsible?: boolean; defaultOpen?: boolean }) {
   const series = dailySubscriptionCosts(details, window, filters);
   if (!series.length) return null;
-  return <details className="cost-daily-values"><summary>Daily subscription amounts</summary><div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Daily subscription comparison table"><table className="data-table billing-table"><thead><tr><th>Subscription</th><th>Date</th><th>Selected cost</th><th>Previous date</th><th>Previous cost</th></tr></thead><tbody>{series.flatMap((item) => item.days.map((day) => <tr key={`${item.subscriptionId}:${day.date}`}><th>{item.subscriptionName}</th><td>{onSelectDay ? <button type="button" className="finding-link" onClick={() => onSelectDay(day.date, day.previousDate, item.subscriptionId)}>{day.date}</button> : day.date}</td><td>{money(day.current, formatMoney)}</td><td>{day.previousDate}</td><td>{money(day.previous, formatMoney)}</td></tr>))}</tbody></table></div></details>;
+  const tables = <DailySubscriptionTables series={series} formatMoney={formatMoney} onSelectDay={onSelectDay} />;
+  if (!collapsible) return tables;
+  return <details className="cost-daily-values" open={defaultOpen}><summary>Daily subscription amounts</summary>{tables}</details>;
 }
 
-export function CostComparisonChart({ details, window, filters = {}, formatMoney, onSelectDay, showDailyValues = true }: { details?: CostDetailSummary; window: CostWindow; filters?: CostFilter; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void; showDailyValues?: boolean }) {
+/* One table per subscription. Repeating the subscription name on every
+   row turned the widest column into the least informative one, so the
+   name is promoted to a group header that also carries the period
+   total - and each row now states the change outright rather than
+   leaving the reader to subtract two columns in their head. */
+function DailySubscriptionTables({ series, formatMoney, onSelectDay }: { series: ReturnType<typeof dailySubscriptionCosts>; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void }) {
+  return <div className="daily-cost-groups">
+    {series.map((item) => {
+      const measured = item.days.filter((day) => day.current !== null && day.previous !== null);
+      const total = item.days.reduce((sum, day) => sum + (day.current ?? 0), 0);
+      const previousTotal = measured.reduce((sum, day) => sum + (day.previous ?? 0), 0);
+      const currentComparable = measured.reduce((sum, day) => sum + (day.current ?? 0), 0);
+      return <section className="daily-cost-group" key={item.subscriptionId}>
+        <header className="daily-cost-group-header">
+          <span className="daily-cost-group-name">
+            <strong>{item.subscriptionName}</strong>
+            <small>Subscription ID: {item.subscriptionId}</small>
+          </span>
+          <span className="daily-cost-group-total">
+            <span className="daily-cost-group-amount">{formatMoney(total)}</span>
+            {measured.length > 0 && <CostDelta current={currentComparable} previous={previousTotal} formatMoney={formatMoney} />}
+          </span>
+        </header>
+        <div className="billing-table-scroll" tabIndex={0} role="region" aria-label={`Daily cost for ${item.subscriptionName}`}>
+          <table className="data-table billing-table daily-cost-table">
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Cost</th>
+                <th scope="col">Change</th>
+                <th scope="col">Compared with</th>
+                <th scope="col">Previous cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {item.days.map((day) => (
+                <tr key={`${item.subscriptionId}:${day.date}`}>
+                  <th scope="row">{onSelectDay ? <button type="button" className="finding-link" onClick={() => onSelectDay(day.date, day.previousDate, item.subscriptionId)}>{day.date}</button> : day.date}</th>
+                  <td className="daily-cost-figure">{money(day.current, formatMoney)}</td>
+                  <td className="daily-cost-figure"><CostDelta current={day.current} previous={day.previous} formatMoney={formatMoney} /></td>
+                  <td className="daily-cost-reference">{day.previousDate}</td>
+                  <td className="daily-cost-figure daily-cost-reference">{money(day.previous, formatMoney)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>;
+    })}
+  </div>;
+}
+
+function CostDelta({ current, previous, formatMoney }: { current: number | null; previous: number | null; formatMoney: Formatter }) {
+  if (current === null || previous === null) return <span className="cost-delta is-flat">—</span>;
+  const difference = current - previous;
+  const rounded = Math.abs(difference) < 0.005 ? 0 : difference;
+  if (rounded === 0) return <span className="cost-delta is-flat">No change</span>;
+  const share = previous === 0 ? null : difference / previous;
+  return <span className={`cost-delta ${difference > 0 ? 'is-up' : 'is-down'}`}>
+    {difference > 0 ? '▲' : '▼'} {formatMoney(Math.abs(difference))}
+    {share !== null && <i>{Math.abs(share * 100).toFixed(1)}%</i>}
+  </span>;
+}
+
+export function CostComparisonChart({ details, window, filters = {}, formatMoney, onSelectDay, showDailyValues = true, chartHeight = CHART_HEIGHT }: { details?: CostDetailSummary; window: CostWindow; filters?: CostFilter; formatMoney: Formatter; onSelectDay?: (date: string, previousDate: string, subscriptionId: string) => void; showDailyValues?: boolean; chartHeight?: number }) {
   const series = dailySubscriptionCosts(details, window, filters);
   const dates = costWindowDates(window);
   const values = series.flatMap((item) => item.days.flatMap((day) => [day.current, day.previous].filter((amount): amount is number => amount !== null)));
   const maximum = values.reduce((result, value) => Math.max(result, value), 1);
   const minimum = values.reduce((result, value) => Math.min(result, value), 0);
   const chartRef = useRef<HTMLDivElement>(null);
+  const tooltipId = useId();
+  const [activePoint, setActivePoint] = useState<{ subscriptionId: string; date: string } | null>(null);
+  useEffect(() => setActivePoint(null), [details, window.startDate, window.endDate, JSON.stringify(filters)]);
   const measured = useChartWidth(chartRef);
   const axis = dayAxis(dates, measured, 82, 24, Math.max(1, dates.length - 1));
   const width = axis.width;
-  const height = CHART_HEIGHT + axis.extraHeight;
+  const height = chartHeight + axis.extraHeight;
+  /* The plot keeps the proportions it was drawn with at 300: 46 below the baseline for the axis,
+     30 above the top gridline. A shorter chart keeps both and gives up only plot height. */
+  const baseline = chartHeight - 46;
   const xFor = (index: number) => 82 + index * (width - 106) / Math.max(1, dates.length - 1);
-  const yFor = (value: number) => 254 - (value - minimum) / (maximum - minimum) * 224;
+  const yFor = (value: number) => baseline - (value - minimum) / (maximum - minimum) * (chartHeight - 76);
+  const activeSeries = series.find((item) => item.subscriptionId === activePoint?.subscriptionId);
+  const activeSlot = activeSeries?.days.findIndex((day) => day.date === activePoint?.date) ?? -1;
+  const activeDay = activeSeries?.days[activeSlot];
+  const viewportLeft = chartRef.current?.scrollLeft ?? 0;
+  const viewportWidth = chartRef.current?.clientWidth || width;
+  const tooltipWidth = Math.min(320, viewportWidth - 16);
+  const tooltipX = Math.max(viewportLeft + 8, Math.min(xFor(activeSlot) + 12, viewportLeft + viewportWidth - tooltipWidth - 8, width - tooltipWidth - 8));
+  const tooltipY = activeDay?.current == null ? 8 : Math.max(8, Math.min(yFor(activeDay.current) - 140, height - 140));
   function pathFor(points: { current: number | null; previous: number | null }[], field: 'current' | 'previous') {
     let connected = false;
     return points.map((point, index) => {
@@ -161,16 +241,75 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
         {[0, 1, 2, 3, 4].map((tick) => { const value = minimum + (maximum - minimum) * tick / 4; return <g key={tick}><line x1={82} x2={width - 24} y1={yFor(value)} y2={yFor(value)} className="cost-chart-grid" /><text x={72} y={yFor(value)} textAnchor="end" dominantBaseline="middle">{formatMoney(value)}</text></g>; })}
         {series.map((item, index) => <g key={item.subscriptionId} style={{ color: COLORS[index % COLORS.length] }}>
           <path d={pathFor(item.days, 'previous')} className="cost-chart-previous" /><path d={pathFor(item.days, 'current')} className="cost-chart-current" />
-          {item.days.map((day, slot) => day.current === null ? null : <circle key={day.date} cx={xFor(slot)} cy={yFor(day.current)} r={4} fill="currentColor" role={onSelectDay ? 'button' : undefined} tabIndex={onSelectDay ? 0 : undefined} data-cost-date={day.date} aria-label={`${item.subscriptionName}, ${day.date}, ${formatMoney(day.current)}`} onClick={() => onSelectDay?.(day.date, day.previousDate, item.subscriptionId)} onKeyDown={(event) => { if (onSelectDay && ['Enter', ' '].includes(event.key)) { event.preventDefault(); onSelectDay(day.date, day.previousDate, item.subscriptionId); } }}><title>{day.date}: {formatMoney(day.current)}; {day.previousDate}: {money(day.previous, formatMoney)}</title></circle>)}
+          {item.days.map((day, slot) => day.current === null ? null : <circle
+            key={day.date}
+            cx={xFor(slot)}
+            cy={yFor(day.current)}
+            r={activePoint?.subscriptionId === item.subscriptionId && activePoint.date === day.date ? 6 : 4}
+            fill="currentColor"
+            role={onSelectDay ? 'button' : undefined}
+            tabIndex={0}
+            data-cost-date={day.date}
+            aria-label={`${item.subscriptionName}, ${day.date}, ${formatMoney(day.current)}`}
+            aria-describedby={activePoint?.subscriptionId === item.subscriptionId && activePoint.date === day.date ? tooltipId : undefined}
+            onPointerEnter={() => setActivePoint({ subscriptionId: item.subscriptionId, date: day.date })}
+            onPointerLeave={(event) => { if (document.activeElement !== event.currentTarget) setActivePoint(null); }}
+            onFocus={() => setActivePoint({ subscriptionId: item.subscriptionId, date: day.date })}
+            onBlur={() => setActivePoint(null)}
+            onClick={() => onSelectDay?.(day.date, day.previousDate, item.subscriptionId)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setActivePoint(null);
+              if (onSelectDay && ['Enter', ' '].includes(event.key)) { event.preventDefault(); onSelectDay(day.date, day.previousDate, item.subscriptionId); }
+            }}
+          />)}
         </g>)}
-        <DayAxis dates={dates} xFor={xFor} y={axis.rotated ? 270 : 284} rotated={axis.rotated} />
+        <DayAxis dates={dates} xFor={xFor} y={axis.rotated ? chartHeight - 30 : chartHeight - 16} rotated={axis.rotated} />
+        {activeSeries && activeDay?.current != null && <foreignObject x={tooltipX} y={tooltipY} width={tooltipWidth} height={132} className="cost-point-tooltip-container">
+          <div className="cost-point-tooltip" role="tooltip" id={tooltipId}>
+            <strong title={activeSeries.subscriptionName}>{activeSeries.subscriptionName}</strong>
+            <dl>
+              <div><dt>Selected · {activeDay.date}</dt><dd>{formatMoney(activeDay.current)}</dd></div>
+              <div><dt>Previous · {activeDay.previousDate}</dt><dd>{money(activeDay.previous, formatMoney)}</dd></div>
+              <div><dt>Change</dt><dd className={tone(activeDay.previous === null ? null : activeDay.current - activeDay.previous)}>
+                {activeDay.previous === null ? 'Unavailable' : `${activeDay.current >= activeDay.previous ? '+' : ''}${formatMoney(activeDay.current - activeDay.previous)}`}
+              </dd></div>
+            </dl>
+          </div>
+        </foreignObject>}
       </svg>
     </div>
     {showDailyValues && <DailySubscriptionValues details={details} window={window} filters={filters} formatMoney={formatMoney} onSelectDay={onSelectDay} />}
   </>;
 }
 
-export function CostWindowOverview({ report, snapshotId, window, onChange, formatMoney, onOpenAnomalies, budgetState, filters, onFiltersChange, showBudget = true, showDailyValues = true, showHeading = true, selectedDay: controlledDay, onSelectDay }: { report: FullReport; snapshotId: string | null; window: CostWindow; onChange: (value: CostWindow) => void; formatMoney: Formatter; onOpenAnomalies: () => void; budgetState?: BudgetState; filters: CostFilter; onFiltersChange: (value: CostFilter) => void; showBudget?: boolean; showDailyValues?: boolean; showHeading?: boolean; selectedDay?: SelectedDay | null; onSelectDay?: (value: SelectedDay | null) => void }) {
+export function CostWindowMetrics({ report, window, filters, formatMoney, onOpenAnomalies, onOpenHistory, monthlyContext, children }: {
+  report: FullReport; window: CostWindow; filters: CostFilter; formatMoney: Formatter;
+  onOpenAnomalies: () => void; onOpenHistory?: () => void; monthlyContext?: ReactNode; children?: ReactNode;
+}) {
+  const coverage = costCoverage(report.costDetails, window);
+  const previous = previousCostWindow(window);
+  const previousCoverage = costCoverage(report.costDetails, previous);
+  const groups = compareCostGroups(report.costDetails, window, filters);
+  const total = coverage.complete ? groups.reduce((sum, row) => sum + (row.current ?? 0), 0) : null;
+  const before = previousCoverage.complete ? groups.reduce((sum, row) => sum + (row.previous ?? 0), 0) : null;
+  const spikes = groups.filter((row) => row.previous !== null && row.previous > 0 && row.percentage !== null && row.percentage > 30);
+  const selectedContent = <><span>Selected period spend</span><output>{money(total, formatMoney)}</output><small>{window.startDate} - {window.endDate} / {coverage.coveredDays} of {coverage.dates.length} days</small>
+    {monthlyContext && <small className="assessed-month-context">
+      {(window.startDate !== report.reportMetadata.periodStart || window.endDate !== report.reportMetadata.periodEnd || Object.values(filters).some(Boolean)) && <>Assessed month: {formatMoney(report.executiveSummary.currentMonthlySpend)} · </>}
+      {monthlyContext}
+    </small>}
+  </>;
+  return <div className={`billing-metrics cost-window-metrics${children ? ' executive-financial-metrics' : ''}`}>
+    {onOpenHistory
+      ? <button type="button" className="exec-primary" aria-label="Open cost history" onClick={onOpenHistory}>{selectedContent}</button>
+      : <div>{selectedContent}</div>}
+    <div><span>Previous period</span><output>{money(before, formatMoney)}</output><small>{previous.startDate} - {previous.endDate} / {previousCoverage.coveredDays} of {previousCoverage.dates.length} days</small></div>
+    {children}
+    <button type="button" className="period-anomaly-link" onClick={onOpenAnomalies}><span><TriangleAlert size={16} aria-hidden="true" /> Cost spikes</span><strong className={countTone(coverage.complete && previousCoverage.complete ? spikes.length : null, true)}>{coverage.complete && previousCoverage.complete ? spikes.length : 'Unavailable'}</strong><small>{spikes.length === 1 ? 'Resource' : 'Resources'} up more than 30% on the previous period <ArrowRight size={14} aria-hidden="true" /></small></button>
+  </div>;
+}
+
+export function CostWindowOverview({ report, snapshotId, window, onChange, formatMoney, onOpenAnomalies, budgetState, filters, onFiltersChange, showBudget = true, showDailyValues = true, showHeading = true, showMetrics = true, chartHeight, selectedDay: controlledDay, onSelectDay }: { report: FullReport; snapshotId: string | null; window: CostWindow; onChange: (value: CostWindow) => void; formatMoney: Formatter; onOpenAnomalies: () => void; budgetState?: BudgetState; filters: CostFilter; onFiltersChange: (value: CostFilter) => void; showBudget?: boolean; showDailyValues?: boolean; showHeading?: boolean; showMetrics?: boolean; chartHeight?: number; selectedDay?: SelectedDay | null; onSelectDay?: (value: SelectedDay | null) => void }) {
   /* The day drilldown is normally this component's own state. When the page
      places the daily figures elsewhere - they belong at the end of the report,
      not in the middle of the chart - that table still has to be able to open
@@ -179,24 +318,13 @@ export function CostWindowOverview({ report, snapshotId, window, onChange, forma
   const selectedDay = controlledDay !== undefined ? controlledDay : internalDay;
   const setSelectedDay = onSelectDay ?? setInternalDay;
   useEffect(() => setSelectedDay(null), [window.startDate, window.endDate, JSON.stringify(filters)]);
-  const coverage = costCoverage(report.costDetails, window);
-  const previous = previousCostWindow(window);
-  const previousCoverage = costCoverage(report.costDetails, previous);
-  const groups = compareCostGroups(report.costDetails, window, filters);
-  const total = coverage.complete ? groups.reduce((sum, row) => sum + (row.current ?? 0), 0) : null;
-  const before = previousCoverage.complete ? groups.reduce((sum, row) => sum + (row.previous ?? 0), 0) : null;
-  const spikes = groups.filter((row) => row.previous !== null && row.previous > 0 && row.percentage !== null && row.percentage > 30);
   return <section className="cost-window-overview" aria-label="Selected period cost overview">
     {showHeading
       ? <div className="cost-section-heading"><h2>Subscription cost comparison</h2><CostExportButton report={report} snapshotId={snapshotId} window={window} filters={filters} /></div>
       : null}
-    <div className="billing-metrics cost-window-metrics">
-      <div><span>Selected period</span><output>{money(total, formatMoney)}</output><small>{window.startDate} - {window.endDate} / {coverage.coveredDays} of {coverage.dates.length} days</small></div>
-      <div><span>Previous period</span><output>{money(before, formatMoney)}</output><small>{previous.startDate} - {previous.endDate} / {previousCoverage.coveredDays} of {previousCoverage.dates.length} days</small></div>
-      <button type="button" className="period-anomaly-link" onClick={onOpenAnomalies}><span><TriangleAlert size={16} aria-hidden="true" /> Period anomalies</span><strong className={countTone(coverage.complete && previousCoverage.complete ? spikes.length : null)}>{coverage.complete && previousCoverage.complete ? spikes.length : 'Unavailable'}</strong><small>Resource cost spikes above 30% <ArrowRight size={14} aria-hidden="true" /></small></button>
-    </div>
+    {showMetrics && <CostWindowMetrics report={report} window={window} filters={filters} formatMoney={formatMoney} onOpenAnomalies={onOpenAnomalies} />}
     <CostFilters details={report.costDetails} value={filters} onChange={onFiltersChange} />
-    <CostComparisonChart details={report.costDetails} window={window} filters={filters} formatMoney={formatMoney} showDailyValues={showDailyValues} onSelectDay={(date, previousDate, subscriptionId) => setSelectedDay({ date, previousDate, subscriptionId })} />
+    <CostComparisonChart details={report.costDetails} window={window} filters={filters} formatMoney={formatMoney} showDailyValues={showDailyValues} chartHeight={chartHeight} onSelectDay={(date, previousDate, subscriptionId) => setSelectedDay({ date, previousDate, subscriptionId })} />
       {showBudget && budgetState && <BudgetContext state={budgetState} details={report.costDetails} filters={filters} />}
     {selectedDay && <section className="cost-day-drilldown" aria-label="Selected day resource detail"><div className="cost-section-heading"><h3>{selectedDay.date} vs {selectedDay.previousDate}</h3><CostExportButton report={report} snapshotId={snapshotId} window={{ startDate: selectedDay.date, endDate: selectedDay.date }} previous={{ startDate: selectedDay.previousDate, endDate: selectedDay.previousDate }} filters={{ ...filters, subscriptionId: selectedDay.subscriptionId }} label="Download day detail" /><button type="button" className="ghost-button" aria-label="Close day detail" title="Close day detail" onClick={() => setSelectedDay(null)}><X size={16} /></button></div><ResourceCostTable details={report.costDetails} window={{ startDate: selectedDay.date, endDate: selectedDay.date }} previous={{ startDate: selectedDay.previousDate, endDate: selectedDay.previousDate }} filters={{ ...filters, subscriptionId: selectedDay.subscriptionId }} formatMoney={formatMoney} snapshotId={snapshotId} /></section>}
   </section>;
@@ -217,7 +345,7 @@ export function PeriodCostAnomalies({ report, window, onChange, formatMoney, fil
   return <section className="period-cost-anomalies" aria-label="Selected period anomalies">
     <CostFilters details={report.costDetails} value={filters} onChange={onFiltersChange} />
     <div className="cost-section-heading"><label className="billing-filter"><span>Analyze by</span><select aria-label="Period anomaly dimension" value={dimension} onChange={(event) => setDimension(event.target.value as CostDimension)}><option value="resource">Resource</option><option value="resourceGroup">Resource group</option><option value="tag" disabled={!filters.tagKey}>Tag value</option><option value="service">Service</option></select></label><CostExportButton report={report} snapshotId={snapshotId} window={window} filters={filters} /></div>
-    <h2>Period cost spikes <span className={`cost-count ${countTone(available ? spikes.length : null)}`.trim()}>{available ? spikes.length : 'Unavailable'}</span></h2>
+    <h2>Period cost spikes <span className={`cost-count ${countTone(available ? spikes.length : null, true)}`.trim()}>{available ? spikes.length : 'Unavailable'}</span></h2>
     <p className="billing-provenance">More than 30% above the preceding {coverage.dates.length}-day window. New spend with a zero baseline is not a percentage spike. Separate from the same-weekday statistical detector below.</p>
     {!available ? <p role="status">Complete resource cost evidence is required for both {window.startDate} - {window.endDate} and {previous.startDate} - {previous.endDate}.</p> : <>
       <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Period cost spikes"><table className="data-table billing-table"><thead><tr><th>Dimension</th><th>Subscription</th><th>Owner tag</th><th>Selected cost</th><th>Previous cost</th><th>Increase</th></tr></thead><tbody>{spikes.slice(0, limit).map((row) => <tr key={row.id}><th><button type="button" className="finding-link" onClick={() => setSelectedGroupId(row.id)}>{row.name}</button></th><td>{row.subscriptionName}</td><td>{row.owners.join('; ') || 'Not recorded'}</td><td>{money(row.current, formatMoney)}</td><td>{money(row.previous, formatMoney)}</td><td className="cost-increase">{changeLabel(row.percentage)}</td></tr>)}</tbody></table></div>

@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, Inbox, LayoutDashboard, LoaderCircle, Mail, Menu, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronDown, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, Inbox, LayoutDashboard, LoaderCircle, Mail, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
 import worldMapUrl from '@svg-maps/world/world.svg?url';
+import { CountUp } from './CountUp';
 import {
   downloadCustomReport,
   downloadReportArtifact,
@@ -44,19 +45,20 @@ import type {
   RecommendationTerm,
   ReservationResourceType,
   SubscriptionReference,
+  TagDimensionCost,
 } from '../report/models';
 import { CATEGORY_DISPLAY_NAMES } from '../findings/categories';
 import { SqlOptimization } from './SqlOptimization';
 import { BillingHistoryTab, HourlyCostPanel } from './BillingHistory';
-import { AICostAlerts, AnomalyOverview, useAnomalySummary, type AnomalyState } from './AnomalyOverview';
+import { AICostAlerts, useAnomalySummary, type AnomalyState } from './AnomalyOverview';
 import { billingDates, billingWindow } from '../report/billingHistory';
-import { tagDistribution } from '../report/tagDistribution';
-import { CostExportButton, CostFilters, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, ResourceCostTable, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
+import { CostExportButton, CostFilters, CostWindowMetrics, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, ResourceCostTable, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
-import { costWindowDates, matchesCostFilter, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
-import { BudgetContext, BudgetDailyChart, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
+import { costWindowDates, matchesCostFilter, monthCostWindow, presetCostWindow, previousCostWindow, sameTagKey, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { BudgetContext, BudgetDailyChart, budgetDailySummary, budgetSummaryText, budgetTargetsTag, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
+import { buildTakeaways, ExecutiveTakeaways } from './ExecutiveTakeaways';
 import { ServiceRetirements } from './ServiceRetirements';
-import { DayAxis, dayAxis, useChartWidth } from './TrendChart';
+import { DailyBarChart, DayAxis, dayAxis, useChartWidth } from './TrendChart';
 import { BRAND_NAME } from '../brand';
 import './executive-analysis.css';
 import './region-map.css';
@@ -329,80 +331,195 @@ function SubscriptionReferences({ subscriptions }: { subscriptions: Subscription
   );
 }
 
-// Persistent left-side navigation (overrides the earlier "top-only nav, no left
-// sidebar" decision per explicit ADO Task 781 instruction, comment 8538467, item 8).
-export function LeftNavSidebar({ activeTab, onSelect }: { activeTab: Tab; onSelect: (tab: Tab) => void }) {
-  const [expandedGroups, setExpandedGroups] = useState<Set<PrimaryNav>>(() => new Set(['dashboard', 'costManagement']));
+/* Report navigation is a left rail fixed beneath the app header: it stays put
+   while the report scrolls and runs from just below the logo to the bottom of
+   the window, scrolling on its own only if its pages do not fit. Every area
+   starts open; an area the reader closes stays closed until its own page is
+   opened. The rail collapses to icons, and below 900px it becomes one
+   "Report pages" menu above the report. */
+export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelect: (tab: Tab) => void }) {
+  const [expandedGroups, setExpandedGroups] = useState<Set<PrimaryNav>>(() => new Set(PRIMARY_NAV_ORDER));
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return window.localStorage.getItem('mkai-nav-collapsed') === 'true'; } catch { return false; }
+  });
   const [pageQuery, setPageQuery] = useState('');
+  const [placement, setPlacement] = useState<{ top: number; left: number } | null>(null);
+  const navRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const query = pageQuery.trim().toLocaleLowerCase();
   const groups = PRIMARY_NAV_ORDER.map((group) => ({
     group,
     pages: PRIMARY_NAV_TABS[group].filter((page) => !query || `${PRIMARY_NAV_LABELS[group]} ${page}`.toLocaleLowerCase().includes(query)),
   })).filter(({ pages }) => pages.length > 0);
+  const firstMatch = groups[0]?.pages[0];
+
+  useEffect(() => {
+    try { window.localStorage.setItem('mkai-nav-collapsed', String(collapsed)); } catch { /* storage unavailable */ }
+  }, [collapsed]);
+
   useEffect(() => {
     const activeGroup = PRIMARY_NAV_ORDER.find((group) => PRIMARY_NAV_TABS[group].includes(activeTab));
-    if (activeGroup) setExpandedGroups(new Set(['dashboard', 'costManagement', activeGroup]));
+    if (activeGroup) setExpandedGroups((current) => current.has(activeGroup) ? current : new Set([...current, activeGroup]));
   }, [activeTab]);
+
+  /* The rail is fixed to the viewport, so it is placed from the sticky header's
+     bottom edge and the workspace's left edge, and re-placed when either moves. */
+  useLayoutEffect(() => {
+    const header = document.querySelector<HTMLElement>('.app-header');
+    const workspace = navRef.current?.closest<HTMLElement>('#workspace-main') ?? navRef.current?.parentElement ?? null;
+    if (!header || !workspace) return;
+    let frame = 0;
+    const place = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const top = Math.max(0, Math.round(header.getBoundingClientRect().bottom));
+        const left = Math.round(workspace.getBoundingClientRect().left);
+        setPlacement((current) => current && current.top === top && current.left === left ? current : { top, left });
+      });
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(header);
+    observer?.observe(workspace);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!navRef.current?.contains(event.target as Node)) setMobileOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMobileOpen(false);
+      navRef.current?.querySelector<HTMLButtonElement>('.report-sidenav-mobile-toggle')?.focus();
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [mobileOpen]);
+
   function selectPage(page: Tab) {
     setPageQuery('');
     setMobileOpen(false);
     onSelect(page);
   }
+
+  function toggleGroup(group: PrimaryNav) {
+    if (collapsed) {
+      setCollapsed(false);
+      setExpandedGroups((current) => new Set([...current, group]));
+      return;
+    }
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }
+
   return (
-    <nav className={`left-nav-sidebar${mobileOpen ? ' is-open' : ''}`} aria-label="Report navigation">
-      <button type="button" className="report-nav-mobile-toggle" aria-label="Report pages" aria-expanded={mobileOpen} aria-controls="report-nav-groups" onClick={() => setMobileOpen((open) => !open)}>
-        <Menu size={18} aria-hidden="true" /><span>{activeTab}</span><ChevronRight size={16} aria-hidden="true" />
+    <nav
+      ref={navRef}
+      className={`report-sidenav${collapsed ? ' is-collapsed' : ''}${mobileOpen ? ' is-open' : ''}`}
+      aria-label="Report navigation"
+      style={placement ? { '--sidenav-top': `${placement.top}px`, '--sidenav-left': `${placement.left}px` } as React.CSSProperties : undefined}
+    >
+      <button
+        type="button"
+        className="report-sidenav-mobile-toggle"
+        aria-label="Report pages"
+        aria-expanded={mobileOpen}
+        aria-controls="report-sidenav-body"
+        onClick={() => setMobileOpen((open) => !open)}
+      >
+        <Menu size={18} aria-hidden="true" />
+        <span>{activeTab}</span>
+        <ChevronDown size={16} aria-hidden="true" />
       </button>
-      <div id="report-nav-groups" className="report-nav-groups">
-        <div className="report-nav-search">
-          <Search size={16} aria-hidden="true" />
-          <input ref={searchRef} type="search" aria-label="Find a report page" placeholder="Find a page" value={pageQuery} onChange={(event) => setPageQuery(event.target.value)} onKeyDown={(event) => {
-            if (event.key === 'Escape') setPageQuery('');
-            if (event.key === 'Enter' && query && groups.length) { event.preventDefault(); selectPage(groups[0].pages[0]); }
-          }} />
-          {pageQuery && <button type="button" aria-label="Clear page search" title="Clear page search" onClick={() => { setPageQuery(''); searchRef.current?.focus(); }}><X size={14} aria-hidden="true" /></button>}
+      <div id="report-sidenav-body" className="report-sidenav-body">
+        <div className="report-sidenav-search">
+          <Search size={15} aria-hidden="true" />
+          <input
+            ref={searchRef}
+            type="search"
+            aria-label="Find a report page"
+            placeholder="Find a page"
+            value={pageQuery}
+            onChange={(event) => setPageQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') { event.stopPropagation(); setPageQuery(''); }
+              if (event.key === 'Enter' && query && firstMatch) { event.preventDefault(); selectPage(firstMatch); }
+            }}
+          />
+          {pageQuery && (
+            <button type="button" aria-label="Clear page search" title="Clear page search" onClick={() => { setPageQuery(''); searchRef.current?.focus(); }}>
+              <X size={14} aria-hidden="true" />
+            </button>
+          )}
         </div>
-        {groups.length === 0 && <p className="report-nav-empty" role="status">No matching pages</p>}
-      {groups.map(({ group, pages }) => {
-        const Icon = PRIMARY_NAV_ICONS[group];
-        return (
-        <div className="left-nav-group" key={group}>
-          <button
-            type="button"
-            className="left-nav-group-toggle"
-            aria-expanded={!!query || expandedGroups.has(group)}
-            aria-controls={`report-nav-${group}`}
-            disabled={!!query}
-            onClick={() => setExpandedGroups((current) => {
-              const next = new Set(current);
-              if (next.has(group)) next.delete(group);
-              else next.add(group);
-              return next;
-            })}
-          >
-            <Icon className="report-nav-group-icon" size={16} aria-hidden="true" />
-            <span>{PRIMARY_NAV_LABELS[group]}</span>
-            <ChevronRight className="report-nav-chevron" size={14} aria-hidden="true" />
-          </button>
-          <ul id={`report-nav-${group}`} className="left-nav-children" hidden={!query && !expandedGroups.has(group)}>
-            {pages.map((childTab) => (
-              <li key={childTab}>
+        <div className="report-sidenav-groups">
+          {groups.length === 0 && <p className="report-sidenav-empty" role="status">No matching pages</p>}
+          {groups.map(({ group, pages }) => {
+            const Icon = PRIMARY_NAV_ICONS[group];
+            const open = !!query || expandedGroups.has(group);
+            const current = PRIMARY_NAV_TABS[group].includes(activeTab);
+            return (
+              <section key={group} className="report-sidenav-group" data-current={current || undefined}>
                 <button
                   type="button"
-                  className={childTab === activeTab ? 'active' : ''}
-                  onClick={() => selectPage(childTab)}
-                  aria-current={childTab === activeTab ? 'page' : undefined}
+                  className="report-sidenav-group-toggle"
+                  aria-expanded={open}
+                  aria-controls={`report-sidenav-${group}`}
+                  disabled={!!query}
+                  title={collapsed ? PRIMARY_NAV_LABELS[group] : undefined}
+                  onClick={() => toggleGroup(group)}
                 >
-                  {childTab}
+                  <span className="report-sidenav-icon"><Icon size={16} aria-hidden="true" /></span>
+                  <span className="report-sidenav-label">{PRIMARY_NAV_LABELS[group]}</span>
+                  <ChevronDown className="report-sidenav-chevron" size={14} aria-hidden="true" />
                 </button>
-              </li>
-            ))}
-          </ul>
+                <ul id={`report-sidenav-${group}`} className="report-sidenav-pages" hidden={!open}>
+                  {pages.map((page) => (
+                    <li key={page}>
+                      <button
+                        type="button"
+                        aria-current={page === activeTab ? 'page' : undefined}
+                        title={page}
+                        onClick={() => selectPage(page)}
+                      >
+                        {page}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
         </div>
-        );
-      })}
+        <button
+          type="button"
+          className="report-sidenav-collapse"
+          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          {collapsed ? <PanelLeftOpen size={16} aria-hidden="true" /> : <PanelLeftClose size={16} aria-hidden="true" />}
+          <span>Collapse</span>
+        </button>
       </div>
     </nav>
   );
@@ -416,6 +533,9 @@ function TopSummaryBar({ report, formatMoney }: { report: FullReport; formatMone
   const completeness = report.completeness;
   const months = report.spendHistory.months;
   const lastComplete = months.length > 0 ? months[months.length - 1] : null;
+  /* When the last complete month is the assessed month the tile repeated the
+     assessed figure under a second name ("$494 · August 2026" beside "$494"). */
+  const lastCompleteIsAssessed = lastComplete !== null && lastComplete.month === metadata.periodStart.slice(0, 7);
   return (
     <div className="summary-strip" aria-label="Report headline metrics">
       <div className={`summary-tile ${s.spendChangePercentage === null || s.spendChangePercentage === 0 ? '' : s.spendChangePercentage > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()}>
@@ -427,6 +547,7 @@ function TopSummaryBar({ report, formatMoney }: { report: FullReport; formatMone
             : `${s.spendChangePercentage >= 0 ? '▲' : '▼'} ${Math.abs(s.spendChangePercentage * 100).toFixed(1)}% vs previous`}
         </small>
       </div>
+      {!lastCompleteIsAssessed && (
       <div className="summary-tile">
         <span className="summary-tile-label">Last complete month</span>
         <strong className="summary-tile-value">{lastComplete ? formatMoney(lastComplete.total) : '—'}</strong>
@@ -436,6 +557,7 @@ function TopSummaryBar({ report, formatMoney }: { report: FullReport; formatMone
             : report.spendHistory.statusMessage}
         </small>
       </div>
+      )}
       <div className="summary-tile positive">
         <span className="summary-tile-label">Potential savings</span>
         <strong className="summary-tile-value">{formatMoney(s.potentialSavingsMonth)}</strong>
@@ -455,69 +577,6 @@ function TopSummaryBar({ report, formatMoney }: { report: FullReport; formatMone
   );
 }
 
-const CATEGORY_PILL_DOMAINS: { domain: string; label: string }[] = [
-  { domain: 'compute', label: 'Compute' },
-  { domain: 'storage', label: 'Storage' },
-  { domain: 'network', label: 'Networking' },
-  { domain: 'sql', label: 'Azure SQL' },
-  { domain: 'ai', label: 'AI & ML' },
-];
-
-// A persistent, clickable "spend by category" strip that jumps straight to the
-// matching domain tab — quick-glance nav that stays put regardless of the
-// active sidebar section.
-function CategorySpendPills({
-  report,
-  formatMoney,
-  activeTab,
-  onSelect,
-}: {
-  report: FullReport;
-  formatMoney: MoneyFormatter;
-  activeTab: Tab;
-  onSelect: (t: Tab) => void;
-}) {
-  const domainEntries = CATEGORY_PILL_DOMAINS.map(({ domain, label }) => ({
-    domain,
-    label,
-    spend: report.domains[domain]?.domainSpendMonth ?? 0,
-    tab: DOMAIN_TABS[domain],
-  }));
-  const domainTotal = domainEntries.reduce((sum, item) => sum + item.spend, 0);
-  const otherSpend = Math.max(report.executiveSummary.currentMonthlySpend - domainTotal, 0);
-  return (
-    <nav className="category-pill-row" aria-label="Spend by category">
-      <button
-        type="button"
-        aria-pressed={activeTab === 'Executive Summary'}
-        className={`category-pill ${activeTab === 'Executive Summary' ? 'active' : ''}`}
-        onClick={() => onSelect('Executive Summary')}
-      >
-        <span>All spend</span>
-        <strong>{formatMoney(report.executiveSummary.currentMonthlySpend)}</strong>
-      </button>
-      {domainEntries.map((item) => (
-        <button
-          key={item.domain}
-          type="button"
-          aria-pressed={activeTab === item.tab}
-          className={`category-pill ${activeTab === item.tab ? 'active' : ''}`}
-          onClick={() => onSelect(item.tab)}
-        >
-          <span>{item.label}</span>
-          <strong>{formatMoney(item.spend)}</strong>
-        </button>
-      ))}
-      {otherSpend > 0 && (
-        <div className="category-pill category-pill-static">
-          <span>Other services</span>
-          <strong>{formatMoney(otherSpend)}</strong>
-        </div>
-      )}
-    </nav>
-  );
-}
-
 export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, costWindow: controlledCostWindow, onCostWindowChange }: { report: FullReport; narration: CostAgentOutput; snapshotId: string | null; snapshotCreatedAt?: string; costWindow?: CostWindow; onCostWindowChange?: (value: CostWindow) => void }) {
   const [tab, setTab] = useState<Tab>('Executive Summary');
   /* The cost window is now presented once, in the saved-report strip, which is
@@ -526,12 +585,14 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
      how it is mounted in tests and how a caller that does not want to own a
      window can still use it. Same contract as a React input with value vs
      defaultValue. */
-  const [uncontrolledCostWindow, setUncontrolledCostWindow] = useState<CostWindow>(() => presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend.days.map((day) => day.date), 30));
+  const defaultCostWindow = (value: FullReport) => monthCostWindow(value.reportMetadata.periodStart, value.reportMetadata.periodEnd)
+    ?? presetCostWindow(value.costDetails?.dates ?? value.dailyCostTrend.days.map((day) => day.date), 30);
+  const [uncontrolledCostWindow, setUncontrolledCostWindow] = useState<CostWindow>(() => defaultCostWindow(report));
   const costWindow = controlledCostWindow ?? uncontrolledCostWindow;
   const setCostWindow = onCostWindowChange ?? setUncontrolledCostWindow;
   const [costFilters, setCostFilters] = useState<CostFilter>({});
   useEffect(() => setCostFilters({}), [report]);
-  useEffect(() => setUncontrolledCostWindow(presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend.days.map((day) => day.date), 30)), [report]);
+  useEffect(() => setUncontrolledCostWindow(defaultCostWindow(report)), [report]);
   const anomalyState = useAnomalySummary(report);
   const budgetState = useBudgetSummary(report);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
@@ -591,7 +652,11 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
     currencyDisplay: 'narrowSymbol',
     maximumFractionDigits: 0,
   });
-  const formatMoney: MoneyFormatter = (value) => numberFormatter.format(value * conversionRate);
+  // Whole-dollar rounding would print a real 32-cent figure as $0, which reads as missing data.
+  const formatMoney: MoneyFormatter = (value) => {
+    const converted = value * conversionRate;
+    return converted !== 0 && Math.abs(converted) < 0.5 ? exactFormatter.format(converted) : numberFormatter.format(converted);
+  };
   // Whole-dollar rounding hides real per-hour figures (most resources cost well
   // under $1/hr) - use a separate formatter with decimal precision for those.
   const hourlyFormatter = new Intl.NumberFormat(undefined, {
@@ -602,6 +667,17 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
     maximumFractionDigits: 4,
   });
   const formatHourlyMoney: MoneyFormatter = (value) => hourlyFormatter.format(value * conversionRate);
+  // Daily subscription figures sit between the two: whole dollars make the
+  // arithmetic look broken ($32 - $7 printing as $24) and four decimals are
+  // noise at that size, so they get a fixed two.
+  const exactFormatter = new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: displayCurrency,
+    currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const formatExactMoney: MoneyFormatter = (value) => exactFormatter.format(value * conversionRate);
   const currencyNames = new Intl.DisplayNames(undefined, { type: 'currency' });
   const currencyOptions = exchangeRates ? Object.keys(exchangeRates.rates).sort() : [sourceCurrency];
 
@@ -623,14 +699,55 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
 
   return (
     <div className="dashboard-frame" data-report-page={tab}>
-      <LeftNavSidebar activeTab={tab} onSelect={selectTab} />
+      <ReportSideNav activeTab={tab} onSelect={selectTab} />
       <div className="dashboard-main">
       <div className="dashboard-titlebar">
         <div className="report-page-title">
           <span>{PRIMARY_NAV_LABELS[PRIMARY_NAV_ORDER.find((group) => PRIMARY_NAV_TABS[group].includes(tab)) ?? 'dashboard']}</span>
           <h1 id="report-page-heading" tabIndex={-1}>{tab}</h1>
         </div>
-        <span className="report-period-badge">{report.reportMetadata.period}</span>
+        {/* The period badge ("2026-08") repeated the cost window's From/To,
+            which sit directly above; removed so the dates appear once. */}
+        {/* Report context opens as a popover beside the page actions. */}
+      <div className="report-subnav">
+        <details className="report-context-details" aria-label="Report context">
+          <summary>
+            <span>Report context</span>
+            <span>{snapshotId ? 'Saved snapshot' : 'Unsaved assessment'} · {report.subscriptionBreakdown.length} subscription{report.subscriptionBreakdown.length === 1 ? '' : 's'}</span>
+            {exchangeError && <span className="context-warning">Exchange rates unavailable</span>}
+          </summary>
+          <div className="report-context-body">
+            <dl className="report-context-metadata">
+              <div><dt>Assessment completed</dt><dd>{new Date(snapshotCreatedAt ?? report.reportMetadata.generatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</dd></div>
+              <div><dt>Billing period</dt><dd>{reportDate(report.reportMetadata.periodStart)} - {reportDate(report.reportMetadata.periodEnd)}</dd></div>
+              <div><dt>Cost basis</dt><dd>{report.reportMetadata.costBasis} · {sourceCurrency}</dd></div>
+            </dl>
+            <div className={`currency-provenance ${exchangeError ? 'has-error' : ''}`} role="status" aria-live="polite">
+          {loadingExchangeRates && <span>Loading ECB reference rates</span>}
+          {!loadingExchangeRates && exchangeError && (
+            <span>{sourceCurrency} billing values shown · {exchangeError}</span>
+          )}
+          {!loadingExchangeRates && exchangeRates && (
+            <>
+              <span>
+                {displayCurrency === sourceCurrency
+                  ? `${sourceCurrency} billing currency · no conversion applied`
+                  : `1 ${sourceCurrency} = ${conversionRate.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${displayCurrency}`}
+              </span>
+              <span>{exchangeRates.provider} · {reportDate(exchangeRates.publishedDate)}{exchangeRates.stale ? ' · cached rate' : ''}</span>
+              <a href={exchangeRates.providerUrl} target="_blank" rel="noreferrer">
+                Indicative rate <ExternalLink size={12} aria-hidden="true" />
+              </a>
+            </>
+          )}
+            </div>
+            {/* On the Executive Summary the overview already carries these
+                figures directly beneath this disclosure, so repeating them here
+                only duplicated the page. Other tabs keep them as context. */}
+            {tab !== 'Executive Summary' && <TopSummaryBar report={report} formatMoney={formatMoney} />}
+          </div>
+        </details>
+      </div>
         <button
           className="focus-download-control"
           type="button"
@@ -638,7 +755,8 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           aria-label="Download FocusCost files"
           onClick={() => setShowFocusDownloads(true)}
         >
-          <Download size={17} />
+          <Download size={15} aria-hidden="true" />
+          <span className="titlebar-button-label">FOCUS files</span>
         </button>
         <button
           className="report-download-control"
@@ -648,7 +766,8 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           disabled={!snapshotId}
           onClick={() => setShowReportExports(true)}
         >
-          <FileCode2 size={17} />
+          <FileCode2 size={15} aria-hidden="true" />
+          <span className="titlebar-button-label">Reports</span>
         </button>
         <label className="currency-control">
           <span>Display currency</span>
@@ -666,40 +785,6 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           </select>
         </label>
       </div>
-      <details className="report-context-details" aria-label="Report context">
-        <summary>
-          <span>Report context</span>
-          <span>{snapshotId ? 'Saved snapshot' : 'Unsaved assessment'} · {report.subscriptionBreakdown.length} subscription{report.subscriptionBreakdown.length === 1 ? '' : 's'}</span>
-          {exchangeError && <span className="context-warning">Exchange rates unavailable</span>}
-        </summary>
-        <div className="report-context-body">
-          <dl className="report-context-metadata">
-            <div><dt>Assessment completed</dt><dd>{new Date(snapshotCreatedAt ?? report.reportMetadata.generatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</dd></div>
-            <div><dt>Billing period</dt><dd>{reportDate(report.reportMetadata.periodStart)} - {reportDate(report.reportMetadata.periodEnd)}</dd></div>
-            <div><dt>Cost basis</dt><dd>{report.reportMetadata.costBasis} · {sourceCurrency}</dd></div>
-          </dl>
-          <div className={`currency-provenance ${exchangeError ? 'has-error' : ''}`} role="status" aria-live="polite">
-        {loadingExchangeRates && <span>Loading ECB reference rates</span>}
-        {!loadingExchangeRates && exchangeError && (
-          <span>{sourceCurrency} billing values shown · {exchangeError}</span>
-        )}
-        {!loadingExchangeRates && exchangeRates && (
-          <>
-            <span>
-              {displayCurrency === sourceCurrency
-                ? `${sourceCurrency} billing currency · no conversion applied`
-                : `1 ${sourceCurrency} = ${conversionRate.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${displayCurrency}`}
-            </span>
-            <span>{exchangeRates.provider} · {reportDate(exchangeRates.publishedDate)}{exchangeRates.stale ? ' · cached rate' : ''}</span>
-            <a href={exchangeRates.providerUrl} target="_blank" rel="noreferrer">
-              Indicative rate <ExternalLink size={12} aria-hidden="true" />
-            </a>
-          </>
-        )}
-          </div>
-          <TopSummaryBar report={report} formatMoney={formatMoney} />
-        </div>
-      </details>
       {activeRemediation && (
         <RemediationDialog
           finding={activeRemediation.finding}
@@ -734,16 +819,14 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           onClose={() => setShowCustomReportBuilder(false)}
         />
       )}
-      <CategorySpendPills report={report} formatMoney={formatMoney} activeTab={tab} onSelect={selectTab} />
       <div className="dashboard-body">
         <div className="tab-panel" key={tab}>
           {tab === 'Executive Summary' && (
             <ExecutiveSummaryTab
               report={report}
-              narrativeSummary={narration?.executive_summary}
               onOpenFinding={openFinding}
               formatMoney={formatMoney}
-              formatHourlyMoney={formatHourlyMoney}
+              formatExactMoney={formatExactMoney}
               displayCurrency={displayCurrency}
               anomalyState={anomalyState}
               onOpenAnomalies={() => selectTab('Cost Anomalies')}
@@ -768,9 +851,6 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
               report={report}
               formatMoney={formatHourlyMoney}
               details={report.costDetails}
-              costWindow={costWindow}
-              costFilters={costFilters}
-              onCostFiltersChange={setCostFilters}
               displayCurrency={displayCurrency}
             />
           )}
@@ -859,7 +939,7 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           {tab === 'Cost by Tags/Application' && (
             <CostByTagsTab
               report={report}
-              formatMoney={formatMoney}
+              formatMoney={formatExactMoney}
               formatHourlyMoney={formatHourlyMoney}
               displayCurrency={displayCurrency}
               costWindow={costWindow}
@@ -1397,74 +1477,6 @@ function RemediationDialog({
   );
 }
 
-type TimeRangeDays = 7 | 30 | 60 | 90;
-type AnalysisRangeMode = TimeRangeDays | 'custom';
-const TIME_RANGE_OPTIONS: TimeRangeDays[] = [7, 30, 60, 90];
-
-// Global time-range control (ADO Task 781, comment 8538467, item 1). Drives the
-// Daily Cost Trend chart and the range KPI strip below it; extending this to every
-// other tab (many of which are point-in-time inventory findings, not time-series)
-// is a materially larger follow-up, not done here.
-function TimeRangeSelector({ mode, window, dates, onModeChange, onWindowChange }: {
-  mode: AnalysisRangeMode;
-  window: CostWindow;
-  dates: string[];
-  onModeChange: (value: AnalysisRangeMode) => void;
-  onWindowChange: (value: CostWindow) => void;
-}) {
-  const earliest = dates[0] ?? '';
-  const latest = dates.at(-1) ?? '';
-  return (
-    <div className="analysis-range-controls">
-      <div className="time-range-selector" role="group" aria-label="Time range">
-        {TIME_RANGE_OPTIONS.map((option) => (
-          <button
-            key={option}
-            type="button"
-            className={option === mode ? 'active' : ''}
-            aria-pressed={option === mode}
-            onClick={() => onModeChange(option)}
-          >
-            {option}d
-          </button>
-        ))}
-        <button type="button" className={mode === 'custom' ? 'active' : ''} aria-pressed={mode === 'custom'} onClick={() => onModeChange('custom')}>Custom</button>
-      </div>
-      {mode === 'custom' && (
-        <div className="billing-filters analysis-custom-period" role="group" aria-label="Custom analysis period">
-          <label className="billing-filter"><span>From (UTC)</span><input type="date" aria-label="Analysis period start" value={window.startDate} min={earliest} max={window.endDate || latest} disabled={!dates.length} onChange={(event) => {
-            const startDate = event.target.value;
-            onWindowChange({ startDate, endDate: window.endDate < startDate ? startDate : window.endDate });
-          }} /></label>
-          <label className="billing-filter"><span>To (UTC)</span><input type="date" aria-label="Analysis period end" value={window.endDate} min={window.startDate || earliest} max={latest} disabled={!dates.length} onChange={(event) => {
-            const endDate = event.target.value;
-            onWindowChange({ startDate: window.startDate > endDate ? endDate : window.startDate, endDate });
-          }} /></label>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RangeSpendSummary({ report, formatMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
-  const result = billingWindow(report, { rangeDays, startDate: costWindow.startDate, endDate: costWindow.endDate });
-  const avgDaily = result.totalCost === null ? null : result.totalCost / result.coveredDays;
-  return (
-    <div className="kpi-grid range-spend-kpi-grid">
-      <div className="kpi-card">
-        <div className="kpi-label">Spend, {rangeLabel.toLowerCase()}</div>
-        <div className="kpi-value">{result.totalCost === null ? 'Unavailable' : formatMoney(result.totalCost)}</div>
-        <div className="kpi-note">{result.coveredDays}/{result.days.length} covered export-calendar days</div>
-      </div>
-      <div className="kpi-card">
-        <div className="kpi-label">Average daily spend</div>
-        <div className="kpi-value">{avgDaily === null ? 'Unavailable' : formatMoney(avgDaily)}</div>
-        <div className="kpi-note">Average hourly: {result.averageHourlyCost === null ? 'Unavailable' : formatMoney(result.averageHourlyCost)}</div>
-      </div>
-    </div>
-  );
-}
-
 /* A categorised, collapsible block. The executive view previously ran as one
    continuous column of tables and charts separated only by full-bleed dividers,
    so nothing signalled where one subject ended and the next began. Grouping the
@@ -1503,6 +1515,9 @@ function ReportSection({
   );
 }
 
+/* The executive summary is a page of many sections, so its comparison chart is drawn shorter than the 300px used where the chart is the whole subject. */
+const EXECUTIVE_CHART_HEIGHT = 160;
+
 /* A top-level, always-visible section of the dashboard. Distinct from
    ReportSection, which is the collapsible block used inside a section: this
    one names a phase of reading the report and never hides its contents.
@@ -1526,7 +1541,7 @@ function DashboardSection({
     <section className="dashboard-section" aria-labelledby={headingId} data-dashboard-section={id}>
       <header className="dashboard-section-header">
         <div className="dashboard-section-heading">
-          <h2 id={headingId}>{title}</h2>
+          <h2 id={headingId} tabIndex={-1}>{title}</h2>
           {caption && <p>{caption}</p>}
         </div>
         {aside && <div className="dashboard-section-aside">{aside}</div>}
@@ -1538,10 +1553,9 @@ function DashboardSection({
 
 function ExecutiveSummaryTab({
   report,
-  narrativeSummary,
   onOpenFinding,
   formatMoney,
-  formatHourlyMoney,
+  formatExactMoney,
   displayCurrency,
   anomalyState,
   onOpenAnomalies,
@@ -1554,10 +1568,9 @@ function ExecutiveSummaryTab({
   onNavigate,
 }: {
   report: FullReport;
-  narrativeSummary?: string;
   onOpenFinding: (category: string) => void;
   formatMoney: MoneyFormatter;
-  formatHourlyMoney: MoneyFormatter;
+  formatExactMoney: MoneyFormatter;
   displayCurrency: string;
   anomalyState: AnomalyState;
   onOpenAnomalies: () => void;
@@ -1572,25 +1585,27 @@ function ExecutiveSummaryTab({
   const s = report.executiveSummary;
   const metadata = report.reportMetadata;
   const completeness = report.completeness;
-  const analysisDates = useMemo(() => billingDates(report), [report]);
-  const [rangeMode, setRangeMode] = useState<AnalysisRangeMode>(30);
-  const [analysisWindow, setAnalysisWindow] = useState<CostWindow>(() => presetCostWindow(analysisDates, 30));
-  const rangeDays = costWindowDates(analysisWindow).length || 30;
-  const rangeLabel = rangeMode === 'custom'
-    ? `${reportDate(analysisWindow.startDate)} - ${reportDate(analysisWindow.endDate)}`
-    : `Last ${rangeMode} days`;
-  const [costDetailsOpened, setCostDetailsOpened] = useState(false);
+  /* One window for the whole page: the report-wide cost window. */
+  const takeaways = useMemo(() => buildTakeaways({
+    report,
+    budgets: budgetState && !budgetState.loading && !budgetState.error
+      ? relateBudgets(budgetState.budgets, report.costDetails?.rows ?? [], {}).map(({ budget }) => budget)
+      : [],
+    anomalySignals: anomalyState.result?.status === 'ready' ? anomalyState.result.anomalies.length : null,
+    window: costWindow,
+    formatMoney,
+  }), [report, budgetState, anomalyState.result, costWindow, formatMoney]);
   /* The daily figures sit at the end of the report rather than under the
      chart, so the day selection they drive is owned here and handed to the
      cost window instead of living inside it. */
   const [selectedDay, setSelectedDay] = useState<SelectedDay | null>(null);
-  useEffect(() => {
-    setRangeMode(30);
-    setAnalysisWindow(presetCostWindow(analysisDates, 30));
-  }, [report, analysisDates]);
-  function selectAnalysisRange(mode: AnalysisRangeMode) {
-    setRangeMode(mode);
-    if (mode !== 'custom') setAnalysisWindow(presetCostWindow(analysisDates, mode));
+  function revealComparison(date: string, previousDate: string, subscriptionId: string) {
+    setSelectedDay({ date, previousDate, subscriptionId });
+    requestAnimationFrame(() => {
+      const heading = document.getElementById('dashboard-section-cost-comparison');
+      heading?.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
+      heading?.focus({ preventScroll: true });
+    });
   }
   return (
     <div className="panel executive-report">
@@ -1606,62 +1621,61 @@ function ExecutiveSummaryTab({
           </div>
         }
       >
-        <div className="kpi-grid executive-hero-grid">
-          <button type="button" className={`kpi-card kpi-link-card ${s.spendChangePercentage === null || s.spendChangePercentage === 0 ? '' : s.spendChangePercentage > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()} onClick={() => onNavigate('History')} aria-label="Open cost history">
-            <div className="kpi-label">Total monthly spend</div>
-            <div className="kpi-value">{formatMoney(s.currentMonthlySpend)}</div>
-            <div className="kpi-note">
-              {s.spendChangePercentage === null
-                ? `${completeness.availableSubscriptions} complete exports · comparison accrues next month`
-                : `${s.spendChangePercentage >= 0 ? '▲' : '▼'} ${Math.abs(s.spendChangePercentage * 100).toFixed(1)}% vs previous complete month`}
+        <div className="executive-hero">
+          <CostWindowMetrics
+            report={report}
+            window={costWindow}
+            filters={costFilters}
+            formatMoney={formatExactMoney}
+            onOpenAnomalies={onOpenAnomalies}
+            onOpenHistory={() => onNavigate('History')}
+            monthlyContext={s.spendChangePercentage === null
+              ? 'Monthly comparison accrues next month'
+              : <>{s.spendChangePercentage >= 0 ? '▲' : '▼'} {Math.abs(s.spendChangePercentage * 100).toFixed(1)}% vs previous complete month</>}
+          >
+            <button type="button" className={`kpi-card kpi-link-card ${s.estimatedWastageMonth > 0 ? 'risk' : 'neutral'}`} onClick={() => onNavigate('Stale Resources')} aria-label="Open stale and orphaned resources">
+              <div className="kpi-label"><span className="exec-metric-icon"><Gauge size={16} aria-hidden="true" /></span>Estimated wastage</div>
+              <div className="kpi-value"><CountUp value={s.estimatedWastageMonth} format={formatMoney} /></div>
+              <div className="kpi-note">{percent(s.pctWastage)} of assessed month · billed cost at risk</div>
+              <span className="kpi-card-link-label" title="Review waste"><ChevronRight size={16} aria-hidden="true" /></span>
+            </button>
+            <button type="button" className="kpi-card kpi-link-card positive" onClick={() => onNavigate('Savings Roadmap')} aria-label="Open savings roadmap">
+              <div className="kpi-label"><span className="exec-metric-icon"><TrendingDown size={16} aria-hidden="true" /></span>Potential savings</div>
+              <div className="kpi-value"><CountUp value={s.potentialSavingsMonth} format={formatMoney} /></div>
+              <div className="kpi-note">{percent(s.pctRecoverable)} of assessed month · estimated / month</div>
+              <span className="kpi-card-link-label" title="Open roadmap"><ChevronRight size={16} aria-hidden="true" /></span>
+            </button>
+          </CostWindowMetrics>
+
+          <div className="executive-hero-context">
+            <div className="kpi-card">
+              <div className="kpi-label">{s.idleReviewCandidates == null ? 'Active resources' : 'Other billed resources'}</div>
+              <div className="kpi-value">{s.activeResources.toLocaleString()}</div>
+              <div className="kpi-note">Cost-bearing resources across {completeness.availableSubscriptions} subscriptions</div>
             </div>
-            <span className="kpi-card-link-label">Open history <ChevronRight size={14} aria-hidden="true" /></span>
-          </button>
-          <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open stale and orphaned resources">
-            <div className="kpi-label">Estimated wastage</div>
-            <div className="kpi-value">{formatMoney(s.estimatedWastageMonth)}</div>
-            <div className="kpi-note">{percent(s.pctWastage)} of total · includes billed cost at risk</div>
-            <span className="kpi-card-link-label">Review waste <ChevronRight size={14} aria-hidden="true" /></span>
-          </button>
-          <button type="button" className="kpi-card kpi-link-card positive" onClick={() => onNavigate('Savings Roadmap')} aria-label="Open savings roadmap">
-            <div className="kpi-label">Potential savings</div>
-            <div className="kpi-value">{formatMoney(s.potentialSavingsMonth)}</div>
-            <div className="kpi-note">{percent(s.pctRecoverable)} of total bill · estimated / month</div>
-            <span className="kpi-card-link-label">Open roadmap <ChevronRight size={14} aria-hidden="true" /></span>
-          </button>
-          <div className="kpi-card">
-            <div className="kpi-label">{s.idleReviewCandidates == null ? 'Active resources' : 'Other billed resources'}</div>
-            <div className="kpi-value">{s.activeResources.toLocaleString()}</div>
-            <div className="kpi-note">Cost-bearing resources across {completeness.availableSubscriptions} subscriptions</div>
-          </div>
-          <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open confirmed idle resources">
-            <div className="kpi-label">{s.idleReviewCandidates == null ? 'Idle resources (legacy)' : 'Confirmed idle resources'}</div>
-            <div className="kpi-value">{s.idleResources.toLocaleString()}</div>
-            {s.idleReviewCandidates != null && <div className="kpi-note">{s.idleReviewCandidates.toLocaleString()} candidates require evidence or owner review</div>}
-            <div className="kpi-note">{percent(s.idleResourcePercentage)} of assessed active + idle resources</div>
-            <span className="kpi-card-link-label">Review resources <ChevronRight size={14} aria-hidden="true" /></span>
-          </button>
-          <div className="kpi-card">
-            <div className="kpi-label">Advisor score</div>
-            <div className="kpi-value">{report.advisorScore.score === null ? '—' : `${report.advisorScore.score.toFixed(0)} / 100`}</div>
-            <div className="kpi-note">
-              {report.advisorScore.monthlyChange === null
-                ? report.advisorScore.status
-                : `${report.advisorScore.monthlyChange >= 0 ? '▲' : '▼'} ${Math.abs(report.advisorScore.monthlyChange).toFixed(1)} pts this month`}
+            <button type="button" className={`kpi-card kpi-link-card ${s.idleResources > 0 ? 'risk' : 'neutral'}`} onClick={() => onNavigate('Stale Resources')} aria-label="Open confirmed idle resources">
+              <div className="kpi-label">{s.idleReviewCandidates == null ? 'Idle resources (legacy)' : 'Confirmed idle resources'}</div>
+              <div className="kpi-value">{s.idleResources.toLocaleString()}</div>
+              {s.idleReviewCandidates != null && <div className="kpi-note">{s.idleReviewCandidates.toLocaleString()} candidates require evidence or owner review</div>}
+              <div className="kpi-note">{percent(s.idleResourcePercentage)} of assessed active + idle resources</div>
+              <span className="kpi-card-link-label" title="Review resources"><ChevronRight size={16} aria-hidden="true" /></span>
+            </button>
+            <div className="kpi-card">
+              <div className="kpi-label">Advisor score</div>
+              <div className="kpi-value">{report.advisorScore.score === null ? '—' : `${report.advisorScore.score.toFixed(0)} / 100`}</div>
+              <div className="kpi-note">
+                {report.advisorScore.monthlyChange === null
+                  ? report.advisorScore.status
+                  : `${report.advisorScore.monthlyChange >= 0 ? '▲' : '▼'} ${Math.abs(report.advisorScore.monthlyChange).toFixed(1)} pts this month`}
+              </div>
             </div>
           </div>
         </div>
 
-        <details className="overview-details report-evidence-details">
-          <summary>Report details <span>Source, integrity and narrative</span></summary>
-          <div className="executive-provenance">
-            <span><b>Period</b>{metadata.period}</span>
-            <span><b>Cost basis</b>{metadata.costBasis}</span>
-            <span><b>Source</b>{metadata.source}</span>
-            <span><b>Integrity</b>Completed runs + blob size verified</span>
-          </div>
-          {narrativeSummary && <div className="executive-narrative">{narrativeSummary}</div>}
-        </details>
+        <ExecutiveTakeaways
+          items={takeaways.filter((item) => item.key !== 'spend')}
+          onNavigate={onNavigate}
+        />
       </DashboardSection>
 
       <DashboardSection
@@ -1675,7 +1689,7 @@ function ExecutiveSummaryTab({
           snapshotId={snapshotId}
           window={costWindow}
           onChange={onCostWindowChange}
-          formatMoney={formatHourlyMoney}
+          formatMoney={formatExactMoney}
           onOpenAnomalies={onOpenAnomalies}
           budgetState={budgetState}
           filters={costFilters}
@@ -1683,75 +1697,108 @@ function ExecutiveSummaryTab({
           showBudget={false}
           showDailyValues={false}
           showHeading={false}
+          showMetrics={false}
+          chartHeight={EXECUTIVE_CHART_HEIGHT}
           selectedDay={selectedDay}
           onSelectDay={setSelectedDay}
         />
       </DashboardSection>
 
       <DashboardSection
-        id="insights-findings"
-        title="Insights & Findings"
-        caption="Anomalies, distribution and prioritised actions"
+        id="spend-distribution-overview"
+        title="Spend Distribution"
       >
-        <AnomalyOverview state={anomalyState} onOpenDetails={onOpenAnomalies} formatMoney={formatMoney} />
+        <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} />
+      </DashboardSection>
 
-        <details className="overview-details cost-analysis-details" onToggle={(event) => {
-          if (event.currentTarget.open) setCostDetailsOpened(true);
-        }}>
-      <summary>Explore costs and findings <span>Charts, hourly costs, subscriptions and evidence</span></summary>
-      {costDetailsOpened && <>
-      <div className="analysis-scope-bar">
-        <span className="analysis-scope-label">Analysis range</span>
-        <TimeRangeSelector mode={rangeMode} window={analysisWindow} dates={analysisDates} onModeChange={selectAnalysisRange} onWindowChange={setAnalysisWindow} />
-      </div>
-
-      <div className="report-section-stack">
-        <ReportSection
-          id="spend-over-time"
-          title="Spend over time"
-          caption="Range totals and hourly cost"
-          meta={rangeLabel}
-        >
-          <RangeSpendSummary report={report} formatMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
-          <HourlyCostPanel report={report} formatMoney={formatHourlyMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} embedded />
-        </ReportSection>
-
-        <ReportSection
-          id="spend-distribution"
-          title="Spend distribution"
-          caption="Where the money goes, by type, tag and region"
-          meta={formatMoney(s.currentMonthlySpend)}
-        >
-          <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={analysisWindow} rangeLabel={rangeLabel} />
-        </ReportSection>
-
-        {report.operationalSignals.length > 0 && (
-          <ReportSection
-            id="operational-signals"
-            title="Operational signals"
-            caption="Platform observations across the assessed estate"
-            defaultOpen={false}
-            meta={`${report.operationalSignals.length} ${report.operationalSignals.length === 1 ? 'signal' : 'signals'}`}
-          >
-            <div className="executive-signal-grid">
-              {report.operationalSignals.map((signal) => (
-                <div className={`executive-signal ${signal.tone}`} key={signal.key}>
-                  <span>{signal.label}</span>
-                  <strong>{signal.value}</strong>
-                  <small>{signal.detail}</small>
+      <div className={`executive-evidence-grid${report.prioritizedFindings.length ? ' has-findings' : ''}`}>
+        <div className="executive-evidence-notes">
+        {report.operationalSignals.length > 0 && (() => {
+          /* The badge counted checks run, not issues found, so three clean
+             checks read as "3 signals". A value that parses to zero is a
+             clean check; anything else (including a non-numeric value) is
+             kept as a signal rather than hidden. */
+          const raised = report.operationalSignals.filter((signal) => {
+            const amount = Number.parseFloat(signal.value);
+            return !Number.isFinite(amount) || amount !== 0;
+          });
+          return (
+            <DashboardSection
+              id="operational-signals"
+              title="Operational signals"
+              aside={<span className="executive-section-count">{raised.length ? `${raised.length} ${raised.length === 1 ? 'signal' : 'signals'}` : 'All clear'}</span>}
+            >
+              {raised.length === 0 ? (
+                <p className="executive-signal-clear" role="status">
+                  No issues across {report.operationalSignals.length} checks: {report.operationalSignals.map((signal) => signal.label.toLowerCase()).join(', ')}.
+                </p>
+              ) : (
+                <div className="executive-signal-grid">
+                  {raised.map((signal) => (
+                    <div className={`executive-signal ${signal.tone}`} key={signal.key}>
+                      <span>{signal.label}</span>
+                      <strong>{signal.value}</strong>
+                      <small>{signal.detail}</small>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </ReportSection>
-        )}
+              )}
+            </DashboardSection>
+          );
+        })()}
+
+        <DashboardSection
+          id="prioritised-findings"
+          title="Prioritised findings"
+          aside={report.prioritizedFindings.length > 0 ? <span className="executive-section-count">{report.prioritizedFindings.length} {report.prioritizedFindings.length === 1 ? 'finding' : 'findings'}</span> : undefined}
+        >
+          {report.prioritizedFindings.length === 0 ? (
+            <p className="executive-signal-clear" role="status">No prioritised findings in this snapshot. Review coverage and domain evidence before concluding that no action is needed.</p>
+          ) : (
+          <div className="executive-table-scroll">
+            <table className="report-table executive-findings-table">
+              <thead>
+                <tr>
+                  <th className="num">#</th>
+                  <th>Finding</th>
+                  <th>Evidence and impact</th>
+                  <th className="num">Monthly impact</th>
+                  <th>Severity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.prioritizedFindings.map((finding) => (
+                  <tr key={finding.category}>
+                    <td className="num finding-rank">{finding.rank}</td>
+                    <td>
+                      <button className="finding-link" type="button" onClick={() => onOpenFinding(finding.category)}>
+                        <strong>{finding.finding}</strong><ChevronRight size={15} aria-hidden="true" />
+                      </button>
+                    </td>
+                    <td className="finding-evidence">{finding.evidence}</td>
+                    <td className="num">
+                      {finding.impactType === 'cost_at_risk'
+                        ? finding.monthlyCostAtRisk === null ? '—' : formatMoney(finding.monthlyCostAtRisk)
+                        : finding.monthlySaving === null ? '—' : formatMoney(finding.monthlySaving)}
+                      <small className={`impact-label ${finding.impactType}`}>
+                        {finding.impactType === 'cost_at_risk' ? 'Cost at risk' : 'Potential saving'}
+                      </small>
+                    </td>
+                    <td><span className={`severity severity-${finding.severity.toLowerCase()}`}>{finding.severity}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          )}
+        </DashboardSection>
+        </div>
 
         {report.topServices.length > 0 && (
-          <ReportSection
+          <DashboardSection
             id="top-services"
             title="Top Azure services"
-            caption="Ranked by closed-period spend"
-            defaultOpen={false}
-            meta={`${report.topServices.length} ${report.topServices.length === 1 ? 'service' : 'services'}`}
+            aside={<span className="executive-section-count">{report.topServices.length} {report.topServices.length === 1 ? 'service' : 'services'}</span>}
           >
             <div className="top-services" aria-label="Top Azure services by monthly spend">
               {report.topServices.map((service) => (
@@ -1769,15 +1816,17 @@ function ExecutiveSummaryTab({
                 </div>
               ))}
             </div>
-          </ReportSection>
+          </DashboardSection>
         )}
 
-        <ReportSection
+        {/* With one subscription the table was a single row followed by an
+            identical Total row - it restated the headline and nothing else. */}
+        {report.subscriptionBreakdown.length > 1 && (
+        <DashboardSection
           id="subscriptions"
           title="Subscriptions"
           caption="Spend against verified saving"
-          defaultOpen={false}
-          meta={`${report.subscriptionBreakdown.length} ${report.subscriptionBreakdown.length === 1 ? 'subscription' : 'subscriptions'}`}
+          aside={<span className="executive-section-count">{report.subscriptionBreakdown.length} subscriptions</span>}
         >
           <div className="executive-table-scroll">
             <table className="report-table executive-subscription-table">
@@ -1807,64 +1856,16 @@ function ExecutiveSummaryTab({
               </tbody>
             </table>
           </div>
-        </ReportSection>
+        </DashboardSection>
+        )}
 
-        <ReportSection
-          id="prioritised-findings"
-          title="Prioritised findings"
-          caption="Ranked by monthly impact"
-          defaultOpen={false}
-          meta={report.prioritizedFindings.length === 0 ? 'None' : `${report.prioritizedFindings.length} ${report.prioritizedFindings.length === 1 ? 'finding' : 'findings'}`}
-        >
-          <div className="executive-table-scroll">
-            <table className="report-table executive-findings-table">
-              <thead>
-                <tr>
-                  <th className="num">#</th>
-                  <th>Finding</th>
-                  <th>Evidence and impact</th>
-                  <th className="num">Monthly impact</th>
-                  <th>Severity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.prioritizedFindings.length === 0 && (
-                  <tr><td colSpan={5}>No prioritised findings in this snapshot. Review coverage and domain evidence before concluding that no action is needed.</td></tr>
-                )}
-                {report.prioritizedFindings.map((finding) => (
-                  <tr key={finding.category}>
-                    <td className="num finding-rank">{finding.rank}</td>
-                    <td>
-                      <button className="finding-link" type="button" onClick={() => onOpenFinding(finding.category)}>
-                        <strong>{finding.finding}</strong><ChevronRight size={15} aria-hidden="true" />
-                      </button>
-                    </td>
-                    <td className="finding-evidence">{finding.evidence}</td>
-                    <td className="num">
-                      {finding.impactType === 'cost_at_risk'
-                        ? finding.monthlyCostAtRisk === null ? '—' : formatMoney(finding.monthlyCostAtRisk)
-                        : finding.monthlySaving === null ? '—' : formatMoney(finding.monthlySaving)}
-                      <small className={`impact-label ${finding.impactType}`}>
-                        {finding.impactType === 'cost_at_risk' ? 'Cost at risk' : 'Potential saving'}
-                      </small>
-                    </td>
-                    <td><span className={`severity severity-${finding.severity.toLowerCase()}`}>{finding.severity}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </ReportSection>
       </div>
-      </>}
-      </details>
-      </DashboardSection>
 
       {budgetState && (
         <DashboardSection
           id="budget-context"
           title="Budget Context"
-          caption="Native Azure budgets against the assessed scope"
+          caption="Azure budgets · current budget cycle"
           aside={
             <button
               type="button"
@@ -1885,14 +1886,14 @@ function ExecutiveSummaryTab({
       <DashboardSection
         id="daily-breakdown"
         title="Daily Cost Breakdown"
-        caption="Per-day figures behind the comparison"
       >
         <DailySubscriptionValues
           details={report.costDetails}
           window={costWindow}
           filters={costFilters}
-          formatMoney={formatHourlyMoney}
-          onSelectDay={(date, previousDate, subscriptionId) => setSelectedDay({ date, previousDate, subscriptionId })}
+          formatMoney={formatExactMoney}
+          onSelectDay={revealComparison}
+          defaultOpen
         />
       </DashboardSection>
     </div>
@@ -1901,62 +1902,6 @@ function ExecutiveSummaryTab({
 
 const SPEND_CATEGORY_ORDER = ['Compute', 'Storage', 'Networking', 'Databases', 'AI/ML', 'Other'];
 const spendCategoryClass = (category: string) => `spend-${category.toLowerCase().replaceAll('/', '-').replaceAll(' ', '-')}`;
-
-function SpendCategoryDonut({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
-  const categories = report.spendCategories.filter((item) => item.monthlySpend > 0);
-  const total = categories.reduce((sum, item) => sum + item.monthlySpend, 0);
-  const radius = 48;
-  const circumference = 2 * Math.PI * radius;
-  let cumulative = 0;
-  const segments = categories.map((item) => {
-    const share = total > 0 ? item.monthlySpend / total : 0;
-    const segment = { ...item, share, offset: cumulative };
-    cumulative += share;
-    return segment;
-  });
-  return (
-    <section className="executive-visual executive-donut-panel">
-      <header><span>Spend by resource type</span><strong>{formatMoney(total)}</strong></header>
-      {total > 0 ? (
-        <div className="donut-layout">
-          <div className="donut-chart">
-            <svg viewBox="0 0 120 120" role="img" aria-label="Spend by resource type donut chart">
-              <circle className="donut-track" cx="60" cy="60" r={radius} />
-              {segments.map((segment) => (
-                <circle
-                  className={`donut-segment ${spendCategoryClass(segment.category)}`}
-                  cx="60"
-                  cy="60"
-                  r={radius}
-                  key={segment.category}
-                  strokeDasharray={`${segment.share * circumference} ${circumference}`}
-                  strokeDashoffset={-segment.offset * circumference}
-                  transform="rotate(-90 60 60)"
-                >
-                  <title>{segment.category}: {formatMoney(segment.monthlySpend)} ({percent(segment.pctOfTotal)})</title>
-                </circle>
-              ))}
-            </svg>
-            <span><strong>{categories.length}</strong><small>cost groups</small></span>
-          </div>
-          <div className="spend-legend">
-            {SPEND_CATEGORY_ORDER.map((category) => {
-              const item = report.spendCategories.find((value) => value.category === category);
-              return (
-                <span key={category}>
-                  <i className={spendCategoryClass(category)} />
-                  <b>{category}</b>
-                  <strong>{formatMoney(item?.monthlySpend ?? 0)}</strong>
-                  <small>{percent(item?.pctOfTotal ?? 0)}</small>
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      ) : <p className="visual-empty">No positive resource-type spend is available.</p>}
-    </section>
-  );
-}
 
 function MonthlySpendChart({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
   const months = report.spendHistory.months;
@@ -1997,225 +1942,6 @@ function MonthlySpendChart({ report, formatMoney }: { report: FullReport; format
     </section>
   );
 }
-function ApplicationHourlyCostDonut({ report, formatMoney, rangeDays, costWindow }: { report: FullReport; formatMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow }) {
-  const { available, signed, total, days, items } = tagDistribution(report.tagDailyCostTrend, rangeDays, costWindow);
-  const radius = 48;
-  const circumference = 2 * Math.PI * radius;
-  let cumulative = 0;
-  const segments = items.map((item, index) => {
-    const share = total > 0 ? item.avgHourly / total : 0;
-    const segment = { ...item, share, offset: cumulative, color: TREND_SERIES_PALETTE[index % TREND_SERIES_PALETTE.length] };
-    cumulative += share;
-    return segment;
-  });
-  return (
-    <section className="executive-visual executive-donut-panel">
-      <header><span>Average hourly cost by tag set · {days} export days</span><strong>{available ? `${formatMoney(total)}/hr` : 'Unavailable'}</strong></header>
-      {available && !signed && total > 0 ? (
-        <div className="donut-layout">
-          <div className="donut-chart">
-            <svg viewBox="0 0 120 120" role="img" aria-label="Average hourly cost by non-overlapping tag set">
-              <circle className="donut-track" cx="60" cy="60" r={radius} />
-              {segments.map((segment) => (
-                <circle
-                  className="donut-segment"
-                  cx="60"
-                  cy="60"
-                  r={radius}
-                  key={segment.tagValue}
-                  style={{ stroke: segment.color }}
-                  strokeDasharray={`${segment.share * circumference} ${circumference}`}
-                  strokeDashoffset={-segment.offset * circumference}
-                  transform="rotate(-90 60 60)"
-                >
-                  <title>{`${segment.tagValue} — ${formatMoney(segment.avgHourly)}/hr (${percent(segment.share)})`}</title>
-                </circle>
-              ))}
-            </svg>
-            <span><strong>{segments.length}</strong><small>tag sets</small></span>
-          </div>
-          <div className="spend-legend">
-            {segments.map((segment) => (
-              <span key={segment.tagValue}>
-                <i style={{ background: segment.color }} />
-                <b>{segment.tagValue}</b>
-                <strong>{formatMoney(segment.avgHourly)}/hr</strong>
-                <small>{percent(segment.share)}</small>
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : signed ? <div className="spend-legend">{items.map(item => <span key={item.tagValue}><b>{item.tagValue}</b><strong>{formatMoney(item.avgHourly)}/hr</strong></span>)}</div>
-        : <p className="visual-empty">{available ? 'No net cost in the selected export window.' : 'Non-overlapping tag distribution is unavailable for this snapshot.'}</p>}
-    </section>
-  );
-}
-
-// Merged daily spend trend: always shows the tenant-wide total, plus any
-// user-added per-application (tag-value) series overlaid in distinct colors.
-const TREND_SERIES_PALETTE = [
-  'var(--color-metric-green)',
-  'var(--color-category-networking)',
-  'var(--color-category-databases)',
-  'var(--color-category-ai)',
-  'var(--color-periwinkle-glow)',
-];
-
-function DailySpendTrendChart({ report, formatMoney, formatHourlyMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
-  const [selectedValues, setSelectedValues] = useState<string[]>([]);
-  const chartFrame = useRef<HTMLDivElement>(null);
-  const measuredWidth = useChartWidth(chartFrame, 480);
-  const tagTrend = report.tagDailyCostTrend;
-  const availableToAdd = tagTrend.availableTagValues.filter((value) => !selectedValues.includes(value) && tagTrend.series.some(item => item.tagValue === value));
-
-  const previousWindow = previousCostWindow(costWindow);
-  const currentDays = report.dailyCostTrend.days.filter((day) => day.date >= costWindow.startDate && day.date <= costWindow.endDate);
-  const previousDays = report.dailyCostTrend.days.filter((day) => day.date >= previousWindow.startDate && day.date <= previousWindow.endDate);
-  const dateToSlot = new Map(currentDays.map((day, index) => [day.date, index]));
-
-  const appSeries = selectedValues.map((value, index) => {
-    const match = tagTrend.series.find((item) => item.tagValue === value);
-    return {
-      key: value,
-      label: value,
-      color: TREND_SERIES_PALETTE[index % TREND_SERIES_PALETTE.length],
-      days: (match?.days ?? []).filter((day) => dateToSlot.has(day.date)),
-    };
-  });
-
-  const maximum = Math.max(
-    ...currentDays.map((day) => day.totalCost),
-    ...previousDays.map((day) => day.totalCost),
-    ...appSeries.flatMap((item) => item.days.map((day) => day.totalCost)),
-    0.01,
-  );
-    const dates = currentDays.map((day) => day.date);
-    const baseWidth = Math.max(currentDays.length * 34, measuredWidth);
-  const height = 240;
-  const padX = 28;
-  const padY = 24;
-    const axis = dayAxis(dates, baseWidth, padX, padX, Math.max(1, dates.length - 1));
-    const width = axis.width;
-    const chartHeight = height + axis.extraHeight;
-  const baselineY = height - padY;
-  const stepX = currentDays.length > 1 ? (width - padX * 2) / (currentDays.length - 1) : 0;
-
-  function xForSlot(slot: number): number {
-    return padX + slot * stepX;
-  }
-  function yFor(value: number): number {
-    return baselineY - (value / maximum) * (height - padY * 2);
-  }
-  function pathFor(points: { x: number; y: number }[]): string {
-    return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
-  }
-
-  const currentPoints = currentDays.map((day, index) => ({ x: xForSlot(index), y: yFor(day.totalCost), day }));
-  // Right-align the previous window so its most recent day sits under the current
-  // window's most recent day, even if there isn't enough history for a full window.
-  const previousOffset = currentDays.length - previousDays.length;
-  const previousPoints = previousDays.map((day, index) => ({ x: xForSlot(previousOffset + index), y: yFor(day.totalCost), day }));
-  const areaPath = currentPoints.length > 0
-    ? `${pathFor(currentPoints)} L ${currentPoints[currentPoints.length - 1].x.toFixed(1)} ${baselineY} L ${currentPoints[0].x.toFixed(1)} ${baselineY} Z`
-    : '';
-  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => ({
-    value: maximum * fraction,
-    y: yFor(maximum * fraction),
-  }));
-
-  return (
-    <section className="executive-visual executive-history-panel daily-trend-panel-wide">
-      <header>
-        <span>Daily spend &amp; average hourly cost, per tag — {rangeLabel} vs the preceding {rangeDays} days</span>
-        <small>{report.dailyCostTrend.statusMessage} {tagTrend.statusMessage}</small>
-      </header>
-      <div className="daily-trend-controls">
-        <div className="daily-trend-legend">
-          <span className="daily-trend-legend-item">
-            <i style={{ background: 'var(--color-signal-orange)' }} aria-hidden="true" />
-            This period
-          </span>
-          {previousPoints.length > 0 && (
-            <span className="daily-trend-legend-item">
-              <i className="dashed" aria-hidden="true" />
-              Previous period
-            </span>
-          )}
-          {appSeries.map((item) => (
-            <span className="daily-trend-legend-item" key={item.key}>
-              <i style={{ background: item.color }} aria-hidden="true" />
-              {item.label}
-              <button
-                type="button"
-                onClick={() => setSelectedValues((current) => current.filter((value) => value !== item.key))}
-                aria-label={`Remove ${item.label}`}
-              >
-                <X size={11} />
-              </button>
-            </span>
-          ))}
-        </div>
-        {availableToAdd.length > 0 && (
-          <select
-            className="resource-hourly-picker"
-            value=""
-            onChange={(event) => {
-              if (event.target.value) setSelectedValues((current) => [...current, event.target.value]);
-            }}
-            aria-label="Add tag"
-          >
-            <option value="">+ Add tag</option>
-            {availableToAdd.map((value) => (
-              <option value={value} key={value}>{value}</option>
-            ))}
-          </select>
-        )}
-      </div>
-      {currentPoints.length > 0 ? (
-        <div className="daily-line-chart-scroll">
-          <div className="daily-line-chart-axis-labels" style={{ height }}>
-            {yTicks.slice().reverse().map((tick) => (
-              <span key={tick.value}>{formatMoney(tick.value)}</span>
-            ))}
-          </div>
-          <div className="daily-line-chart-main" ref={chartFrame}>
-            <svg className="daily-line-chart" viewBox={`0 0 ${width} ${chartHeight}`} width={width} height={chartHeight} style={{ width: `${width}px`, minWidth: `${width}px` }} role="img" aria-label="Daily cost trend">
-              {yTicks.map((tick) => (
-                <line key={tick.value} className="daily-line-chart-grid" x1={padX} x2={width - padX} y1={tick.y} y2={tick.y} />
-              ))}
-              <path d={areaPath} className="daily-line-chart-area" />
-              {previousPoints.length > 0 && (
-                <path d={pathFor(previousPoints)} className="daily-line-chart-path daily-line-chart-path-previous" />
-              )}
-              <path d={pathFor(currentPoints)} className="daily-line-chart-path" style={{ stroke: 'var(--color-signal-orange)' }} />
-              {currentPoints.map((point) => (
-                <circle className="daily-line-chart-point" key={point.day.date} cx={point.x} cy={point.y} r={3} style={{ fill: 'var(--color-signal-orange)' }}>
-                  <title>{`This period · ${reportDate(point.day.date)}: ${formatMoney(point.day.totalCost)} total (${formatHourlyMoney(point.day.averageHourlyCost)}/hr average)`}</title>
-                </circle>
-              ))}
-              {appSeries.map((item) => {
-                const points = item.days.map((day) => ({ x: xForSlot(dateToSlot.get(day.date) ?? 0), y: yFor(day.totalCost), day }));
-                if (points.length === 0) return null;
-                return (
-                  <g key={item.key}>
-                    <path d={pathFor(points)} className="daily-line-chart-path" style={{ stroke: item.color }} />
-                    {points.map((point) => (
-                      <circle className="daily-line-chart-point" key={`${item.key}-${point.day.date}`} cx={point.x} cy={point.y} r={3} style={{ fill: item.color }}>
-                        <title>{`${item.label} · ${reportDate(point.day.date)}: ${formatMoney(point.day.totalCost)} total (${formatHourlyMoney(point.day.averageHourlyCost)}/hr average)`}</title>
-                      </circle>
-                    ))}
-                  </g>
-                );
-              })}
-              <DayAxis dates={dates} xFor={xForSlot} y={baselineY + (axis.rotated ? 14 : 18)} rotated={axis.rotated} />
-            </svg>
-          </div>
-        </div>
-      ) : <p className="visual-empty">Daily FOCUS export history is not available.</p>}
-    </section>
-  );
-}
-
 type TreemapNode = {
   key: string;
   label: string;
@@ -2225,6 +1951,8 @@ type TreemapNode = {
 };
 
 function CostTreemap({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
+  /* Opens at subscription level even when there is only one, so the view
+     scales unchanged as more subscriptions are added; drill in from there. */
   const [subscriptionId, setSubscriptionId] = useState<string | null>(null);
   const [resourceGroup, setResourceGroup] = useState<string | null>(null);
   const selectedSubscription = report.costHierarchy.find((item) => item.subscriptionId === subscriptionId);
@@ -2244,7 +1972,9 @@ function CostTreemap({ report, formatMoney }: { report: FullReport; formatMoney:
       resource: resourceGroup ? item : undefined,
     });
   }
-  const nodes = [...nodesByKey.values()].sort((left, right) => right.spend - left.spend).slice(0, 24);
+  /* Groups that round to nothing drew full-size "$0" cells (flex-basis has a
+     16% floor), so a third of the map was empty groups. */
+  const nodes = [...nodesByKey.values()].filter((node) => node.spend >= 0.5).sort((left, right) => right.spend - left.spend).slice(0, 24);
   const total = nodes.reduce((sum, node) => sum + node.spend, 0);
   function selectNode(node: TreemapNode) {
     if (!subscriptionId) setSubscriptionId(node.key);
@@ -2344,7 +2074,10 @@ function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMon
             })}
         </svg>
         <div className="region-ranking">
-          {report.regionSpend.slice(0, 6).map((item) => (
+          {/* Every region with spend, so each dot on the map has its row - the
+              ranking stopped at six while the map drew seven, leaving the
+              seventh (Central India) as an unexplained dot. */}
+          {report.regionSpend.filter((item) => item.monthlySpend > 0).slice(0, 10).map((item) => (
             <span key={item.region}><b>{displayRegion(item.region)}</b><i><em style={{ width: `${Math.max(2, item.pctOfTotal * 100)}%` }} /></i><strong>{formatMoney(item.monthlySpend)}</strong></span>
           ))}
         </div>
@@ -2356,15 +2089,16 @@ function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMon
   );
 }
 
-function ExecutiveSpendVisuals({ report, formatMoney, formatHourlyMoney, rangeDays, costWindow, rangeLabel }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow; rangeLabel: string }) {
+function ExecutiveSpendVisuals({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
   return (
-    <div className="executive-visual-grid">
-      <SpendCategoryDonut report={report} formatMoney={formatMoney} />
-      <MonthlySpendChart report={report} formatMoney={formatMoney} />
-      <DailySpendTrendChart report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={costWindow} rangeLabel={rangeLabel} />
-      <ApplicationHourlyCostDonut report={report} formatMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={costWindow} />
-      <CostTreemap report={report} formatMoney={formatMoney} />
-      <RegionSpendMap report={report} formatMoney={formatMoney} />
+    <div className="executive-distribution">
+      <div className="executive-trend">
+        <MonthlySpendChart report={report} formatMoney={formatMoney} />
+      </div>
+      <div className="executive-visual-grid">
+        <CostTreemap report={report} formatMoney={formatMoney} />
+        <RegionSpendMap report={report} formatMoney={formatMoney} />
+      </div>
     </div>
   );
 }
@@ -3445,7 +3179,18 @@ function StaleResourcesTab({
     <div className="panel">
       <h2 className="section-title">Stale and Orphaned Resources</h2>
       <p className="section-subtitle">
-        Inventory threshold {report.reportMetadata.staleDays} days · protected tags {report.reportMetadata.protectedTagKeys.join(', ') || 'none'}
+        Inventory threshold {report.reportMetadata.staleDays} days ·{' '}
+        {report.reportMetadata.protectedTagKeys.length === 0
+          ? 'no protected tags'
+          : (
+            <>
+              resources tagged{' '}
+              {report.reportMetadata.protectedTagKeys.map((key, index) => (
+                <Fragment key={key}>{index > 0 && ', '}<code className="tag-key-chip">{key}</code></Fragment>
+              ))}{' '}
+              are excluded
+            </>
+          )}
       </p>
       <div className="kpi-grid stale-kpi-grid">
         <div className="kpi-card risk">
@@ -3917,6 +3662,14 @@ function GovernanceTab({ report }: { report: FullReport }) {
   );
 }
 
+/* What a tag key explains is the sum of its rows. The API sends the same figure, but a
+   snapshot written before it did carries 0 rather than omitting it, so anything that
+   trusts the stored value shows "explains $0.00" above a table of real spend and cannot
+   rank the keys. */
+function allocatedOf(item: TagDimensionCost): number {
+  return item.rows.reduce((total, row) => total + row.monthlyCost, 0);
+}
+
 function CostByTagsTab({
   report,
   formatMoney,
@@ -3939,7 +3692,14 @@ function CostByTagsTab({
   snapshotId: string | null;
 }) {
   const summary = report.tagCosts;
-  const dimensions = summary?.dimensions ?? [];
+  /* Most explanatory key first. Saved snapshots written before the API ordered them this
+     way are alphabetical - which opened this page on `Action`, one value and 3% of
+     spend. Sorted here so every snapshot opens on its most useful key; stable, so the
+     API's own order is kept on ties. */
+  const dimensions = useMemo(
+    () => [...(summary?.dimensions ?? [])].sort((left, right) => allocatedOf(right) - allocatedOf(left)),
+    [summary?.dimensions],
+  );
   const [selectedKey, setSelectedKey] = useState<string>(dimensions[0]?.tagKey ?? '');
   const [selectedValue, setSelectedValue] = useState<string | null>(null);
   const [breakdown, setBreakdown] = useState<CostDimension>('service');
@@ -3948,7 +3708,13 @@ function CostByTagsTab({
   const activeValue = dimension?.tagKey === selectedKey && allRows.some((row) => row.value === selectedValue)
     ? selectedValue : null;
   const rows = activeValue === null ? allRows : allRows.filter((row) => row.value === activeValue);
-  const maxCost = Math.max(...allRows.map((row) => row.monthlyCost), 1);
+  /* Bars compare each value against everything the key covers, unallocated spend
+     included, not against the largest value present. Scaling to the largest row made
+     every single-value key draw one full-width bar, which reads as "this tag accounts
+     for all of it" when on this estate the widest of them accounts for 5%. */
+  const dimensionAllocated = dimension ? allocatedOf(dimension) : 0;
+  const dimensionTotal = dimensionAllocated + (dimension?.unallocatedCost ?? 0);
+  const barBasis = Math.max(dimensionTotal, ...allRows.map((row) => row.monthlyCost), 1);
   /* Selecting a tag key and value here scopes the breakdowns below, so the two
      halves of this page answer the same question rather than sitting side by
      side unaware of each other.
@@ -3960,47 +3726,62 @@ function CostByTagsTab({
      selection. An inherited value is kept only while it belongs to the key
      actually being shown. */
   const pageTagKey = dimension?.tagKey;
-  const inheritedTagValue = pageTagKey && costFilters.tagKey?.toLowerCase() === pageTagKey.toLowerCase()
+  const inheritedTagValue = pageTagKey && costFilters.tagKey && sameTagKey(costFilters.tagKey, pageTagKey)
     ? costFilters.tagValue
     : undefined;
   const scopedFilters: CostFilter = pageTagKey
     ? { ...costFilters, tagKey: pageTagKey, tagValue: activeValue === null ? inheritedTagValue : activeValue }
     : costFilters;
-  /* Budgets are matched against the rows the selection actually covers, not
-     against the tag string, so a budget scoped by resource group still shows
-     up when that group is what carries the tag. A budget whose subscription
-     carries none of the selected spend is not reported as covering it. */
-  const taggedBudgets = useMemo(() => {
-    if (!budgetState || report.costDetails?.status !== 'complete') return [];
-    const scopedRows = report.costDetails.rows.filter((row) => matchesCostFilter(row, scopedFilters));
-    return relateBudgets(budgetState.budgets, scopedRows, scopedFilters, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [budgetState?.budgets, report.costDetails, JSON.stringify(scopedFilters)]);
-  const scopeLabel = activeValue === null
-    ? `all ${dimension?.tagKey ?? 'tag'} values`
-    : `${dimension?.tagKey} = ${activeValue || '(empty)'}`;
+  /* The graph and budgets answer "how is this application doing", so they appear
+     only once a key and a value are both chosen. For a key alone they described
+     every value at once - a question the table above already answers better. */
+  const selectionMade = pageTagKey !== undefined && activeValue !== null;
+  const scopeLabel = `${dimension?.tagKey ?? 'tag'} = ${activeValue || '(empty)'}`;
+  /* Only budgets whose own filter names this key and value. Budgets that merely
+     contain the spend - subscription-wide ones, or ones filtered on a different tag
+     that happens to sit on the same resources - are left out entirely: they are not
+     this application's budget, and listing them implied they were. */
+  const allocatedBudgets = useMemo(() => {
+    if (!budgetState || !selectionMade || !pageTagKey) return [];
+    return budgetState.budgets
+      .filter((budget) => budgetTargetsTag(budget.filter, pageTagKey, activeValue ?? ''))
+      .map((budget) => ({ budget, relation: 'Matching budget filter' }));
+  }, [budgetState, selectionMade, pageTagKey, activeValue]);
   const subscriptionNames = useMemo(
     () => new Map(report.subscriptionBreakdown.map((row) => [row.subscriptionId.toLowerCase(), row.subscriptionName])),
     [report.subscriptionBreakdown],
   );
-  /* A budget whose own filter targets this spend is an allocation for it. One
-     that merely contains it - a subscription-wide budget, or one whose filter
-     Azure would not return in an evaluable form - governs everything in its
-     subscription, so it matches every tag equally. Listing both as one set
-     made the same budgets appear whichever tag was selected, which reads as
-     "these are this application's budgets" when they are nothing of the kind. */
-  const allocatedBudgets = taggedBudgets.filter((item) => item.relation === 'Matching budget filter');
-  const containingBudgets = taggedBudgets.filter((item) => item.relation !== 'Matching budget filter');
-  /* Picking a day on a budget chart asks "what did this application run that
-     day", so the answer is resource-level and stays inside the selection. */
-  const [budgetDay, setBudgetDay] = useState<{ key: string; date: string } | null>(null);
+  /* The selection's own daily spend, from the same cost rows the budgets and the
+     breakdown read, so all three agree on what "this application" cost. */
+  const selectionDates = costWindowDates(costWindow);
+  const selectionValues = useMemo(() => {
+    if (!selectionMade || report.costDetails?.status !== 'complete') return [];
+    const rows = report.costDetails.rows.filter((row) => matchesCostFilter(row, scopedFilters));
+    return selectionDates.map((date) => {
+      const covered = rows.filter((row) => row.dailyCosts[date] !== undefined);
+      return covered.length ? covered.reduce((sum, row) => sum + row.dailyCosts[date], 0) : null;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionMade, report.costDetails, JSON.stringify(scopedFilters), costWindow.startDate, costWindow.endDate]);
+  const selectionTotal = selectionValues.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+  /* Picking a day on the application's graph lists what it ran that day,
+     whether or not any budget tracks this application. */
+  const [selectionDay, setSelectionDay] = useState<string | null>(null);
   useEffect(() => {
-    setBudgetDay(null);
+    setSelectionDay(null);
   }, [selectedKey, activeValue, costWindow.startDate, costWindow.endDate]);
-  const budgetCard = ({ budget, relation }: { budget: Budget; relation: string }) => {
+  const selectionDayTotal = selectionDay === null ? null : selectionValues[selectionDates.indexOf(selectionDay)] ?? null;
+  /* One graph per application: a budget adds its even daily share to that graph
+     (when it is the only budget) and its figures to a card, never a second chart. */
+  const budgetSummaries = allocatedBudgets.map(({ budget }) => budgetDailySummary(budget, report.costDetails, costWindow, scopedFilters));
+  const graphBudget = allocatedBudgets.length === 1 && budgetSummaries[0].allowance !== null ? allocatedBudgets[0].budget : null;
+  const graphReference = graphBudget && budgetSummaries[0].allowance !== null
+    ? { value: budgetSummaries[0].allowance, label: `${graphBudget.name}: even daily share of ${graphBudget.currency} ${graphBudget.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}` }
+    : null;
+  const budgetCard = ({ budget, relation }: { budget: Budget; relation: string }, index: number) => {
     const status = budgetThreshold(budget);
     const key = `${budget.subscriptionId}:${budget.name}`;
-    const selectedDay = budgetDay?.key === key ? budgetDay.date : null;
+    const summary = budgetSummaries[index];
     const native = (value: number | null) => value === null ? 'Unavailable' : `${budget.currency} ${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
     return (
       <article className="tag-budget-card" key={key}>
@@ -4012,33 +3793,8 @@ function CostByTagsTab({
             commonly carry a budget of the same name, and without it they read
             as one budget listed twice. */}
         <p className="billing-provenance">{subscriptionNames.get(budget.subscriptionId.toLowerCase()) ?? budget.subscriptionId} · {relation} · {budget.timeGrain} · {native(budget.currentSpend)} of {native(budget.amount)} reported by Azure for the current cycle.</p>
-        <BudgetDailyChart
-          budget={budget}
-          details={report.costDetails}
-          window={costWindow}
-          formatMoney={formatMoney}
-          filters={scopedFilters}
-          scopeLabel={scopeLabel}
-          selectedDate={selectedDay}
-          onSelectDate={report.costDetails?.status === 'complete'
-            ? (date) => setBudgetDay((value) => value?.key === key && value.date === date ? null : { key, date })
-            : undefined}
-        />
-        {selectedDay && report.costDetails?.status === 'complete' && (
-          <section className="budget-day-drilldown" aria-label={`Resource costs on ${selectedDay} for ${budget.name}`}>
-            <header className="cost-section-heading">
-              <h4>{reportDate(selectedDay)} · {scopeLabel}</h4>
-              <button type="button" className="ghost-button" onClick={() => setBudgetDay(null)} aria-label="Close budget day details">Close</button>
-            </header>
-            <ResourceCostTable
-              details={report.costDetails}
-              window={{ startDate: selectedDay, endDate: selectedDay }}
-              previous={previousCostWindow({ startDate: selectedDay, endDate: selectedDay })}
-              filters={{ ...scopedFilters, subscriptionId: budget.subscriptionId }}
-              formatMoney={formatHourlyMoney}
-              snapshotId={snapshotId}
-            />
-          </section>
+        {report.costDetails?.status === 'complete' && summary.observedDays > 0 && (
+          <p className="billing-provenance">{budgetSummaryText(budget, summary, formatMoney, scopeLabel)}</p>
         )}
       </article>
     );
@@ -4046,7 +3802,7 @@ function CostByTagsTab({
   return (
     <div className="panel">
       <h2 className="section-title">Cost by Tags/Application</h2>
-      <p className="section-subtitle">Grouped by any FOCUS resource tag found (inherited from the resource group when a resource has no tag of its own), with a next-month forecast based on overall spend trend.</p>
+      <p className="section-subtitle">Pick a tag key, then a value, to see what that application costs, its daily spend and the budget that tracks it.</p>
       {!summary?.available || dimensions.length === 0 ? (
         <EvidenceState title="Tag evidence unavailable" detail={summary?.status ?? 'No resource or resource-group tags were present.'} />
       ) : (
@@ -4082,6 +3838,18 @@ function CostByTagsTab({
               </select>
             </label>
           </div>
+          {/* What the selected key does and does not explain, stated before the table
+              rather than as a footnote after it. The table lists only tagged values, so
+              on an estate that is mostly untagged it showed a short list of small
+              numbers with no indication that it was describing a few percent of the
+              bill. */}
+          <p className="tag-cost-coverage">
+            <strong>{dimension?.tagKey}</strong> explains {formatMoney(dimensionAllocated)} of {formatMoney(summary?.totalSpend ?? 0)}
+            {' '}across {allRows.length === 1 ? '1 value' : `${allRows.length} values`}.
+            {dimension && dimension.unallocatedCost > 0 && (
+              <> {formatMoney(dimension.unallocatedCost)} carries no <strong>{dimension.tagKey}</strong> tag and cannot be attributed.</>
+            )}
+          </p>
           <div className="tag-cost-table-scroll" role="region" aria-label="Tag cost breakdown" tabIndex={0}>
             <table className="report-table app-cost-table">
               <thead>
@@ -4096,69 +3864,91 @@ function CostByTagsTab({
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.value}>
-                    <td>{row.value}</td>
+                    <td>{row.value || '(empty)'}</td>
                     <td className="num">{formatMoney(row.monthlyCost)}</td>
                     <td className="num">{percent(row.pctOfTotal)}</td>
                     <td className="num">{row.forecastNextMonth === null ? '—' : formatMoney(row.forecastNextMonth)}</td>
                     <td>
                       <span className="app-cost-bar-track">
-                        <span className="app-cost-bar-fill" style={{ width: `${Math.min(100, (row.monthlyCost / maxCost) * 100)}%` }} />
+                        <span className="app-cost-bar-fill" style={{ width: `${Math.min(100, (row.monthlyCost / barBasis) * 100)}%` }} />
                       </span>
                     </td>
                   </tr>
                 ))}
+                {/* Untagged spend as a row, so the table sums to the key's whole
+                    footprint. Marked as not-a-value rather than listed as one: it is
+                    the absence of the tag, and sorting or filtering it alongside real
+                    values would invite treating it as an application. */}
+                {activeValue === null && dimension && dimension.unallocatedCost > 0 && (
+                  <tr className="tag-cost-unallocated">
+                    <td><em>No {dimension.tagKey} tag</em></td>
+                    <td className="num">{formatMoney(dimension.unallocatedCost)}</td>
+                    <td className="num">{percent(summary?.totalSpend ? dimension.unallocatedCost / summary.totalSpend : 0)}</td>
+                    <td className="num">—</td>
+                    <td>
+                      <span className="app-cost-bar-track">
+                        <span className="app-cost-bar-fill is-unallocated" style={{ width: `${Math.min(100, (dimension.unallocatedCost / barBasis) * 100)}%` }} />
+                      </span>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
-          {dimension && dimension.unallocatedCost > 0 && (
-            <p className="section-subtitle">{formatMoney(dimension.unallocatedCost)}/mo has no {dimension.tagKey} tag value.</p>
-          )}
         </>
       )}
 
-      {/* The budget that governs this tag, if one does.
-
-          Answered on this page rather than by sending the reader to the budget
-          tab, because "is this application within budget" is the question the
-          tag selection raises. A subscription-wide budget is reported as such:
-          it bears on the tag but is not an allocation for it. */}
-      {budgetState && (
-        <section className="tag-cost-budgets" aria-label={`Budgets covering ${dimension?.tagKey ?? 'the selected tag'}`}>
-          <h3 className="section-title">Budget for this selection</h3>
-          {budgetState.loading ? (
-            <p role="status">Checking subscription budgets...</p>
-          ) : budgetState.error ? (
-            <p role="alert">{budgetState.error}</p>
+      {/* Graph and budget for one application, only once one is chosen. Budgets
+          appear only when their own filter names this key and value; none is
+          listed otherwise, rather than offering wider budgets as a stand-in. */}
+      {selectionMade ? (
+        <section className="tag-selection" aria-label={`Daily spend and budget for ${scopeLabel}`}>
+          <header className="cost-section-heading">
+            <h3 className="section-title">{scopeLabel}</h3>
+            <span className="tag-selection-total">{formatMoney(selectionTotal)} in the selected period</span>
+          </header>
+          {report.costDetails?.status === 'complete' ? (
+            <DailyBarChart
+              dates={selectionDates}
+              values={selectionValues}
+              seriesName={`${scopeLabel} daily cost`}
+              formatMoney={formatMoney}
+              ariaLabel={`Daily cost for ${scopeLabel}`}
+              emptyMessage={`No daily cost evidence covers ${scopeLabel} in the selected period.`}
+              selectedDate={selectionDay}
+              onSelectDate={(date) => setSelectionDay((value) => value === date ? null : date)}
+              reference={graphReference}
+            />
           ) : (
-            <>
-              {allocatedBudgets.length === 0 ? (
-                <EvidenceState
-                  title={`No budget is scoped to ${scopeLabel}`}
-                  detail={containingBudgets.length
-                    ? `No Azure budget filters on ${scopeLabel}. The subscription-wide budgets below include this spend but are not an allocation for it.`
-                    : `No Azure budget in the assessed subscriptions matches ${scopeLabel}. Create one on the Budgets page to track this spend against a limit.`}
-                />
-              ) : (
-                <>
-                  <p className="section-subtitle">{allocatedBudgets.length === 1 ? 'One budget is' : `${allocatedBudgets.length} budgets are`} scoped to {scopeLabel}.</p>
-                  {allocatedBudgets.slice(0, 3).map(budgetCard)}
-                  {allocatedBudgets.length > 3 && <p className="section-subtitle">{allocatedBudgets.length - 3} further scoped {allocatedBudgets.length - 3 === 1 ? 'budget is' : 'budgets are'} listed on the Budgets page.</p>}
-                </>
-              )}
-              {containingBudgets.length > 0 && (
-                <details className="wider-budgets">
-                  <summary>
-                    {containingBudgets.length} wider {containingBudgets.length === 1 ? 'budget includes' : 'budgets include'} this spend
-                    <span>Not an allocation for {scopeLabel}</span>
-                  </summary>
-                  <p className="billing-provenance">These govern their whole subscription, so they bear on every tag with spend there and do not change as the selection changes. Each chart below is still limited to {scopeLabel}.</p>
-                  {containingBudgets.slice(0, 3).map(budgetCard)}
-                  {containingBudgets.length > 3 && <p className="section-subtitle">{containingBudgets.length - 3} further wider {containingBudgets.length - 3 === 1 ? 'budget is' : 'budgets are'} listed on the Budgets page.</p>}
-                </details>
-              )}
-            </>
+            <p className="section-subtitle">Daily cost detail is not available in this report.</p>
+          )}
+          {selectionDay && report.costDetails?.status === 'complete' && (
+            <section className="budget-day-drilldown tag-day-drilldown" aria-label={`Contributors on ${selectionDay} for ${scopeLabel}`}>
+              <header className="cost-section-heading">
+                <h4>Contributors on {reportDate(selectionDay)} · {scopeLabel}{selectionDayTotal !== null && <> · {formatMoney(selectionDayTotal)}</>}</h4>
+                <button type="button" className="ghost-button" onClick={() => setSelectionDay(null)} aria-label="Close day contributors">Close</button>
+              </header>
+              <ResourceCostTable
+                details={report.costDetails}
+                window={{ startDate: selectionDay, endDate: selectionDay }}
+                previous={previousCostWindow({ startDate: selectionDay, endDate: selectionDay })}
+                filters={scopedFilters}
+                formatMoney={formatHourlyMoney}
+                snapshotId={snapshotId}
+              />
+            </section>
+          )}
+          {budgetState?.loading && <p role="status">Checking subscription budgets...</p>}
+          {budgetState?.error && <p role="alert">{budgetState.error}</p>}
+          {allocatedBudgets.length > 0 && (
+            <div className="tag-cost-budgets">
+              <h4 className="tag-selection-subhead">{allocatedBudgets.length === 1 ? 'Budget' : `${allocatedBudgets.length} budgets`} for {scopeLabel}</h4>
+              {allocatedBudgets.map(budgetCard)}
+            </div>
           )}
         </section>
+      ) : dimensions.length > 0 && (
+        <p className="tag-selection-hint">Choose a value for <strong>{dimension?.tagKey ?? 'this tag'}</strong> above to see its daily spend and budget.</p>
       )}
 
       {/* Where the tagged money actually went. Scoped by the tag selection

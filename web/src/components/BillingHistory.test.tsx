@@ -91,14 +91,46 @@ it('shows unavailable comparisons and incomplete hourly coverage instead of zero
   expect(container.textContent).toContain('Incomplete coverage');
 });
 
-it('resets selected dates and tags when the report scope changes', async () => {
+it('resets selected dates when the report scope changes and offers no tag filter', async () => {
   await act(async () => root.render(<BillingHistoryTab report={report} formatMoney={format} />));
-  await change('Billing tag filter', billingTagId(report.tagDailyCostTrend.series[0]));
+  expect(field('Billing tag filter')).toBeNull();
   const next = { ...report, dailyCostTrend: { ...report.dailyCostTrend, days: [{ date: '2026-08-01', totalCost: 72, averageHourlyCost: 3 }] } };
   await act(async () => root.render(<BillingHistoryTab report={next} formatMoney={format} />));
   expect(field('Baseline billing date').value).toBe('2026-08-01');
-  expect(field('Billing tag filter').value).toBe('');
   expect(output('Baseline cost')).toBe('$72.00');
+});
+
+it('breaks the two selected days down by subscription, service, resource group or resource', async () => {
+  await act(async () => root.render(<BillingHistoryTab report={detailReportFixture} formatMoney={format} details={detailReportFixture.costDetails} displayCurrency="USD" />));
+  // Only the breakdown toggle and the two dates: no filters, no trend chart.
+  expect(field('Cost tag key')).toBeNull();
+  expect(field('Cost subscription')).toBeNull();
+  expect(field('Cost resource group')).toBeNull();
+  expect(container.querySelector('[aria-label="Historical daily cost by group"]')).toBeNull();
+  const toggle = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('[aria-label="History breakdown"] button')].find((item) => item.textContent === label)!;
+  expect([...container.querySelectorAll('[aria-label="History breakdown"] button')].map((item) => item.textContent)).toEqual(['Subscription', 'Service', 'Resource group', 'Resource']);
+  expect(toggle('Subscription').getAttribute('aria-pressed')).toBe('true');
+  await change('Baseline billing date', '2026-09-06');
+  await change('Comparison billing date', '2026-09-07');
+  const table = () => container.querySelector('[aria-label="Two-day cost comparison"]')!;
+  // Subscription by default: both resources together.
+  expect(table().querySelectorAll('tbody tr')).toHaveLength(1);
+  expect(table().textContent).toContain('Demo subscription');
+  const headline = Number(output('Comparison cost')!.slice(1)) - Number(output('Baseline cost')!.slice(1));
+  expect(output('Billing cost change')).toBe(`+$${headline.toFixed(2)}`);
+
+  await act(async () => toggle('Resource').click());
+  expect(toggle('Resource').getAttribute('aria-pressed')).toBe('true');
+  const rows = [...table().querySelectorAll('tbody tr')].map((row) => row.querySelector('th')!.textContent);
+  // Largest movement first: finance-vm doubles, the shared disk moves less.
+  expect(rows[0]).toContain('finance-vm');
+  expect(rows[1]).toContain('shared-disk');
+  expect(table().textContent).toContain('$96.00');
+  expect(table().textContent).toContain('$288.00');
+  expect(table().textContent).toContain('+200.0%');
+
+  await act(async () => toggle('Resource group').click());
+  expect([...table().querySelectorAll('tbody th')].map((cell) => cell.firstChild!.textContent)).toEqual(['finance', 'platform']);
 });
 
 it('reuses derived hourly evidence on presentation rerenders but recomputes when filters change', async () => {

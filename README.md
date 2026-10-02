@@ -94,7 +94,7 @@ Each profile is a superset of the previous one. Application containers only depl
 
 ## Dashboards and tabs
 
-The app has three top-level views — **Report**, **Chat**, and **Schedules** — reachable from the top navigation bar. **Report** is further organized into a left-hand sidebar of grouped pages:
+The app has three top-level views — **Report**, **Chat**, and **Schedules** — reachable from the top navigation bar. **Report** has a left navigation rail fixed beneath the app header: it stays in place while the report scrolls and runs from just below the logo to the bottom of the window. Every area starts open (a closed area stays closed until its own page opens), **Find a page** searches every page by name or area, and the rail collapses to icons (remembered between visits). Below 900px it becomes one **Report pages** menu above the report. The grouped pages are:
 
 | Group | Pages | What you'll find there |
 | --- | --- | --- |
@@ -104,6 +104,14 @@ The app has three top-level views — **Report**, **Chat**, and **Schedules** �
 | **Analytics** | Advisor Reconciliation | Cross-checks the app's own findings against Azure Advisor's own recommendations, so you can see where the two agree (or don't) and why. |
 | **Recommendations** | Savings Roadmap, Compute Optimization, Storage Optimization, Network Optimization, Azure SQL Optimization, AI Optimization | Domain-specific rightsizing and elimination recommendations, each backed by either verified billed cost, Advisor's own estimate, or Azure Monitor-verified idle metrics — the evidence type is always shown next to the number. |
 | **Reports** | Action Plan | A consolidated, exportable list of every recommended action across all domains, prioritized and ready to hand to whoever owns remediation. |
+
+The **Executive Summary** keeps monthly headline metrics separate from the selected-period comparison. **Spend Distribution** shows the monthly trend, subscription treemap and regional map together, with subscription drilldown available directly. **Operational signals**, **Top Azure services** and **Prioritised findings** are visible front-page sections, not disclosures. The resource-type donut and anomaly preview are omitted; the dedicated **Cost Anomalies** page remains available. **Daily subscription amounts** starts expanded on this page, with each subscription's ID beneath its name. Selecting a day reveals its resource detail in Cost Comparison. Report context remains available without repeating the headline figures; the separate **Report details** disclosure has been removed.
+
+The shared presentation finish lives in `web/src/polish.css`: layered surfaces, quiet structural borders, consistent segmented controls and navigation, and stronger headline figures. Tables share compact rows, sticky headers and row highlighting; the Executive Summary budget table can be searched and filtered by status, and flags budgets still within limit that Azure forecasts to overrun. It uses the existing brand and theme tokens, supports both density settings, and respects reduced motion and touch targets without changing report calculations.
+
+The landing page follows a single layout rhythm: overview, comparison, distribution, evidence, budgets and daily detail. The overview combines selected-period spend, previous-period spend, assessed-month wastage, assessed-month savings and cost spikes into five financial cards; the comparison chart does not repeat them. Period figures follow the filters, with assessed-month context shown when the selection differs. Services sit beside a compact signals/findings stack on wide screens; populated findings tables receive the full width. All sections share aligned headers and gutters, and the layout stacks on smaller screens.
+
+Comparison-chart dots show the subscription, selected and previous dates/costs, and absolute change on hover or keyboard focus. Escape dismisses the tooltip; clicking or pressing Enter/Space still opens the selected day's detail where available. Missing previous evidence stays explicitly unavailable.
 
 Two other top-level views round out the app:
 

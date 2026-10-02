@@ -229,6 +229,27 @@ def test_top_services_are_ranked_from_positive_closed_period_contributors():
     assert report.top_services[0].pct_of_total == 0.6
 
 
+def test_top_services_fold_provider_names_that_differ_only_by_case():
+    report = build_full_report(
+        subscription_ids=["sub-1"],
+        subscription_names={"sub-1": "Sub One"},
+        per_sub_spend={"sub-1": 500.0},
+        resource_graph_rows={},
+        cost_by_resource_id={},
+        service_family_spend={},
+        advisor_recommendations=[],
+        untagged_counts={},
+        service_spend={
+            "Microsoft.App": 262.0,
+            "microsoft.app": 14.0,
+            "Microsoft.Search": 54.0,
+        },
+    )
+
+    assert [item.service_name for item in report.top_services] == ["Microsoft.App", "Microsoft.Search"]
+    assert report.top_services[0].monthly_spend == 276.0
+
+
 def test_executive_dashboard_and_storage_analysis_use_verified_dimensions():
     disk_id = "/subscriptions/sub-1/resourcegroups/rg/providers/microsoft.compute/disks/disk1"
     storage_id = "/subscriptions/sub-1/resourcegroups/rg/providers/microsoft.storage/storageaccounts/store1"
@@ -544,6 +565,56 @@ def test_tag_cost_summary_excludes_unallocated_and_forecasts_from_growth_rate():
     assert checkout.forecast_next_month is None
     # Team/Department/Project have no values in this fixture -> no dimension emitted.
     assert {dim.tag_key for dim in report.tag_costs.dimensions} == {"Application"}
+    assert application.allocated_cost == 90
+    assert application.coverage == 0.9
+
+
+def test_tag_cost_dimensions_lead_with_the_key_that_explains_most_spend():
+    focus_data = FocusCostData(
+        data_version="1.2-preview",
+        period="2026-07",
+        period_start="2026-07-01",
+        period_end="2026-07-31",
+        currency="USD",
+        pricing_currencies=["USD"],
+        subscription_ids=["sub-1"],
+        subscription_names={"sub-1": "Sub One"},
+        row_count=3,
+        billed_cost_by_subscription={"sub-1": 100},
+        effective_cost_by_subscription={"sub-1": 100},
+        list_cost_by_subscription={"sub-1": 100},
+        contracted_cost_by_subscription={"sub-1": 100},
+        negotiated_discount_by_subscription={"sub-1": 0},
+        billed_cost_by_resource_id={},
+        effective_cost_by_resource_id={},
+        service_spend={},
+        service_category_spend={},
+        # Alphabetical order would open on `Action`, the least informative key.
+        tag_spend={
+            "Action": {"Do Not Delete": 3, "Unallocated": 97},
+            "Workload": {"agent": 5, "Unallocated": 95},
+            "Owner": {"ana": 5, "Unallocated": 95},
+            "Project": {"alpha": 40, "beta": 20, "Unallocated": 40},
+        },
+    )
+    report = build_full_report(
+        subscription_ids=["sub-1"],
+        subscription_names={"sub-1": "Sub One"},
+        per_sub_spend={"sub-1": 100},
+        resource_graph_rows={},
+        cost_by_resource_id={},
+        service_family_spend={},
+        advisor_recommendations=[],
+        untagged_counts={},
+        focus_cost_data=focus_data,
+    )
+
+    dimensions = report.tag_costs.dimensions
+    # By spend explained, ties alphabetical so the order is stable.
+    assert [dim.tag_key for dim in dimensions] == ["Project", "Owner", "Workload", "Action"]
+    assert [dim.coverage for dim in dimensions] == [0.6, 0.05, 0.05, 0.03]
+    dumped = report.tag_costs.model_dump(by_alias=True)["dimensions"][0]
+    assert dumped["allocatedCost"] == 60 and dumped["coverage"] == 0.6
 
 
 def test_extended_support_and_off_hours_savings_summaries():

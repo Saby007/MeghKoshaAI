@@ -5,13 +5,22 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getCostAnomalies, getExchangeRates, getRateOptimization, getResourceAvailability, getServiceRetirements, listBudgets } from '../api';
 import { anomalyFixture, detailReportFixture, pricingReportFixture, reportFixture, resourceReportFixture, tagReportFixture } from '../report/testFixtures';
 import { ReportView } from './ReportView';
-import { BudgetContext, budgetFilterMatches, budgetThreshold } from './BudgetContext';
+import type { FullReport } from '../report/models';
+import { compareCostGroups, dailySubscriptionCosts } from '../report/costDetails';
+import { CostComparisonChart } from './CostExplorer';
+import { BudgetContext, budgetCycle, budgetFilterMatches, budgetThreshold } from './BudgetContext';
 
 vi.mock('../api', async (importOriginal) => ({ ...await importOriginal<typeof import('../api')>(), getCostAnomalies: vi.fn(), getExchangeRates: vi.fn(), getRateOptimization: vi.fn(), getResourceAvailability: vi.fn(), getServiceRetirements: vi.fn(), listBudgets: vi.fn() }));
 let container: HTMLDivElement;
 let root: Root;
 const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.trim() === label)!;
 const tagSelect = (label: string) => container.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+/* Rows for actual tag values. The table also carries a trailing row for spend the key
+   does not cover, which is a summary of the selection rather than a member of it, so
+   counting it here would make "how many values match" depend on whether the estate
+   happens to be fully tagged. */
+const tagValueRows = (scope: ParentNode = container) =>
+  scope.querySelectorAll('.app-cost-table tbody tr:not(.tag-cost-unallocated)');
 const chooseTagOption = async (label: string, text: string) => {
   const select = tagSelect(label);
   const option = [...select.options].find((item) => item.textContent === text)!;
@@ -28,17 +37,146 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 
-it('keeps the same visible category navigation across report tab switches', async () => {
+it('shows point data on hover and keyboard focus while preserving day drilldown', async () => {
+  const costWindow = { startDate: '2026-09-01', endDate: '2026-09-07' };
+  const onSelect = vi.fn();
+  const format = (value: number) => `$${value.toFixed(2)}`;
+  await act(async () => root.render(<CostComparisonChart details={detailReportFixture.costDetails} window={costWindow} formatMoney={format} onSelectDay={onSelect} showDailyValues={false} chartHeight={160} />));
+  const series = dailySubscriptionCosts(detailReportFixture.costDetails, costWindow)[0];
+  const day = series.days[0];
+  const dot = container.querySelector<SVGCircleElement>(`[data-cost-date="${day.date}"]`)!;
+  await act(async () => dot.dispatchEvent(new Event('pointerover', { bubbles: true })));
+  const tooltip = container.querySelector('[role="tooltip"]')!;
+  expect(tooltip.textContent).toContain(series.subscriptionName);
+  expect(tooltip.textContent).toContain(day.date);
+  expect(tooltip.textContent).toContain(day.previousDate);
+  expect(tooltip.textContent).toContain(format(day.current!));
+  expect(tooltip.textContent).toContain(format(day.previous!));
+  expect(dot.getAttribute('aria-describedby')).toBe(tooltip.id);
+  await act(async () => dot.dispatchEvent(new Event('pointerout', { bubbles: true })));
+  expect(container.querySelector('[role="tooltip"]')).toBeNull();
+  await act(async () => dot.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
+  expect(container.querySelector('[role="tooltip"]')).not.toBeNull();
+  await act(async () => dot.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(container.querySelector('[role="tooltip"]')).toBeNull();
+  await act(async () => dot.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  expect(onSelect).toHaveBeenCalledWith(day.date, day.previousDate, series.subscriptionId);
+  await act(async () => dot.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
+  expect(container.querySelector('[role="tooltip"]')).not.toBeNull();
+  await act(async () => root.render(<CostComparisonChart details={detailReportFixture.costDetails} window={{ startDate: '2026-09-02', endDate: '2026-09-08' }} formatMoney={format} onSelectDay={onSelect} showDailyValues={false} chartHeight={160} />));
+  expect(container.querySelector('[role="tooltip"]')).toBeNull();
+});
+
+it('does not invent previous cost or change in a point tooltip with missing history', async () => {
+  const costWindow = { startDate: '2026-09-01', endDate: '2026-09-07' };
+  const original = detailReportFixture.costDetails!;
+  const previousDate = dailySubscriptionCosts(original, costWindow)[0].days[0].previousDate;
+  const details = {
+    ...original,
+    dates: original.dates.filter((date) => date !== previousDate),
+    rows: original.rows.map((row) => ({ ...row, dailyCosts: Object.fromEntries(Object.entries(row.dailyCosts).filter(([date]) => date !== previousDate)) })),
+  };
+  await act(async () => root.render(<CostComparisonChart details={details} window={costWindow} formatMoney={(value) => `$${value.toFixed(2)}`} showDailyValues={false} />));
+  await act(async () => container.querySelector('[data-cost-date]')!.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
+  expect([...container.querySelectorAll('[role="tooltip"] dd')].map((cell) => cell.textContent).slice(1)).toEqual(['Unavailable', 'Unavailable']);
+});
+
+it('combines the financial overview into exactly five cards and updates period amounts with filters', async () => {
+  const costWindow = { startDate: '2026-09-01', endDate: '2026-09-07' };
+  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" costWindow={costWindow} />));
+  const metrics = container.querySelector('.executive-financial-metrics')!;
+  expect(metrics.children).toHaveLength(5);
+  expect([...metrics.children].map((card) => card.querySelector('span, .kpi-label')?.textContent?.trim())).toEqual([
+    'Selected period spend', 'Previous period', 'Estimated wastage', 'Potential savings', 'Cost spikes',
+  ]);
+  expect(container.querySelector('[data-dashboard-section="cost-comparison"] .cost-window-metrics')).toBeNull();
+  expect(metrics.querySelector('.assessed-month-context')?.textContent).toContain('Assessed month:');
+  const expected = (filters = {}) => compareCostGroups(detailReportFixture.costDetails, costWindow, filters).reduce((sum, row) => sum + (row.current ?? 0), 0);
+  const selectedAmount = () => Number(metrics.querySelector('output')!.textContent!.replace(/[^\d.-]/g, ''));
+  expect(selectedAmount()).toBeCloseTo(expected(), 2);
+  const service = container.querySelector<HTMLSelectElement>('[aria-label="Cost service"]')!;
+  await act(async () => { service.value = 'Virtual Machines'; service.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(selectedAmount()).toBeCloseTo(expected({ serviceName: 'Virtual Machines' }), 2);
+  expect(metrics.children).toHaveLength(5);
+});
+
+it('keeps unavailable period evidence explicit in the merged financial cards', async () => {
   await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
-  const navigation = container.querySelector('[aria-label="Spend by category"]')!;
-  expect(navigation.closest('details')).toBeNull();
+  expect(container.querySelector('.executive-financial-metrics output')?.textContent).toBe('Unavailable');
+  expect(container.querySelector('.executive-financial-metrics .period-anomaly-link strong')?.textContent).toBe('Unavailable');
+});
+
+it('draws the comparison chart shorter on the executive summary than where it is the whole subject', async () => {
+  const costWindow = { startDate: '2026-09-01', endDate: '2026-09-07' };
+  const chartHeight = () => Number(container.querySelector('.cost-comparison-chart')!.getAttribute('viewBox')!.split(' ')[3]);
+  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" costWindow={costWindow} onCostWindowChange={() => {}} />));
+  const executive = chartHeight();
+  // The same chart on the anomalies tab, where it is the subject, keeps its full height.
+  await act(async () => button('Cost Anomalies').click());
+  const full = chartHeight();
+  expect(full).toBeGreaterThanOrEqual(300);
+  expect(executive).toBeLessThan(full - 80);
+});
+it('puts the cost comparison above the spend distribution on the executive summary', async () => {
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
+  const order = [...container.querySelectorAll('[data-dashboard-section]')].map((section) => section.getAttribute('data-dashboard-section'));
+  expect(order.indexOf('cost-comparison')).toBeGreaterThan(-1);
+  expect(order.indexOf('cost-comparison')).toBeLessThan(order.indexOf('spend-distribution-overview'));
+  expect(order.indexOf('cost-overview')).toBeLessThan(order.indexOf('cost-comparison'));
+});
+it('presents signals, services and prioritised findings as front-page sections without disclosures', async () => {
+  const report = {
+    ...reportFixture,
+    operationalSignals: [{ key: 'checks', label: 'Checks', value: '0', detail: 'No issues found', tone: 'positive' }],
+    topServices: [{ rank: 1, serviceName: 'Microsoft.Compute', displayName: 'Compute', monthlySpend: 2200, pctOfTotal: 0.7 }],
+  };
+  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" />));
+  for (const id of ['operational-signals', 'top-services', 'prioritised-findings']) {
+    const section = container.querySelector(`[data-dashboard-section="${id}"]`)!;
+    expect(section.tagName).toBe('SECTION');
+    expect(section.closest('.executive-report')).not.toBeNull();
+    expect(section.closest('.executive-evidence-grid')).not.toBeNull();
+    expect(section.querySelector('summary')).toBeNull();
+    expect(section.querySelector('h2')).not.toBeNull();
+  }
+  expect(container.querySelector('.anomaly-overview')).toBeNull();
+  expect(container.textContent).not.toContain('Spend by resource type');
+  expect(container.querySelector('.executive-donut-panel')).toBeNull();
+  expect(container.textContent).not.toContain('Report details');
+  expect(container.querySelector('.report-evidence-details')).toBeNull();
+  expect(container.querySelector('.executive-evidence-grid')?.classList.contains('has-findings')).toBe(report.prioritizedFindings.length > 0);
+});
+it('keeps populated findings and multi-subscription evidence in the organised landing page', async () => {
+  const report: FullReport = {
+    ...reportFixture,
+    subscriptionBreakdown: [
+      ...reportFixture.subscriptionBreakdown,
+      { ...reportFixture.subscriptionBreakdown[0], subscriptionId: 'sub-2', subscriptionName: 'Second subscription' },
+    ],
+    prioritizedFindings: [{
+      rank: 1, category: 'unattached_disks', finding: 'Review unattached disks',
+      evidence: 'Verified billed cost', impactType: 'potential_savings',
+      monthlySaving: 20, monthlyCostAtRisk: null, severity: 'Medium',
+    }],
+  };
+  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" />));
+  expect(container.querySelector('.executive-evidence-grid.has-findings')).not.toBeNull();
+  expect(container.querySelector('[data-dashboard-section="prioritised-findings"] .executive-findings-table')?.textContent).toContain('Review unattached disks');
+  expect(container.querySelector('[data-dashboard-section="subscriptions"]')?.textContent).toContain('Second subscription');
+  expect(container.querySelector('[data-dashboard-section="top-services"]')).toBeNull();
+  expect(container.querySelector('[data-dashboard-section="operational-signals"]')).toBeNull();
+});
+it('uses one persistent left navigation across report pages', async () => {
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
+  const navigation = container.querySelector('nav[aria-label="Report navigation"]')!;
+  expect(navigation.classList.contains('report-sidenav')).toBe(true);
+  expect(container.querySelector('.report-topnav, .category-pill-row, [aria-label="Report areas"]')).toBeNull();
   await act(async () => button('History').click());
-  expect(container.querySelector('[aria-label="Spend by category"]')).toBe(navigation);
-  expect(navigation.closest('details')).toBeNull();
-  await act(async () => navigation.querySelectorAll<HTMLButtonElement>('button')[1].click());
-  expect(navigation.querySelector('[aria-pressed="true"]')?.textContent).toContain('Compute');
+  expect(container.querySelector('nav[aria-label="Report navigation"]')).toBe(navigation);
+  expect(navigation.querySelector('[data-current="true"] .report-sidenav-group-toggle')?.textContent?.trim()).toBe('Cost Management');
+  await act(async () => button('Compute Optimization').click());
   expect(container.querySelector('#report-page-heading')?.textContent).toBe('Compute Optimization');
-  expect(container.querySelectorAll('[aria-label="Spend by category"]')).toHaveLength(1);
+  expect(container.querySelectorAll('nav[aria-label="Report navigation"]')).toHaveLength(1);
 });
 
 it('navigates actionable cost overview cards and leaves informational cards static', async () => {
@@ -54,6 +192,51 @@ it('navigates actionable cost overview cards and leaves informational cards stat
   expect(container.querySelector('#report-page-heading')?.textContent).toBe('Savings Roadmap');
 });
 
+it('does not present zero waste or zero confirmed idle resources as risk cards', async () => {
+  const report = { ...reportFixture, executiveSummary: { ...reportFixture.executiveSummary, estimatedWastageMonth: 0 } };
+  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" />));
+  for (const label of ['Open stale and orphaned resources', 'Open confirmed idle resources']) {
+    expect(container.querySelector(`[aria-label="${label}"]`)?.classList.contains('risk')).toBe(false);
+    expect(container.querySelector(`[aria-label="${label}"]`)?.classList.contains('neutral')).toBe(true);
+  }
+  expect(container.querySelector('[aria-label="Open confirmed idle resources"]')?.textContent).toContain('3 candidates require evidence or owner review');
+});
+
+it('searches and filters budgets, and flags forecast overruns that are still within budget', async () => {
+  const base = { subscriptionId: 'sub-1', category: 'Cost', currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '', filter: {} } as const;
+  const budgets = [
+    { ...base, name: 'Platform', amount: 100, currentSpend: 20, forecastSpend: 140 },
+    { ...base, name: 'Finance', amount: 100, currentSpend: 115, forecastSpend: 150 },
+    { ...base, name: 'Sandbox', amount: 100, currentSpend: 10, forecastSpend: 40 },
+    { ...base, name: 'Legacy', amount: 100, currentSpend: null, forecastSpend: null },
+  ];
+  await act(async () => root.render(<BudgetContext details={detailReportFixture.costDetails} state={{ budgets, loading: false, error: null, refresh: vi.fn() }} />));
+  const names = () => [...container.querySelectorAll('.budget-table tbody th')].map((cell) => cell.firstChild?.textContent);
+  expect(names()).toEqual(['Platform', 'Finance', 'Sandbox', 'Legacy']);
+  expect(container.querySelector('.table-count')?.textContent).toBe('4 of 4 budgets');
+  const platform = [...container.querySelectorAll('.budget-table tbody tr')].find((row) => row.textContent?.includes('Platform'))!;
+  expect([...platform.querySelectorAll('.budget-status')].map((badge) => badge.textContent)).toEqual(['Within budget', 'Forecast over']);
+  await act(async () => button('Needs attention (2)').click());
+  expect(names()).toEqual(['Platform', 'Finance']);
+  await act(async () => button('On track').click());
+  expect(names()).toEqual(['Sandbox']);
+  await act(async () => button('Unavailable').click());
+  expect(names()).toEqual(['Legacy']);
+  await act(async () => button('All').click());
+  const search = container.querySelector<HTMLInputElement>('[aria-label="Search budgets"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'fin');
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(names()).toEqual(['Finance']);
+  expect(container.querySelector('.table-count')?.textContent).toBe('1 of 4 budgets');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'nothing');
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(container.textContent).toContain('No budgets match this search or status.');
+});
+
 it('keeps budget matching, forecast variance and status thresholds explicit', async () => {
   const budget = { subscriptionId: 'sub-1', name: 'Finance', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '', currentSpend: 105, forecastSpend: 140 };
   expect(budgetThreshold({ ...budget, currentSpend: 100 }).tone).toBe('within');
@@ -67,8 +250,14 @@ it('keeps budget matching, forecast variance and status thresholds explicit', as
   expect(budgetFilterMatches(undefined, row)).toBeNull();
   await act(async () => root.render(<BudgetContext details={detailReportFixture.costDetails} state={{ budgets: [budget], loading: false, error: null, refresh: vi.fn() }} />));
   expect(container.textContent).toContain('Filter applicability unverified');
-  expect(container.textContent).toContain('USD -5');
-  expect(container.textContent).toContain('Projected overrun: USD 40');
+  expect(container.textContent).toContain('$5.00 over');
+  expect(container.textContent).toContain('Overrun $40.00');
+  expect(budgetThreshold(budget).label).toBe('Over by 5%');
+  // A monthly budget checked on 30 Sep reports September to date, not the report month.
+  expect(budgetCycle({ ...budget, periodStart: '2026-01-01' }, '2026-09-30T10:00:00Z')).toEqual({ start: '2026-09-01', end: '2026-09-30' });
+  expect(budgetCycle({ ...budget, timeGrain: 'Quarterly', periodStart: '2026-01-01' }, '2026-08-15')).toEqual({ start: '2026-07-01', end: '2026-09-30' });
+  expect(budgetCycle({ ...budget, timeGrain: 'Annually', periodStart: '2025-04-01' }, '2026-02-10')).toEqual({ start: '2025-04-01', end: '2026-03-31' });
+  expect(budgetCycle({ ...budget, periodStart: '2027-01-01' }, '2026-09-30')).toBeNull();
 });
 
 it('drills from a selected period into day resources, preserves the range for anomalies, and replaces savings breakdown', async () => {
@@ -90,6 +279,9 @@ it('drills from a selected period into day resources, preserves the range for an
   await act(async () => drilldown.querySelector<HTMLButtonElement>('[aria-label^="Check VM availability"]')!.click());
   expect(drilldown.textContent).toContain('12.00 h observed (partial)');
   expect(drilldown.textContent).toContain('720/1440 minutes');
+  // A non-zero spike count is red, not the amber used for a mere warning.
+  expect(container.querySelector('.period-anomaly-link strong')?.className).toBe('metric-count-risk');
+  expect(container.querySelector('.period-anomaly-link strong')?.className).not.toContain('warn');
   await act(async () => container.querySelector<HTMLButtonElement>('.period-anomaly-link')!.click());
   expect(container.querySelector('[aria-label="Selected period anomalies"]')?.textContent).toContain('finance-vm');
   // The 7-day window supplied above is what the anomalies tab compares against.
@@ -103,7 +295,7 @@ it('drills from a selected period into day resources, preserves the range for an
 
 it('opens billing views from the full report and reuses main-screen anomaly results', async () => {
   await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
-  expect(container.querySelector('[aria-label="Cost anomaly overview"]')?.textContent).toContain('Demo subscription');
+  expect(container.querySelector('[aria-label="Cost anomaly overview"]')).toBeNull();
   await act(async () => button('History').click());
   expect(container.querySelector('[aria-label="Billing history comparison"]')).not.toBeNull();
   expect(container.querySelector('#report-page-heading')?.textContent).toBe('History');
@@ -116,7 +308,7 @@ it('opens billing views from the full report and reuses main-screen anomaly resu
   await act(async () => button('Cost by Hour').click());
   expect(container.querySelector('[aria-label="Billing day filter"]')).not.toBeNull();
   await act(async () => button('Executive Summary').click());
-  await act(async () => button('View all').click());
+  await act(async () => button('Cost Anomalies').click());
   expect(container.textContent).toContain('Detected signals');
   expect(getCostAnomalies).toHaveBeenCalledOnce();
 });
@@ -132,80 +324,126 @@ it('checks service retirements only on request and distinguishes failed sources 
   expect(container.textContent).not.toContain('No resource-specific retirements were returned');
 });
 
-it('keeps the overview compact and mounts detailed visuals only on demand without dropping evidence', async () => {
-  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
-  const details = container.querySelector<HTMLDetailsElement>('.cost-analysis-details')!;
-  expect(details.open).toBe(false);
-  expect(container.querySelector('.executive-visual-grid')).toBeNull();
-  expect(container.querySelector('.cost-analysis-details .billing-filters')).toBeNull();
-  expect(container.textContent).toContain('Assessed month');
+it('shows trend, subscriptions and regions together with hierarchy drilldown and no repeated overview content', async () => {
+  const report = { ...reportFixture, costHierarchy: detailReportFixture.costDetails!.rows.map((row) => ({ ...row, monthlySpend: 100, pctOfTotal: 0.5 })) };
+  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" />));
+  const distribution = container.querySelector('.executive-distribution')!;
+  const trend = distribution.querySelector('.executive-history-panel')!;
+  const footprint = distribution.querySelector('.executive-visual-grid')!;
+  expect(trend).not.toBeNull();
+  expect(footprint.querySelector('.cost-treemap')).not.toBeNull();
+  expect(footprint.querySelector('.region-map')).not.toBeNull();
+  expect(distribution.querySelector('[hidden]')).toBeNull();
+  expect(distribution.querySelector('[aria-label="Spend distribution view"]')).toBeNull();
+  expect(container.querySelector('.cost-analysis-details')).toBeNull();
+  expect(container.querySelector('[data-dashboard-section="prioritised-findings"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Time range"]')).toBeNull();
+  expect(container.querySelector('.report-context-details .summary-strip')).toBeNull();
+  expect([...container.querySelectorAll('.executive-takeaways .takeaway')].some((item) => item.textContent?.startsWith('Spend '))).toBe(false);
+  expect(container.querySelector('[data-dashboard-section="spend-distribution-overview"] .dashboard-section-figure')).toBeNull();
   expect(container.textContent).not.toContain('Month to date');
-  expect(container.querySelector('[aria-label="Spend by category"]')?.tagName).toBe('NAV');
-  expect(container.querySelector('[aria-pressed="true"]')?.textContent).toContain('All spend');
-  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
-  const visuals = container.querySelector('.executive-visual-grid');
-  expect(visuals).not.toBeNull();
+  expect(container.querySelector('nav[aria-label="Report navigation"] [aria-current="page"]')?.textContent?.trim()).toBe('Executive Summary');
   expect(container.textContent).toContain('No prioritised findings in this snapshot');
-  expect(container.querySelector('[aria-label="Billing day filter"]')).not.toBeNull();
-  await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')); });
-  expect(container.querySelector('.executive-visual-grid')).toBe(visuals);
+  const node = footprint.querySelector<HTMLButtonElement>('.treemap-cell')!;
+  await act(async () => node.click());
+  const level = footprint.querySelector('.treemap-breadcrumb')!.textContent;
+  expect(level).not.toBe('Subscriptions');
+  expect(distribution.querySelector('.executive-history-panel')).toBe(trend);
+  expect(distribution.querySelector('[hidden]')).toBeNull();
   expect(getCostAnomalies).toHaveBeenCalledOnce();
 });
 
-it('keeps daily trend labels aligned and applies a custom period to every executive cost view', async () => {
-  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
-  const details = container.querySelector<HTMLDetailsElement>('.cost-analysis-details')!;
-  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
+it('keeps the daily ledger expanded with subscription IDs and reveals comparison drilldown from a day', async () => {
+  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} />));
+  const ledger = container.querySelector<HTMLDetailsElement>('.cost-daily-values')!;
+  expect(ledger.open).toBe(true);
+  expect(ledger.querySelector('.daily-cost-group-name strong')?.textContent).toBe('Demo subscription');
+  expect(ledger.querySelector('.daily-cost-group-name small')?.textContent).toBe('Subscription ID: sub-1');
+  const heading = container.querySelector<HTMLHeadingElement>('#dashboard-section-cost-comparison')!;
+  heading.scrollIntoView = vi.fn();
+  const frame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => { callback(0); return 0; });
+  try {
+    await act(async () => ledger.querySelector<HTMLButtonElement>('.finding-link')!.click());
+    expect(container.querySelector('[aria-label="Selected day resource detail"]')?.textContent).toContain('finance-vm');
+    expect(heading.scrollIntoView).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(heading);
+  } finally {
+    frame.mockRestore();
+  }
+});
 
-  const chart = container.querySelector<SVGElement>('[aria-label="Daily cost trend"]')!;
-  const labels = () => [...chart.querySelectorAll('text')].map((node) => node.textContent);
-  expect(labels()).toHaveLength(30);
-  expect(labels().at(0)).toBe('08-09');
-  expect(labels().at(-1)).toBe('09-07');
-  expect(chart.querySelectorAll('text[transform^="rotate(-60"]').length).toBe(30);
-  expect(chart.getAttribute('preserveAspectRatio')).toBeNull();
+it('shows no graph or budget for a key alone and charts the chosen value over the report window', async () => {
+  const window = { startDate: '2026-09-01', endDate: '2026-09-07' };
+  await act(async () => root.render(<ReportView report={applicationTagReport} narration={null} snapshotId="visual-report-1" costWindow={window} onCostWindowChange={vi.fn()} />));
+  await act(async () => button('Cost by Tags/Application').click());
 
-  await act(async () => button('Custom').click());
-  const start = container.querySelector<HTMLInputElement>('[aria-label="Analysis period start"]')!;
-  const end = container.querySelector<HTMLInputElement>('[aria-label="Analysis period end"]')!;
-  expect(start.value).toBe('2026-08-09');
-  expect(end.value).toBe('2026-09-07');
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(start, '2026-09-01');
-    start.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  // Filters lead the page; the old tag-set pie and all-values trend are gone.
+  expect(container.querySelector('.executive-donut-panel')).toBeNull();
+  expect(container.querySelector('[aria-label="Daily cost trend"]')).toBeNull();
+  const panel = container.querySelector('.panel')!;
+  const controls = panel.querySelector('.tag-cost-controls')!;
+  expect(panel.querySelector('.tag-selection')).toBeNull();
+  expect(panel.querySelector('.tag-selection-hint')!.textContent).toContain('Choose a value for application above');
+  expect(controls.compareDocumentPosition(panel.querySelector('.tag-selection-hint')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-  expect(labels()).toEqual(['09-01', '09-02', '09-03', '09-04', '09-05', '09-06', '09-07']);
-  expect(chart.querySelectorAll('text[transform]')).toHaveLength(0);
-  expect(container.querySelector('.range-spend-kpi-grid')?.textContent).toContain('7/7 covered export-calendar days');
-  const tagDonut = [...container.querySelectorAll<HTMLElement>('.executive-donut-panel')].find((section) => section.textContent?.includes('Average hourly cost by tag set'))!;
-  expect(tagDonut.textContent).toContain('7 export days');
+  await chooseTagOption('Tag value', 'Finance');
+  const selection = panel.querySelector('.tag-selection')!;
+  expect(selection.querySelector('h3')!.textContent).toBe('application = Finance');
+  // Finance alone across the seven days, not the subscription.
+  expect(selection.textContent).toContain('$1,632.00 in the selected period');
+  expect(selection.querySelector('[aria-label="Daily cost for application = Finance"]')).not.toBeNull();
+  expect(panel.querySelector('.tag-selection-hint')).toBeNull();
+
+  await chooseTagOption('Tag value', 'All values');
+  expect(panel.querySelector('.tag-selection')).toBeNull();
+
+  await act(async () => button('Cost by Hour').click());
   expect(container.querySelector('[aria-label="Cost by hour"]')?.textContent).toContain('2026-09-01 - 2026-09-07');
+});
+
+it('ranks tag keys and states what one explains from its rows, not from a stored zero', async () => {
+  // A snapshot written before the API carried the figure holds 0, not a missing value.
+  const staleSnapshot = {
+    ...tagReportFixture,
+    tagCosts: {
+      ...tagReportFixture.tagCosts,
+      dimensions: tagReportFixture.tagCosts.dimensions.map((item) => ({ ...item, allocatedCost: 0, coverage: 0 })),
+    },
+  };
+  await act(async () => root.render(<ReportView report={staleSnapshot} narration={null} snapshotId="visual-report-1" />));
+  await act(async () => button('Cost by Tags/Application').click());
+  expect([...tagSelect('Tag key').options].map((option) => option.textContent)).toEqual(['Environment', 'Team']);
+  const explains = container.querySelector('.tag-cost-coverage')!.textContent!;
+  expect(explains).toContain('Environment explains $250.00 of $250.00');
+  expect(explains).not.toContain('%');
 });
 
 it('filters tag costs by the selected key and value without changing financial evidence', async () => {
   await act(async () => root.render(<ReportView report={tagReportFixture} narration={null} snapshotId="visual-report-1" />));
   await act(async () => button('Cost by Tags/Application').click());
+  // Keys open most-explanatory first: Environment (250) before Team (200).
+  expect([...tagSelect('Tag key').options].map((option) => option.value)).toEqual(['Environment', 'Team']);
+  await chooseTagOption('Tag key', 'Team');
   expect(tagSelect('Tag value')).not.toBeNull();
   expect([...tagSelect('Tag value').options].map((option) => option.textContent)).toEqual(['All values', 'Platform', 'Sales']);
   const table = container.querySelector('.app-cost-table')!;
-  expect(table.querySelectorAll('tbody tr')).toHaveLength(2);
-  const originalSalesRow = table.querySelectorAll('tbody tr')[1];
+  expect(tagValueRows(table)).toHaveLength(2);
+  const originalSalesRow = tagValueRows(table)[1];
   const originalEvidence = originalSalesRow.textContent;
   const originalBarWidth = originalSalesRow.querySelector<HTMLElement>('.app-cost-bar-fill')!.style.width;
 
   await chooseTagOption('Tag value', 'Sales');
-  expect(table.querySelectorAll('tbody tr')).toHaveLength(1);
+  expect(tagValueRows(table)).toHaveLength(1);
   expect(table.querySelector('tbody tr')!.textContent).toBe(originalEvidence);
   expect(table.querySelector<HTMLElement>('.app-cost-bar-fill')!.style.width).toBe(originalBarWidth);
 
   await chooseTagOption('Tag value', 'All values');
-  expect(table.querySelectorAll('tbody tr')).toHaveLength(2);
+  expect(tagValueRows(table)).toHaveLength(2);
   await chooseTagOption('Tag value', 'Sales');
   await chooseTagOption('Tag key', 'Environment');
   expect([...tagSelect('Tag value').options].map((option) => option.textContent)).toEqual(['All values', 'Production']);
   expect(tagSelect('Tag value').selectedOptions[0].textContent).toBe('All values');
-  expect(table.querySelectorAll('tbody tr')).toHaveLength(1);
+  expect(tagValueRows(table)).toHaveLength(1);
   expect(table.querySelector('tbody tr')!.textContent).toContain('Production');
   expect(table.querySelector('tbody tr')!.textContent).not.toContain('Sales');
 });
@@ -213,6 +451,7 @@ it('filters tag costs by the selected key and value without changing financial e
 it('falls back to all values after report changes and allows selecting values on the fallback key', async () => {
   await act(async () => root.render(<ReportView report={tagReportFixture} narration={null} snapshotId="visual-report-1" />));
   await act(async () => button('Cost by Tags/Application').click());
+  await chooseTagOption('Tag key', 'Team');
   await chooseTagOption('Tag value', 'Sales');
   const team = tagReportFixture.tagCosts.dimensions[0];
   const refreshedReport = { ...tagReportFixture, tagCosts: {
@@ -228,9 +467,9 @@ it('falls back to all values after report changes and allows selecting values on
   await act(async () => root.render(<ReportView report={changedKeyReport} narration={null} snapshotId="visual-report-1" />));
   expect(tagSelect('Tag key').value).toBe('Owner');
   expect(tagSelect('Tag value').selectedOptions[0].textContent).toBe('All values');
-  expect(container.querySelectorAll('.app-cost-table tbody tr')).toHaveLength(2);
+  expect(tagValueRows()).toHaveLength(2);
   await chooseTagOption('Tag value', 'Sales');
-  expect(container.querySelectorAll('.app-cost-table tbody tr')).toHaveLength(1);
+  expect(tagValueRows()).toHaveLength(1);
   expect(container.querySelector('.app-cost-table tbody')!.textContent).toContain('Sales');
 });
 
@@ -244,8 +483,11 @@ it.each(['', 'All values', 'Team "A" & Operations'])('matches the literal tag va
   const select = tagSelect('Tag value');
   expect(select.options[1].value).not.toBe(select.options[0].value);
   await act(async () => { select.value = select.options[1].value; select.dispatchEvent(new Event('change', { bubbles: true })); });
-  expect(container.querySelectorAll('.app-cost-table tbody tr')).toHaveLength(1);
-  expect(container.querySelector('.app-cost-table tbody td')!.textContent).toBe(value);
+  expect(tagValueRows()).toHaveLength(1);
+  /* The empty value is labelled, not rendered as an empty cell: the picker has always
+     shown it as "(empty)", and a blank cell beside a cost reads as a failure to render
+     rather than as a resource tagged with nothing. The label is the picker's. */
+  expect(container.querySelector('.app-cost-table tbody td')!.textContent).toBe(value || '(empty)');
 });
 
 it('preserves the missing-tag state and disables the value filter for a key without rows', async () => {
@@ -282,87 +524,123 @@ const renderTagBudgets = async (budgets: unknown[]) => {
   await act(async () => button('Cost by Tags/Application').click());
 };
 
-it('scopes budget evidence to the selected tag and drops budgets the selection never touches', async () => {
-  await renderTagBudgets([subscriptionWideBudget, foreignSubscriptionBudget]);
-  const budgets = container.querySelector('.tag-cost-budgets')!;
-  expect(budgets.textContent).toContain('Subscription budget');
-  // sub-2 carries none of the assessed tag spend, so it does not bear on the selection.
-  expect(budgets.textContent).not.toContain('Unrelated subscription budget');
-  // All application values: both tagged resources, 1632 + 204 across the window.
-  expect(budgets.textContent).toContain('$1,836');
-  expect(budgets.textContent).toContain('all application values');
+const dayBar = (date: string) => container.querySelector<HTMLButtonElement>(`.tag-selection .cost-bar-hit[title^="${date}"]`);
+const dayContributors = () => container.querySelector('.tag-day-drilldown');
+
+it('makes the application graph clickable and lists that day\'s contributors, with no budget needed', async () => {
+  await renderTagBudgets([]);
+  // A key alone has no graph, so nothing to click yet.
+  expect(container.querySelector('.tag-selection')).toBeNull();
 
   await chooseTagOption('Tag value', 'Finance');
-  // Finance alone, not the budget's whole subscription.
-  expect(container.querySelector('.tag-cost-budgets')!.textContent).toContain('$1,632');
-  expect(container.querySelector('.tag-cost-budgets')!.textContent).toContain('for application = Finance');
+  expect(container.querySelector('.tag-cost-budgets')).toBeNull();
+  expect(dayContributors()).toBeNull();
+
+  await act(async () => dayBar('2026-09-07')!.click());
+  const contributors = dayContributors()!;
+  expect(contributors.getAttribute('aria-label')).toBe('Contributors on 2026-09-07 for application = Finance');
+  // The resources behind that day, inside the selected application only.
+  expect(contributors.textContent).toContain('finance-vm');
+  expect(contributors.textContent).not.toContain('shared-disk');
+  expect(dayBar('2026-09-07')!.getAttribute('aria-pressed')).toBe('true');
+
+  // The same day again, or Close, puts it away.
+  await act(async () => dayBar('2026-09-07')!.click());
+  expect(dayContributors()).toBeNull();
+  await act(async () => dayBar('2026-09-06')!.click());
+  expect(dayContributors()!.getAttribute('aria-label')).toContain('2026-09-06');
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close day contributors"]')!.click());
+  expect(dayContributors()).toBeNull();
 });
 
-it('drills a selected budget day into the resources of that tag on that day', async () => {
-  await renderTagBudgets([financeBudget]);
+it('drops the chosen day when the application changes, so one application\'s day is never shown for another', async () => {
+  await renderTagBudgets([]);
   await chooseTagOption('Tag value', 'Finance');
-  expect(container.querySelector('[aria-label^="Resource costs on"]')).toBeNull();
-
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Resource costs for 2026-09-03"]')!.click());
-  const drilldown = container.querySelector('[aria-label="Resource costs on 2026-09-03 for Finance app budget"]')!;
-  expect(drilldown).not.toBeNull();
-  expect(drilldown.textContent).toContain('finance-vm');
-  expect(drilldown.textContent).toContain('$288.00');
-  // Platform spend shares the subscription but not the selected application.
-  expect(drilldown.textContent).not.toContain('shared-disk');
-
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Resource costs for 2026-09-03"]')!.click());
-  expect(container.querySelector('[aria-label^="Resource costs on"]')).toBeNull();
+  await act(async () => dayBar('2026-09-07')!.click());
+  expect(dayContributors()).not.toBeNull();
+  await chooseTagOption('Tag value', 'Platform');
+  expect(dayContributors()).toBeNull();
+  await act(async () => dayBar('2026-09-07')!.click());
+  expect(dayContributors()!.textContent).toContain('shared-disk');
+  expect(dayContributors()!.textContent).not.toContain('finance-vm');
 });
+it('lists only budgets whose own filter names the chosen key and value', async () => {
+  const contactBudget = { ...financeBudget, name: 'Contact budget', filter: { tags: { name: 'contact', operator: 'In', values: ['Finance'] } } };
+  await renderTagBudgets([financeBudget, subscriptionWideBudget, foreignSubscriptionBudget, contactBudget]);
+  // A key alone shows no budget at all.
+  expect(container.querySelector('.tag-cost-budgets')).toBeNull();
 
-it('separates budgets allocated to the tag from wider budgets that merely contain it', async () => {
-  await renderTagBudgets([financeBudget, subscriptionWideBudget, foreignSubscriptionBudget]);
   await chooseTagOption('Tag value', 'Finance');
   const budgets = container.querySelector('.tag-cost-budgets')!;
-  expect(budgets.textContent).toContain('One budget is scoped to application = Finance');
-  const wider = budgets.querySelector('.wider-budgets')!;
-  expect(wider.querySelector('summary')!.textContent).toContain('Not an allocation for application = Finance');
-  expect(wider.textContent).toContain('Subscription budget');
-  // The application's own budget leads the section rather than being buried.
-  expect(wider.textContent).not.toContain('Finance app budget');
+  expect(budgets.textContent).toContain('Budget for application = Finance');
+  expect(budgets.textContent).toContain('Finance app budget');
   // Same-named budgets in different subscriptions are told apart by subscription.
   expect(budgets.textContent).toContain('Demo subscription');
+  // Budgets that merely contain the spend are not this application's budget.
+  expect(budgets.textContent).not.toContain('Subscription budget');
+  expect(budgets.textContent).not.toContain('Unrelated subscription budget');
+  // Same value, different key: not a match.
+  expect(budgets.textContent).not.toContain('Contact budget');
+  expect(budgets.querySelector('.wider-budgets')).toBeNull();
 
-  // Switching application changes which budget is presented as its allocation.
+  // No budget names Platform, so none is shown - not a stand-in.
   await chooseTagOption('Tag value', 'Platform');
-  const afterSwitch = container.querySelector('.tag-cost-budgets')!;
-  expect(afterSwitch.textContent).toContain('No budget is scoped to application = Platform');
-  expect(afterSwitch.textContent).not.toContain('Finance app budget');
-  expect(afterSwitch.querySelector('.wider-budgets')!.textContent).toContain('Subscription budget');
+  expect(container.querySelector('.tag-selection')).not.toBeNull();
+  expect(container.querySelector('.tag-cost-budgets')).toBeNull();
 });
 
-it('colours anomaly counts by severity when signals need action', async () => {
-  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} onCostWindowChange={() => {}} />));
-  const overview = container.querySelector('.anomaly-overview-metrics')!;
-  // The synthetic fixture carries one signal, and that signal is high severity.
-  expect(overview.querySelectorAll('.metric-count-warn')).toHaveLength(1);
-  expect(overview.querySelectorAll('.metric-count-risk')).toHaveLength(1);
-  expect(overview.querySelector('.metric-count-good')).toBeNull();
+it('shows one application graph when a budget tracks it, with the budget share on that graph', async () => {
+  await renderTagBudgets([financeBudget]);
+  await chooseTagOption('Tag value', 'Finance');
+  const selection = container.querySelector('.tag-selection')!;
+  // One chart only: the budget does not add a second graph.
+  expect(selection.querySelectorAll('svg')).toHaveLength(1);
+  expect(selection.querySelector('.budget-daily-chart')).toBeNull();
+  expect(selection.querySelector('.cost-chart-reference')).not.toBeNull();
+  expect(selection.textContent).toContain('Finance app budget: even daily share of USD');
+  // The budget's figures stay, as text on its card.
+  const card = selection.querySelector('.tag-budget-card')!;
+  expect(card.textContent).toContain('Finance app budget');
+  expect(card.textContent).toContain('covered days for application = Finance');
+  // Day drilldown comes from the one graph and stays inside the application.
+  await act(async () => dayBar('2026-09-03')!.click());
+  expect(dayContributors()!.textContent).toContain('finance-vm');
+  expect(dayContributors()!.textContent).not.toContain('shared-disk');
 });
 
-it('colours anomaly counts green when nothing crossed the thresholds', async () => {
-  vi.mocked(getCostAnomalies).mockResolvedValue({ ...anomalyFixture, anomalies: [] });
-  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="visual-report-1" />));
-  const overview = container.querySelector('.anomaly-overview-metrics')!;
-  expect(overview.querySelectorAll('.metric-count-good')).toHaveLength(2);
-  expect(overview.querySelector('.metric-count-warn')).toBeNull();
-  expect(overview.querySelector('.metric-count-risk')).toBeNull();
+it('draws no budget line when several budgets track the application, but keeps one graph', async () => {
+  const second = { ...financeBudget, name: 'Finance stretch budget', amount: 2000 };
+  await renderTagBudgets([financeBudget, second]);
+  await chooseTagOption('Tag value', 'Finance');
+  const selection = container.querySelector('.tag-selection')!;
+  expect(selection.querySelectorAll('svg')).toHaveLength(1);
+  expect(selection.querySelector('.cost-chart-reference')).toBeNull();
+  expect(selection.querySelectorAll('.tag-budget-card')).toHaveLength(2);
+  expect(selection.textContent).toContain('2 budgets for application = Finance');
+});
+
+it('matches a budget on a hyphenated tag key shown in display form', async () => {
+  const report = { ...applicationTagReport, costDetails: { ...applicationTagReport.costDetails!, rows: applicationTagReport.costDetails!.rows.map((row) => ({ ...row, tags: { 'azd-env-name': row.tags.application } })) },
+    tagCosts: { ...applicationTagReport.tagCosts, dimensions: [{ ...applicationTagReport.tagCosts.dimensions[0], tagKey: 'Azd Env Name' }] } };
+  vi.mocked(listBudgets).mockResolvedValue([{ ...financeBudget, filter: { tags: { name: 'azd-env-name', operator: 'In', values: ['Finance'] } } }] as never);
+  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} onCostWindowChange={() => {}} />));
+  await act(async () => button('Cost by Tags/Application').click());
+  await chooseTagOption('Tag value', 'Finance');
+  // "Azd Env Name" in the report is `azd-env-name` on the rows and in the budget.
+  expect(container.querySelector('.tag-selection')!.textContent).toContain('$1,632.00 in the selected period');
+  expect(container.querySelector('.tag-cost-budgets')!.textContent).toContain('Finance app budget');
 });
 
 it('ignores a tag value inherited from a different tag key when scoping the selection', async () => {
-  await renderTagBudgets([subscriptionWideBudget]);
+  await renderTagBudgets([financeBudget]);
   await chooseTagOption('Cost tag key', 'owner');
   await chooseTagOption('Cost tag value', 'Finance team');
+  await chooseTagOption('Tag value', 'Finance');
   // "owner = Finance team" must not be tested against the application key, which
-  // matches nothing and previously emptied the budget evidence for the page.
-  const budgets = container.querySelector('.tag-cost-budgets')!;
-  expect(budgets.textContent).toContain('$1,836');
-  expect(budgets.textContent).not.toContain('No daily cost evidence');
+  // matches nothing and previously emptied the evidence for the page.
+  const selection = container.querySelector('.tag-selection')!;
+  expect(selection.textContent).toContain('$1,632.00 in the selected period');
+  expect(selection.textContent).not.toContain('No daily cost evidence');
 });
 
 it.each([true, false])('shows the same realized RI and Savings Plan evidence in EA Pricing and Rate Optimization when pricing is available: %s', async (available) => {

@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Check, CheckCheck, ChevronDown, LoaderCircle, Play, RefreshCw, X } from 'lucide-react';
-import type { StaleDays } from '../collectors/costAssessment';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Check, CheckCheck, ChevronDown, LoaderCircle, Play, RefreshCw, Search, X } from 'lucide-react';
 
 export type Subscription = { subscriptionId: string; displayName: string; state?: string };
 
@@ -13,13 +12,13 @@ type SubscriptionPickerProps = {
   hasReport: boolean;
   periodLabel: string | null;
   scopeChanged: boolean;
-  staleDays: StaleDays;
   error: string | null;
   onToggle: (subscriptionId: string) => void;
   onSelectAll: () => void;
   onClearAll: () => void;
-  onStaleDaysChange: (days: StaleDays) => void;
   onRun: () => void;
+  /* Shown in the same row, between the subscription picker and the run controls. */
+  children?: ReactNode;
 };
 
 export function SubscriptionPicker({
@@ -31,52 +30,142 @@ export function SubscriptionPicker({
   hasReport,
   periodLabel,
   scopeChanged,
-  staleDays,
   error,
   onToggle,
   onSelectAll,
   onClearAll,
-  onStaleDaysChange,
   onRun,
+  children,
 }: SubscriptionPickerProps) {
-  const [expanded, setExpanded] = useState(!hasReport);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [filter, setFilter] = useState('');
+  const selectRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (hasReport && !scopeChanged) setExpanded(false);
-  }, [hasReport, scopeChanged]);
+    if (running) setMenuOpen(false);
+  }, [running]);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      setFilter('');
+      return;
+    }
+    const onPointerDown = (event: MouseEvent) => {
+      if (selectRef.current && !selectRef.current.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
 
   const allSelected = subscriptions.length > 0 && selectedIds.size === subscriptions.length;
   const selectedNames = subscriptions.filter((item) => selectedIds.has(item.subscriptionId));
-  const scopeSummary = selectedNames.length === 0
-    ? 'No subscriptions selected'
+
+  const visibleSubscriptions = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    if (!needle) return subscriptions;
+    return subscriptions.filter((item) =>
+      item.displayName.toLowerCase().includes(needle) || item.subscriptionId.toLowerCase().includes(needle));
+  }, [subscriptions, filter]);
+
+  const triggerLabel = selectedIds.size === 0
+    ? 'Select subscriptions'
     : allSelected
-      ? 'All available subscriptions'
-      : selectedNames.slice(0, 2).map((item) => item.displayName).join(' · ');
+      ? 'All subscriptions'
+      : selectedNames.map((item) => item.displayName).join(', ');
 
   return (
     <section
-      className={`scope-ribbon ${expanded ? 'is-open' : ''} ${running || loading ? 'is-running' : ''} ${error ? 'has-error' : ''}`}
+      className={`scope-ribbon ${menuOpen ? 'has-select-open' : ''} ${running || loading ? 'is-running' : ''} ${error ? 'has-error' : ''}`}
       aria-busy={running || loading}
     >
       {(running || loading) && <div className="scope-progress" />}
       <div className="scope-ribbon-main">
-        <button
-          type="button"
-          className="scope-disclosure"
-          onClick={() => setExpanded((current) => !current)}
-          aria-expanded={expanded}
-          aria-controls="subscription-scope-panel"
-        >
-          <span className="scope-icon"><ChevronDown size={18} /></span>
-          <span className="scope-copy" aria-live="polite">
-            <span className="scope-label">Report scope</span>
-            <span className="scope-value">
-              {loading ? 'Discovering subscriptions' : `${selectedIds.size} of ${subscriptions.length} selected`}
-              {scopeChanged && <i>Modified</i>}
-            </span>
-            <span className="scope-summary">{loading ? 'Connecting to Azure Resource Manager' : scopeSummary}</span>
-          </span>
-        </button>
+        <span className="scope-panel-title">Azure subscriptions</span>
+
+        {loading ? (
+          <div className="subscription-skeleton" aria-label="Loading subscriptions">
+            <i />
+          </div>
+        ) : subscriptions.length === 0 ? (
+          <p className="empty-state" role="status">No accessible subscriptions returned.</p>
+        ) : (
+          <div className={`subscription-select ${menuOpen ? 'is-open' : ''}`} ref={selectRef}>
+            <button
+              type="button"
+              className="subscription-select-trigger"
+              disabled={running}
+              aria-expanded={menuOpen}
+              aria-haspopup="true"
+              aria-controls="subscription-select-menu"
+              onClick={() => setMenuOpen((current) => !current)}
+            >
+              <span className="subscription-select-value">{triggerLabel}</span>
+              {scopeChanged && <i className="scope-modified">Modified</i>}
+              <span className="subscription-select-count">{selectedIds.size} of {subscriptions.length}</span>
+              <ChevronDown size={15} className="subscription-select-caret" />
+            </button>
+
+            <div id="subscription-select-menu" className="subscription-select-menu" hidden={!menuOpen}>
+              <div className="subscription-select-actions">
+                <button type="button" onClick={onSelectAll} disabled={running || allSelected}>
+                  <CheckCheck size={14} /> Select all
+                </button>
+                <button type="button" onClick={onClearAll} disabled={running || selectedIds.size === 0}>
+                  <X size={14} /> Clear all
+                </button>
+              </div>
+
+              {subscriptions.length > 8 && (
+                <div className="subscription-select-search">
+                  <Search size={13} />
+                  <input
+                    type="search"
+                    value={filter}
+                    placeholder="Filter by name or ID"
+                    aria-label="Filter subscriptions"
+                    onChange={(event) => setFilter(event.target.value)}
+                  />
+                </div>
+              )}
+
+              {visibleSubscriptions.length === 0 ? (
+                <p className="subscription-select-empty" role="status">No subscriptions match that filter.</p>
+              ) : (
+                <ul className="subscription-grid">
+                  {visibleSubscriptions.map((subscription) => {
+                    const selected = selectedIds.has(subscription.subscriptionId);
+                    return (
+                      <li key={subscription.subscriptionId} className={selected ? 'selected' : ''}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={running}
+                            onChange={() => onToggle(subscription.subscriptionId)}
+                          />
+                          <span className="subscription-check">{selected && <Check size={12} />}</span>
+                          <span>
+                            <strong>{subscription.displayName}</strong>
+                            <small>{subscription.subscriptionId}</small>
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+
+        {children && <div className="scope-range">{children}</div>}
 
         <div className="scope-run-area">
           {periodLabel && <span className="scope-period">{periodLabel}</span>}
@@ -97,67 +186,6 @@ export function SubscriptionPicker({
       </div>
 
       {error && <p className="scope-error" role="alert">{error}</p>}
-      <div id="subscription-scope-panel" className="scope-panel" hidden={!expanded}>
-        <div className="scope-panel-inner">
-          <div className="scope-panel-header">
-            <span>Azure subscriptions</span>
-            <div className="scope-panel-controls">
-              <label className="scope-stale-control">
-                <span>Stale threshold</span>
-                <select
-                  value={staleDays}
-                  disabled={running}
-                  onChange={(event) => onStaleDaysChange(Number(event.target.value) as StaleDays)}
-                >
-                  {[7, 14, 30, 60, 90, 180, 365].map((days) => (
-                    <option value={days} key={days}>{days} days</option>
-                  ))}
-                </select>
-              </label>
-              <div className="scope-bulk-actions">
-                <button type="button" onClick={onSelectAll} disabled={loading || running || allSelected}>
-                  <CheckCheck size={15} /> Select all
-                </button>
-                <button type="button" onClick={onClearAll} disabled={loading || running || selectedIds.size === 0}>
-                  <X size={15} /> Clear all
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="subscription-skeleton" aria-label="Loading subscriptions">
-              {[0, 1, 2, 3, 4].map((item) => <i key={item} style={{ animationDelay: `${item * 90}ms` }} />)}
-            </div>
-          ) : subscriptions.length === 0 ? (
-            <p className="empty-state" role="status">No accessible subscriptions returned.</p>
-          ) : (
-            <ul className="subscription-grid">
-              {subscriptions.map((subscription, index) => {
-                const selected = selectedIds.has(subscription.subscriptionId);
-                return (
-                  <li key={subscription.subscriptionId} className={selected ? 'selected' : ''} style={{ animationDelay: `${index * 45}ms` }}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        disabled={running}
-                        onChange={() => onToggle(subscription.subscriptionId)}
-                      />
-                      <span className="subscription-check">{selected && <Check size={14} />}</span>
-                      <span>
-                        <strong>{subscription.displayName}</strong>
-                        <small>{subscription.subscriptionId}</small>
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-
-        </div>
-      </div>
     </section>
   );
 }

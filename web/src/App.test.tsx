@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import App from './App';
@@ -18,8 +18,8 @@ vi.mock('./apiIdentity', () => ({
 vi.mock('./components/ChatWindow', () => ({ ChatWindow: () => <input aria-label="Chat draft" /> }));
 vi.mock('./components/ScheduleManager', () => ({ ScheduleManager: () => <input aria-label="Schedule filter" /> }));
 vi.mock('./components/SubscriptionPicker', () => ({
-  SubscriptionPicker: ({ onRun, error }: { onRun: () => void; error: string | null }) => (
-    <div>Scope picker<button type="button" onClick={onRun}>Run Report</button>{error && <p role="alert">{error}</p>}</div>
+  SubscriptionPicker: ({ onRun, error, children }: { onRun: () => void; error: string | null; children?: ReactNode }) => (
+    <div className="scope-ribbon">Scope picker<button type="button" onClick={onRun}>Run Report</button>{error && <p role="alert">{error}</p>}{children && <div className="scope-range">{children}</div>}</div>
   ),
 }));
 vi.mock('./components/ReportView', () => ({ ReportView: ({ snapshotId, costWindow }: { snapshotId: string | null; costWindow?: { startDate: string; endDate: string } }) => <div data-testid="loaded-report" data-snapshot={snapshotId} data-window={costWindow ? `${costWindow.startDate}..${costWindow.endDate}` : ''}>Loaded report</div> }));
@@ -66,13 +66,13 @@ it('restores an authorized saved report on sign-in without starting an assessmen
   expect(narrate).not.toHaveBeenCalled();
 });
 
-it('presents one report-wide cost window beside the saved-report controls and hands it to the report', async () => {
+it('presents one report-wide cost window in the scope bar and hands it to the report', async () => {
   const dates = Array.from({ length: 10 }, (_, index) => `2026-09-${String(index + 1).padStart(2, '0')}`);
   vi.mocked(getLatestReport).mockResolvedValue({ ...snapshot, report: { ...snapshot.report, costDetails: { dates } } } as ReportSnapshot);
   await act(async () => root.render(<App />));
 
-  const strip = container.querySelector('.saved-report-controls')!;
-  const picker = strip.querySelector('[aria-label="Report cost window"]');
+  const bar = container.querySelector('.scope-ribbon')!;
+  const picker = bar.querySelector('.scope-range [aria-label="Report cost window"]');
   expect(picker).not.toBeNull();
   // It is presented once, not repeated per tab.
   expect(container.querySelectorAll('[aria-label="Report cost window"]')).toHaveLength(1);
@@ -88,8 +88,19 @@ it('presents one report-wide cost window beside the saved-report controls and ha
 it('shows no cost window until a report is loaded', async () => {
   vi.mocked(getLatestReport).mockResolvedValue(null);
   await act(async () => root.render(<App />));
-  expect(container.querySelector('.saved-report-controls')).not.toBeNull();
+  expect(container.querySelector('.scope-range')).toBeNull();
   expect(container.querySelector('[aria-label="Report cost window"]')).toBeNull();
+});
+
+it('offers no saved-report checkbox or button, and no second row: the saved report simply opens', async () => {
+  vi.mocked(getLatestReport).mockResolvedValue(snapshot);
+  await act(async () => root.render(<App />));
+  expect(container.textContent).not.toContain('Open saved report');
+  expect(container.querySelector('.saved-report-controls')).toBeNull();
+  expect(container.querySelector('.scope-range input[type="checkbox"]')).toBeNull();
+  expect(container.querySelector('.scope-range button.ghost-button')).toBeNull();
+  expect(getLatestReport).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('[data-testid="loaded-report"]')).not.toBeNull();
 });
 
 it('waits for Run Report before collection when no saved report exists', async () => {
@@ -208,14 +219,10 @@ it('retries saved evidence without collecting new data', async () => {
   expect(narrate).not.toHaveBeenCalled();
 });
 
-it('makes saved-report loading optional and allows a pending lookup to be skipped without accepting its late result', async () => {
-  window.localStorage.setItem('mkai-open-saved-report', 'false');
-  await act(async () => root.render(<App />));
-  expect(getLatestReport).not.toHaveBeenCalled();
-  expect(container.textContent).toContain('Report workspace ready');
+it('allows a pending lookup to be skipped without accepting its late result', async () => {
   let finish!: (value: ReportSnapshot) => void;
   vi.mocked(getLatestReport).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-  await act(async () => button('Open saved report').click());
+  await act(async () => root.render(<App />));
   await act(async () => button('Skip saved report').click());
   expect(vi.mocked(getLatestReport).mock.calls[0][0]?.aborted).toBe(true);
   await act(async () => finish(snapshot));
@@ -258,13 +265,20 @@ it('never restores a snapshot outside the authorized scope', async () => {
 });
 
 it('uses only the authorized part of a user-specific remembered scope', async () => {
-  window.localStorage.setItem('mkai-report-scope:tenant-1:verified-user', JSON.stringify({ subscriptionIds: ['SUBSCRIPTION-1', 'revoked-subscription'], staleDays: 30 }));
-  const saved = { ...snapshot, staleDays: 30, report: { ...snapshot.report, reportMetadata: { ...snapshot.report.reportMetadata, staleDays: 30 } } } as ReportSnapshot;
-  vi.mocked(getLatestReport).mockResolvedValue(saved);
+  window.localStorage.setItem('mkai-report-scope:tenant-1:verified-user', JSON.stringify({ subscriptionIds: ['SUBSCRIPTION-1', 'revoked-subscription'] }));
+  vi.mocked(getLatestReport).mockResolvedValue(snapshot);
   await act(async () => root.render(<App />));
-  expect(getLatestReport).toHaveBeenCalledWith(expect.any(AbortSignal), ['subscription-1'], 30);
+  expect(getLatestReport).toHaveBeenCalledWith(expect.any(AbortSignal), ['subscription-1'], 90);
   expect(container.querySelector('[data-testid="loaded-report"]')).not.toBeNull();
-  expect(JSON.parse(window.localStorage.getItem('mkai-report-scope:tenant-1:verified-user')!)).toEqual({ subscriptionIds: ['subscription-1'], staleDays: 30 });
+  expect(JSON.parse(window.localStorage.getItem('mkai-report-scope:tenant-1:verified-user')!)).toEqual({ subscriptionIds: ['subscription-1'] });
+});
+
+it('ignores a stale threshold remembered by an earlier version, which can no longer be changed', async () => {
+  window.localStorage.setItem('mkai-report-scope:tenant-1:verified-user', JSON.stringify({ subscriptionIds: ['subscription-1'], staleDays: 30 }));
+  vi.mocked(getLatestReport).mockResolvedValue(snapshot);
+  await act(async () => root.render(<App />));
+  expect(getLatestReport).toHaveBeenCalledWith(expect.any(AbortSignal), ['subscription-1'], 90);
+  expect(JSON.parse(window.localStorage.getItem('mkai-report-scope:tenant-1:verified-user')!)).toEqual({ subscriptionIds: ['subscription-1'] });
 });
 
 it('clears restored evidence when API identity expires', async () => {

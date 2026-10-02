@@ -1,0 +1,1882 @@
+/* Presentation polish. Imported last, so it is the final word on these rules and can be
+   reverted by removing the one import in main.tsx. Uses the shared tokens only; nothing
+   here changes what is shown, only how it looks and responds. */
+
+/* Headings break evenly and paragraphs never end on a lone word. */
+
+:root .app-shell.app-shell :is(h1, h2, h3, h4, .executive-kicker) {
+    text-wrap: balance;
+}
+
+:root .app-shell.app-shell :is(p, .kpi-note, .empty-state, .panel-lede) {
+    text-wrap: pretty;
+}
+
+/* Every pressable control answers the pointer. `scale` is used rather than `transform`
+   so it composes with the hover lift instead of replacing it. */
+
+:root .app-shell.app-shell :is(button, [role='button'], summary, .segmented button):not(:disabled):active {
+    scale: .98;
+}
+
+:root .app-shell.app-shell .kpi-link-card:not(:disabled):active {
+    scale: .99;
+    transform: translateY(0);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Any clickable card, not only the hero ones, lifts the same way. */
+
+:root .app-shell.app-shell :is(button, a).kpi-card:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--elevation-hover);
+}
+
+/* The entrance is staged in reading order. The panel itself fades in (report-workspace.css),
+   and the blocks inside it then settle one after another. Nearly every tab is one wrapper
+   holding its blocks, so it is the wrapper's children that are staggered. Capped so a long
+   page never feels slow. */
+
+@media (prefers-reduced-motion: no-preference) {
+    :root .app-shell.app-shell .tab-panel > * > * {
+        animation: polish-rise calc(var(--motion-duration-slow) + var(--motion-duration)) var(--ease-mechanical) both;
+    }
+
+    :root .app-shell.app-shell .tab-panel > * > :nth-child(2) { animation-delay: 50ms; }
+    :root .app-shell.app-shell .tab-panel > * > :nth-child(3) { animation-delay: 100ms; }
+    :root .app-shell.app-shell .tab-panel > * > :nth-child(4) { animation-delay: 150ms; }
+    :root .app-shell.app-shell .tab-panel > * > :nth-child(5) { animation-delay: 200ms; }
+    :root .app-shell.app-shell .tab-panel > * > :nth-child(n + 6) { animation-delay: 250ms; }
+}
+@keyframes polish-rise {
+    from {
+        opacity: 0;
+        transform: translateY(var(--space-2));
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* Key takeaways. The strip was a four-column grid whose background doubles as the divider
+   colour, so a fifth sentence left one cell showing as a solid grey block. A wrapping row
+   whose items share the remaining width cannot leave a hole at any count or width. The
+   status dot and chevron sit on the first line of a sentence that wraps, not beside its
+   middle. */
+
+:root .app-shell.app-shell .executive-takeaways {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+:root .app-shell.app-shell .executive-takeaways > .takeaway {
+    flex: 1 1 calc(380px * var(--ui-zoom, 1));
+    display: flex;
+}
+
+:root .app-shell.app-shell .takeaway > :is(button, div) {
+    align-items: flex-start;
+}
+
+:root .app-shell.app-shell .takeaway i {
+    margin-top: calc((1.35em - 7px) / 2);
+}
+
+:root .app-shell.app-shell .takeaway svg {
+    margin-top: calc((1.35em - 13px) / 2);
+}
+
+/* Nothing on the page is set below 12px. These were measured in the rendered report at
+   between 8px and 11.5px, which does not survive a projector or a customer's own screen. */
+
+:root .app-shell.app-shell.app-shell :is(
+    .top-service-name small,
+    .top-service-rank,
+    .top-service-share,
+    .region-ranking b,
+    .region-ranking strong,
+    .executive-signal-clear,
+    .kpi-label,
+    .kpi-note,
+    .kpi-card-link-label,
+    .billing-metrics small,
+    .billing-metrics span,
+    .treemap-cell small,
+    .completeness-stamp span,
+    .completeness-stamp small,
+    .completeness-stamp strong,
+    .scope-panel-title,
+    .subscription-select-count,
+    .report-context-details summary span,
+    .budget-table small,
+    .budget-table th > details > summary,
+    .budget-status,
+    .titlebar-button-label
+) {
+    font-size: 12px;
+}
+
+/* The headline figure is the subject of the page, so its card carries a faint accent edge
+   along the top rather than an extra border. */
+
+:root .app-shell.app-shell .executive-hero .exec-primary {
+    box-shadow: inset 0 1px 0 var(--color-accent-line);
+}
+
+:root .app-shell.app-shell .executive-hero .exec-primary:hover {
+    box-shadow: var(--elevation-hover), inset 0 1px 0 var(--color-accent-line);
+}
+
+/* The scope controls sit at the right of the ribbon, alongside the report status and the
+   update button, rather than at the left. The first item takes the free space, so the
+   group stays together at any width, and the run area no longer claims it separately. */
+
+:root .app-shell.app-shell .scope-ribbon-main > :first-child {
+    margin-left: auto;
+}
+
+:root .app-shell.app-shell .scope-ribbon-main .scope-run-area {
+    margin-left: 0;
+}
+
+/* In the stacked sign-in layout the strapline box moves to the left edge but its two lines
+   stayed right-aligned inside it, so the first line began 54px in from the second. */
+
+@media (max-width: 1100px) {
+    :root .signin-production .signin-strapline {
+        align-items: flex-start;
+    }
+}
+
+/* A tag key is a literal name, not a word in the sentence, so it is set apart as one. */
+
+:root .app-shell.app-shell .tag-key-chip {
+    padding: 1px var(--space-2);
+    border: var(--border-width) solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    background: var(--glass-bg-strong);
+    color: var(--color-bone);
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: .92em;
+}
+
+/* The month-over-month chart on the executive summary has narrow columns (48px minimum),
+   so it fits a half-width card. Its shared 540px floor pushed the latest month out of view
+   at laptop widths. The rate-optimisation chart keeps the floor; its columns need it. */
+
+:root .app-shell.app-shell .executive-visual .monthly-chart {
+    min-width: 0;
+}
+
+/* Nothing is set below 12px in the optimisation, anomaly and roadmap views either. */
+
+:root .app-shell.app-shell.app-shell :is(
+    .anomaly-chart-header span,
+    .anomaly-chart-header strong,
+    .anomaly-source-note,
+    .anomaly-contributor b,
+    .anomaly-contributor small,
+    .immediate-actions-summary span,
+    .immediate-actions-summary small,
+    .metric-coverage header span,
+    .metric-coverage header strong,
+    .metric-coverage b,
+    .metric-coverage span,
+    .live-badge,
+    .immediate-actions-summary b,
+    .ai-opportunities header span,
+    .ai-opportunities header strong,
+    .ai-opportunities p
+) {
+    font-size: 12px;
+}
+
+/* The scope bar is one band. With the date controls in it the row needs about 1,400px, so
+   below that the date controls take their own line inside the same band instead of being
+   squeezed until they wrap inside themselves. The run controls keep the top right. */
+
+@media (max-width: 1419px) {
+    :root .app-shell.app-shell .scope-ribbon-main {
+        flex-wrap: wrap;
+        row-gap: var(--space-1);
+    }
+
+    :root .app-shell.app-shell .scope-ribbon-main > .scope-range {
+        order: 1;
+        flex: 1 0 100%;
+        display: flex;
+        justify-content: flex-end;
+    }
+}
+
+
+/* Shared finish: distinguish the canvas, cards and controls without giving
+   every surface its own heavy border or glow. Keep the existing brand tokens. */
+
+:root .app-shell.app-shell.app-shell {
+    --premium-edge: color-mix(in srgb, var(--glass-border) 65%, transparent);
+    --premium-recess: color-mix(in srgb, var(--color-obsidian-canvas) 70%, var(--color-surface));
+    --premium-raised: color-mix(in srgb, var(--color-carbon-lift) 75%, var(--color-surface));
+    --premium-contact: 0 1px 2px color-mix(in srgb, var(--color-obsidian-canvas) 18%, transparent);
+    --premium-shadow: var(--premium-contact), 0 6px 18px color-mix(in srgb, var(--color-obsidian-canvas) 10%, transparent);
+    font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme='light'] .app-shell.app-shell.app-shell {
+    --premium-contact: 0 1px 2px color-mix(in srgb, var(--color-bone) 6%, transparent);
+    --premium-shadow: var(--premium-contact), 0 6px 18px color-mix(in srgb, var(--color-bone) 4%, transparent);
+}
+
+:root .app-shell.app-shell.app-shell .app-header {
+    min-height: calc(56px * var(--ui-zoom, 1));
+    padding-block: var(--space-2);
+    background: var(--color-obsidian-canvas);
+    border: 0;
+    border-bottom: var(--border-width) solid var(--premium-edge);
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell.app-shell .app-header::before,
+:root .app-shell.app-shell.app-shell .app-header::after {
+    display: none;
+}
+
+:root .app-shell.app-shell.app-shell .brand-product {
+    font-size: clamp(20px, 1.6vw, 24px);
+    font-weight: var(--weight-semi);
+    letter-spacing: -.035em;
+    color: var(--color-bone);
+    background: none;
+    -webkit-text-fill-color: currentColor;
+}
+
+:root .app-shell.app-shell.app-shell .workspace-nav {
+    padding: var(--space-1);
+    gap: var(--space-1);
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-md);
+    background: var(--premium-recess);
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell.app-shell .workspace-nav button {
+    min-height: calc(32px * var(--ui-zoom, 1));
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    letter-spacing: 0;
+    color: var(--color-graphite-mid);
+    transition: background-color var(--motion-duration) var(--ease-mechanical), color var(--motion-duration) var(--ease-mechanical), box-shadow var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .workspace-nav button.active {
+    background: var(--color-carbon-lift);
+    color: var(--color-bone);
+    box-shadow: var(--premium-contact), inset 0 0 0 1px var(--premium-edge);
+}
+
+:root .app-shell.app-shell.app-shell .workspace-nav button.active svg {
+    color: var(--color-signal-orange);
+}
+
+:root .app-shell.app-shell.app-shell .scope-ribbon {
+    background: var(--premium-recess);
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-md);
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell.app-shell .scope-ribbon::before {
+    display: none;
+}
+
+:root .app-shell.app-shell.app-shell .scope-ribbon-main {
+    padding-block: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell :is(.ghost-button, .report-download-control, .theme-toggle, .cost-export-button) {
+    border-radius: var(--radius-sm);
+    border-color: var(--color-control-stroke);
+    background: transparent;
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell.app-shell :is(.primary-button, .dark-button, .primary-command) {
+    border-radius: var(--radius-sm);
+    box-shadow: var(--premium-contact), inset 0 1px 0 var(--glass-highlight);
+    font-weight: var(--weight-semi);
+    letter-spacing: 0;
+}
+
+:root .app-shell.app-shell.app-shell .dashboard-frame {
+    border-color: var(--premium-edge);
+    border-radius: var(--radius-lg);
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell.app-shell .dashboard-frame::before {
+    display: none;
+}
+
+:root .app-shell.app-shell.app-shell .dashboard-main {
+    background: transparent;
+}
+
+:root .app-shell.app-shell.app-shell .dashboard-titlebar {
+    padding: var(--space-4) var(--space-5);
+    border: 0;
+    background: transparent;
+}
+
+:root .app-shell.app-shell.app-shell .report-page-title {
+    padding-left: 0;
+    border: 0;
+}
+
+:root .app-shell.app-shell.app-shell .report-page-title h1 {
+    font-size: clamp(22px, 1.8vw, 28px);
+    font-weight: var(--weight-semi);
+    letter-spacing: -.035em;
+    line-height: 1.25;
+}
+
+:root .app-shell.app-shell.app-shell .report-page-title > span {
+    color: var(--color-graphite-mid);
+    letter-spacing: var(--tracking-overline);
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .report-subnav {
+    padding: 0 var(--space-5) var(--space-3);
+    border: 0;
+    gap: var(--space-3);
+    background: transparent;
+}
+
+:root .app-shell.app-shell.app-shell .report-context-details > summary {
+    border-color: var(--premium-edge);
+    background: transparent;
+}
+
+:root .app-shell.app-shell.app-shell .panel:not(.executive-report) {
+    border-color: var(--premium-edge);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: var(--premium-shadow);
+}
+
+:root .app-shell.app-shell.app-shell :is(.section-title, .billing-heading h2) {
+    letter-spacing: var(--tracking-heading);
+    font-weight: var(--weight-semi);
+}
+
+:root .app-shell.app-shell.app-shell :is(.report-table, .billing-table, .data-table, .schedule-table) thead th {
+    background: var(--premium-recess);
+    color: var(--color-graphite-mid);
+    border-bottom-color: var(--premium-edge);
+}
+
+/* Row headers (the first cell of a body row) read as data, not as a header band. */
+:root .app-shell.app-shell.app-shell :is(.report-table, .billing-table, .data-table, .schedule-table) tbody th {
+    background: transparent;
+    color: var(--color-bone);
+    font-weight: var(--weight-medium);
+    text-align: left;
+    border-bottom-color: var(--premium-edge);
+}
+
+:root .app-shell.app-shell.app-shell :is(.report-table, .billing-table, .data-table, .schedule-table) td {
+    border-bottom-color: var(--premium-edge);
+}
+
+:root .app-shell.app-shell.app-shell .segmented {
+    padding: var(--space-1);
+    gap: var(--space-1);
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-md);
+    background: var(--premium-recess);
+}
+
+:root .app-shell.app-shell.app-shell .segmented button {
+    border: 0;
+    border-radius: var(--radius-sm);
+    letter-spacing: 0;
+    transition: background-color var(--motion-duration) var(--ease-mechanical), color var(--motion-duration) var(--ease-mechanical), box-shadow var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .segmented button.active {
+    background: var(--color-carbon-lift);
+    color: var(--color-signal-orange);
+    box-shadow: var(--premium-contact), inset 0 0 0 1px var(--premium-edge);
+}
+
+:root .app-shell.app-shell.app-shell :is(.operations-heading, .chat-toolbar > span:first-child) {
+    padding-left: 0;
+    border-left: 0;
+}
+
+:root .app-shell.app-shell.app-shell :is(.operations-heading h1, .chat-toolbar h1) {
+    font-size: clamp(22px, 1.8vw, 28px);
+    font-weight: var(--weight-semi);
+    letter-spacing: -.035em;
+}
+
+:root .app-shell.app-shell.app-shell :is(.operations-kicker, .chat-toolbar > span:first-child > small) {
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell.app-shell :is(.chat-workspace, .schedule-table-wrap) {
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: var(--premium-shadow);
+}
+
+:root .app-shell.app-shell.app-shell .chat-toolbar {
+    padding: var(--space-4) var(--space-5);
+    border-bottom-color: var(--premium-edge);
+}
+
+:root .app-shell.app-shell.app-shell .chat-context {
+    padding-inline: var(--space-4);
+    background: var(--premium-recess);
+    border-color: var(--premium-edge);
+}
+
+:root .app-shell.app-shell.app-shell .chat-composer {
+    background: var(--premium-raised);
+    border-color: var(--color-control-stroke);
+    border-radius: var(--radius-md);
+    box-shadow: var(--premium-contact);
+}
+
+:root .app-shell.app-shell.app-shell .chat-composer:focus-within {
+    border-color: var(--color-focus);
+    box-shadow: var(--focus-ring);
+}
+
+/* ================================================================
+   Compact executive summary
+   ----------------------------------------------------------------
+   The cost overview and comparison took over a screen and a half:
+   a two-line section header, loose padding, a 300px chart, labels
+   stacked above every filter and a tall spike card. Same content,
+   tighter: the caption shares the title's line, cells and rows lose
+   padding they did not need, and the filters sit label-beside-field.
+   Sizes follow --ui-zoom so the density control still scales them.
+   ================================================================ */
+
+:root .app-shell.app-shell.app-shell .executive-report {
+    gap: var(--space-2);
+}
+
+/* Section header: title and caption on one line, trailing control stays at the edge. */
+
+:root .app-shell.app-shell.app-shell .dashboard-section-header {
+    align-items: center;
+    padding: calc(7px * var(--ui-zoom, 1)) var(--space-3) 0;
+}
+
+:root .app-shell.app-shell.app-shell .dashboard-section-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: var(--space-3);
+    row-gap: 0;
+    min-width: 0;
+}
+
+:root .app-shell.app-shell.app-shell .dashboard-section-heading p {
+    margin: 0;
+    font-size: var(--font-size-xs);
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell.app-shell .dashboard-section-body {
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+/* Key takeaways: items share one line where they fit, instead of each claiming 380px. */
+
+:root .app-shell.app-shell.app-shell .executive-takeaways > .takeaway {
+    flex: 1 1 calc(235px * var(--ui-zoom, 1));
+}
+
+:root .app-shell.app-shell.app-shell .takeaway > :is(button, div) {
+    padding: calc(4px * var(--ui-zoom, 1)) var(--space-3);
+    line-height: 1.3;
+}
+
+/* Hero figures and the context row. */
+
+:root .app-shell.app-shell.app-shell .executive-hero .exec-primary {
+    padding: var(--space-2) var(--space-3);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .exec-primary .kpi-value {
+    font-size: clamp(28px, 2.4vw, 36px);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .exec-primary .kpi-note {
+    margin-top: var(--space-1);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero-context .kpi-card {
+    padding: calc(6px * var(--ui-zoom, 1)) var(--space-3);
+    gap: 0;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .kpi-label {
+    margin-bottom: 0;
+}
+
+/* Cost comparison: the three figures, the filters and the legend. */
+
+:root .app-shell.app-shell.app-shell .cost-window-overview {
+    gap: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .cost-window-metrics > * {
+    padding: calc(6px * var(--ui-zoom, 1)) var(--space-3);
+    gap: 0;
+}
+
+:root .app-shell.app-shell.app-shell .cost-window-metrics .period-anomaly-link strong {
+    font-size: var(--font-size-lg);
+    line-height: 1.1;
+}
+
+:root .app-shell.app-shell.app-shell .cost-detail-filters {
+    gap: var(--space-2) var(--space-4);
+    padding: 0;
+}
+
+:root .app-shell.app-shell.app-shell .cost-detail-filters .billing-filter {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    max-width: none;
+}
+
+:root .app-shell.app-shell.app-shell .cost-detail-filters .billing-filter > span {
+    flex: none;
+}
+
+:root .app-shell.app-shell.app-shell .cost-detail-filters .billing-filter :is(select, input) {
+    min-height: calc(26px * var(--ui-zoom, 1));
+    padding-block: 0;
+}
+
+:root .app-shell.app-shell.app-shell .cost-window-overview .cost-chart-legend {
+    margin: 0;
+}
+
+/* The completeness chip read "Reconciled / 1/1 / subscriptions" stacked on two lines, which made
+   the first section's header twice as tall as the rest. One line is enough. */
+
+:root .app-shell.app-shell.app-shell .completeness-stamp {
+    display: inline-flex;
+    flex-wrap: nowrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    white-space: nowrap;
+    padding-block: calc(3px * var(--ui-zoom, 1));
+}
+
+/* Executive landing page: distinct headline cards, quiet reference metrics,
+   and two switchable visual pairs instead of four competing panels. */
+
+:root .app-shell.app-shell.app-shell [data-report-page='Executive Summary'] .dashboard-titlebar {
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    padding-block: var(--space-4);
+}
+
+:root .app-shell.app-shell.app-shell [data-report-page='Executive Summary'] .report-page-title {
+    margin-right: auto;
+    padding-left: 0;
+    border: 0;
+}
+
+:root .app-shell.app-shell.app-shell [data-report-page='Executive Summary'] .report-page-title h1 {
+    font-size: clamp(22px, 1.8vw, 28px);
+    letter-spacing: var(--tracking-heading-lg);
+}
+
+:root .app-shell.app-shell.app-shell [data-report-page='Executive Summary'] .report-page-title > span {
+    font-size: 12px;
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell.app-shell .executive-report {
+    gap: var(--space-5);
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .dashboard-section {
+    border-color: var(--premium-edge);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: none;
+    scroll-margin-top: calc(80px * var(--ui-zoom, 1));
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .dashboard-section-header {
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-3) var(--space-3) var(--space-2);
+    border-bottom: 0;
+    align-items: center;
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .dashboard-section-heading {
+    gap: var(--space-1) var(--space-2);
+    flex: 1;
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .dashboard-section-heading h2 {
+    font-size: var(--font-size-md);
+    letter-spacing: var(--tracking-heading);
+    font-weight: var(--weight-semi);
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .dashboard-section-heading p {
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .dashboard-section-body {
+    padding: var(--space-2) var(--space-3) var(--space-3);
+    gap: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .executive-report :is(
+    [data-dashboard-section='cost-overview'],
+    [data-dashboard-section='cost-comparison']
+) .dashboard-section-header {
+    padding: var(--space-2) var(--space-3);
+}
+
+:root .app-shell.app-shell.app-shell .executive-report :is(
+    [data-dashboard-section='cost-overview'],
+    [data-dashboard-section='cost-comparison']
+) .dashboard-section-body {
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.5fr);
+    gap: var(--space-2);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow: visible;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .exec-primary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    padding: var(--space-2) var(--space-3);
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-md);
+    background: var(--premium-raised);
+    justify-content: center;
+    gap: var(--space-1) var(--space-2);
+    box-shadow: var(--elevation-inset);
+    transition: border-color var(--motion-duration) var(--ease-mechanical), box-shadow var(--motion-duration) var(--ease-mechanical), transform var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .exec-primary {
+    background: linear-gradient(120deg, color-mix(in srgb, var(--color-signal-orange) 12%, var(--color-carbon-lift)), var(--premium-raised) 85%);
+    border-color: var(--color-accent-line);
+    box-shadow: var(--elevation-inset);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .kpi-label {
+    padding-right: var(--space-5);
+    font-size: 12px;
+    font-weight: var(--weight-medium);
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--color-pale-stone);
+}
+
+:root .app-shell.app-shell.app-shell .executive-financial-metrics .kpi-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 13px;
+    padding-right: 0;
+}
+
+:root .app-shell.app-shell.app-shell .exec-metric-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: calc(24px * var(--ui-zoom, 1));
+    height: calc(24px * var(--ui-zoom, 1));
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell.app-shell .exec-primary .exec-metric-icon {
+    color: var(--color-signal-orange);
+}
+
+:root .app-shell.app-shell.app-shell .positive .exec-metric-icon {
+    color: var(--color-metric-green);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .exec-primary .kpi-value {
+    font-size: clamp(28px, 2.2vw, 34px);
+    line-height: 1.05;
+    font-weight: var(--weight-semi);
+    letter-spacing: -.045em;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .kpi-note {
+    font-size: 12px;
+    color: var(--color-graphite-mid);
+    line-height: 1.4;
+    min-height: 0;
+}
+
+:root .app-shell.app-shell.app-shell .executive-financial-metrics .kpi-note {
+    grid-column: 1 / -1;
+    padding-right: var(--space-5);
+    margin-top: 0;
+}
+
+:root .app-shell.app-shell.app-shell .exec-delta {
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .neutral .kpi-value {
+    color: var(--color-bone);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .kpi-card-link-label {
+    top: auto;
+    bottom: var(--space-2);
+    right: var(--space-3);
+    display: flex;
+    color: var(--color-graphite-mid);
+    transition: color var(--motion-duration) var(--ease-mechanical), translate var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero-context {
+    gap: var(--space-2);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow: visible;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero-context .kpi-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-content: start;
+    align-items: center;
+    gap: 0 var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-md);
+    background: var(--premium-raised);
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero-context .kpi-label {
+    padding-right: 0;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero-context .kpi-note {
+    grid-column: 1 / -1;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero-context .kpi-link-card .kpi-value {
+    margin-right: var(--space-6);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero-context .kpi-card-link-label {
+    top: auto;
+    bottom: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero-context .kpi-value {
+    font-size: var(--font-size-lg);
+    font-weight: var(--weight-semi);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .kpi-link-card.kpi-link-card:hover {
+    background: var(--color-surface-hover);
+    border-color: var(--color-accent-line);
+    box-shadow: var(--premium-shadow);
+    transform: translateY(-2px);
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .kpi-link-card:hover .kpi-card-link-label {
+    color: var(--color-signal-orange);
+    translate: 2px 0;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .kpi-link-card:focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: 2px;
+}
+
+:root .app-shell.app-shell.app-shell .executive-takeaways {
+    border: 0;
+    border-top: var(--border-width) solid var(--premium-edge);
+    border-radius: 0;
+    background: transparent;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding-top: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .executive-takeaways > .takeaway {
+    flex: 1 1 calc(230px * var(--ui-zoom, 1));
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell.app-shell .takeaway > :is(button, div) {
+    padding: var(--space-1) var(--space-2);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+:root .app-shell.app-shell.app-shell [data-dashboard-section='cost-comparison'] .cost-window-overview {
+    gap: var(--space-1);
+}
+
+:root .app-shell.app-shell.app-shell [data-dashboard-section='cost-comparison'] .cost-window-metrics > * {
+    display: flex;
+    flex-flow: row wrap;
+    align-items: baseline;
+    gap: 0 var(--space-2);
+    min-width: 0;
+    padding: var(--space-1) var(--space-3);
+}
+
+:root .app-shell.app-shell.app-shell [data-dashboard-section='cost-comparison'] .cost-window-metrics > * > span {
+    flex: 1 1 auto;
+    font-size: 12px;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+:root .app-shell.app-shell.app-shell [data-dashboard-section='cost-comparison'] .cost-window-metrics :is(output, strong) {
+    flex: none;
+    font-size: 20px;
+    line-height: 1.2;
+}
+
+:root .app-shell.app-shell.app-shell [data-dashboard-section='cost-comparison'] .cost-window-metrics > * > small {
+    flex: 1 0 100%;
+    margin-top: 0;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .executive-financial-metrics {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: var(--space-2);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .executive-financial-metrics > :is(button, div) {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-1);
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-md);
+    background: var(--premium-raised);
+    color: var(--color-bone);
+    text-align: left;
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell.app-shell .executive-hero .executive-financial-metrics > .exec-primary {
+    border-color: var(--color-accent-line);
+    background: var(--color-accent-subtle);
+}
+
+:root .app-shell.app-shell.app-shell .executive-financial-metrics :is(output, .kpi-value, .period-anomaly-link > strong) {
+    font-size: clamp(20px, 1.8vw, 28px);
+    line-height: 1.15;
+    font-weight: var(--weight-semi);
+    letter-spacing: var(--tracking-heading);
+}
+
+:root .app-shell.app-shell.app-shell .executive-financial-metrics > :is(button, div) > :is(span, .kpi-label) {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin: 0;
+    padding-right: 0;
+    font-size: 12px;
+    font-weight: var(--weight-medium);
+    color: var(--color-pale-stone);
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+:root .app-shell.app-shell.app-shell .executive-financial-metrics :is(small, .kpi-note) {
+    margin: 0;
+    padding-right: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--color-graphite-mid);
+    white-space: normal;
+}
+
+:root .app-shell.app-shell.app-shell .executive-financial-metrics .kpi-card-link-label {
+    top: var(--space-2);
+    bottom: auto;
+    right: var(--space-2);
+}
+
+:root .app-shell.app-shell .cost-point-tooltip-container {
+    pointer-events: none;
+}
+
+:root .app-shell.app-shell .cost-comparison-chart :is(.cost-chart-current, .cost-chart-previous, .cost-chart-grid) {
+    pointer-events: none;
+}
+
+/* Scaling an SVG point on press moves it away from the pointer's release. */
+:root .app-shell.app-shell .cost-comparison-chart circle[data-cost-date]:active {
+    scale: 1;
+}
+
+:root .app-shell.app-shell .cost-point-tooltip {
+    box-sizing: border-box;
+    padding: var(--space-3);
+    border: var(--border-width) solid var(--color-control-stroke);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-sm);
+    font-family: var(--font-geist);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+:root .app-shell.app-shell .cost-point-tooltip > strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: var(--space-2);
+    font-size: 12px;
+    font-weight: var(--weight-semi);
+}
+
+:root .app-shell.app-shell .cost-point-tooltip dl {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+}
+
+:root .app-shell.app-shell .cost-point-tooltip dl > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--space-2);
+}
+
+:root .app-shell.app-shell .cost-point-tooltip dt {
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell .cost-point-tooltip dd {
+    margin: 0;
+    font-size: 12px;
+    font-weight: var(--weight-semi);
+    white-space: nowrap;
+}
+
+@media (max-width: 1000px) {
+    :root .app-shell.app-shell.app-shell .executive-hero .executive-financial-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    /* Five cards in two columns: the last one spans so the grid never leaves a hole. */
+    :root .app-shell.app-shell.app-shell .executive-hero .executive-financial-metrics > :last-child {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (max-width: 460px) {
+    :root .app-shell.app-shell.app-shell .executive-hero .executive-financial-metrics {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution {
+    display: grid;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .executive-visual-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+    background: transparent;
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .executive-visual {
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .executive-visual > header {
+    min-height: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-3);
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .executive-visual > header :is(span, small, strong) {
+    font-size: 12px;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .monthly-chart-scroll {
+    padding: var(--space-2) var(--space-3);
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .monthly-chart {
+    height: calc(192px * var(--ui-zoom, 1));
+    border: 0;
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .cost-treemap {
+    min-height: calc(200px * var(--ui-zoom, 1));
+    flex: 1;
+    align-content: stretch;
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .executive-treemap-panel {
+    display: flex;
+    flex-direction: column;
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .executive-treemap-panel > header {
+    flex: none;
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .treemap-cell {
+    border-radius: var(--radius-sm);
+    padding: var(--space-3);
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .region-panel-body {
+    height: auto;
+    min-height: calc(200px * var(--ui-zoom, 1));
+}
+
+:root .app-shell.app-shell.app-shell .executive-distribution .region-map {
+    height: calc(200px * var(--ui-zoom, 1));
+    padding: var(--space-3);
+}
+
+:root .app-shell.app-shell.app-shell .executive-section-count {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--color-graphite-mid);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .top-service-row {
+    min-height: 0;
+    min-width: 0;
+    grid-template-columns: calc(24px * var(--ui-zoom, 1)) minmax(0, 1fr) minmax(0, .5fr) max-content max-content;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .top-services {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 var(--space-4);
+    border: 0;
+    background: transparent;
+}
+
+:root .app-shell.app-shell.app-shell .executive-evidence-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+    min-width: 0;
+    align-items: start;
+    padding: var(--space-2);
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+}
+
+:root .app-shell.app-shell.app-shell .executive-evidence-grid .dashboard-section {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+:root .app-shell.app-shell.app-shell .executive-evidence-grid .executive-signal-clear {
+    margin: 0;
+    padding: var(--space-2) 0;
+    line-height: 1.5;
+}
+
+:root .app-shell.app-shell.app-shell .executive-evidence-notes {
+    display: grid;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+@media (min-width: 1200px) {
+    :root .app-shell.app-shell.app-shell .executive-evidence-grid:has([data-dashboard-section='top-services']) {
+        grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+    }
+    :root .app-shell.app-shell.app-shell .executive-evidence-grid:has([data-dashboard-section='top-services']) [data-dashboard-section='top-services'] {
+        grid-column: 1;
+        grid-row: 1;
+    }
+    :root .app-shell.app-shell.app-shell .executive-evidence-grid:has([data-dashboard-section='top-services']) .executive-evidence-notes {
+        grid-column: 2;
+        grid-row: 1;
+    }
+    :root .app-shell.app-shell.app-shell .executive-evidence-grid [data-dashboard-section='subscriptions'] {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+    :root .app-shell.app-shell.app-shell .executive-evidence-grid.has-findings .executive-evidence-notes {
+        display: contents;
+    }
+    :root .app-shell.app-shell.app-shell .executive-evidence-grid.has-findings [data-dashboard-section='prioritised-findings'] {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+    :root .app-shell.app-shell.app-shell .executive-evidence-grid.has-findings:has([data-dashboard-section='top-services']) [data-dashboard-section='operational-signals'] {
+        grid-column: 2;
+        grid-row: 1;
+    }
+    :root .app-shell.app-shell.app-shell .executive-evidence-grid.has-findings [data-dashboard-section='subscriptions'] {
+        grid-row: 3;
+    }
+    :root .app-shell.app-shell.app-shell .executive-evidence-grid .top-service-row {
+        grid-template-columns: calc(20px * var(--ui-zoom, 1)) minmax(0, 1fr) max-content max-content;
+        gap: var(--space-1);
+        padding-inline: var(--space-1);
+    }
+    :root .app-shell.app-shell.app-shell .executive-evidence-grid .top-service-bar {
+        display: none;
+    }
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .cost-daily-values > summary {
+    font-size: 12px;
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-carbon-lift);
+    border: var(--border-width) solid var(--glass-border);
+    border-radius: var(--radius-sm);
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .cost-daily-values[open] > summary {
+    margin-bottom: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .daily-cost-group-name {
+    display: grid;
+    gap: var(--space-1);
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+:root .app-shell.app-shell.app-shell .daily-cost-group-name > strong {
+    font-size: var(--font-size-sm);
+    font-weight: var(--weight-semi);
+}
+
+:root .app-shell.app-shell.app-shell .daily-cost-group-name > small {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .budget-table {
+    min-width: 800px;
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .budget-table th:first-child {
+    min-width: 240px;
+}
+
+:root .app-shell.app-shell.app-shell .executive-report :is(
+    .exec-delta-caption, .treemap-breadcrumb, .monthly-column > strong,
+    .monthly-column > span, .executive-visual > header > small,
+    .map-attribution, .report-section-caption,
+    .report-section-meta
+) {
+    font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+    :root .app-shell.app-shell.app-shell .executive-hero {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+    }
+}
+
+@media (max-width: 700px) {
+    :root .app-shell.app-shell.app-shell .executive-hero,
+    :root .app-shell.app-shell.app-shell .executive-distribution .executive-visual-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    :root .app-shell.app-shell.app-shell .executive-hero-context {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    :root .app-shell.app-shell.app-shell .executive-report .dashboard-section-heading {
+        display: grid;
+        gap: var(--space-1);
+    }
+    :root .app-shell.app-shell.app-shell .executive-report .top-services {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    :root .app-shell.app-shell.app-shell .executive-report .top-service-row {
+        grid-template-columns: calc(20px * var(--ui-zoom, 1)) minmax(0, 1fr) max-content max-content;
+    }
+    :root .app-shell.app-shell.app-shell .executive-report .top-service-bar {
+        display: none;
+    }
+}
+
+@media (max-width: 460px) {
+    :root .app-shell.app-shell.app-shell .executive-hero-context {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (pointer: coarse) {
+    :root .app-shell.app-shell.app-shell :is(.workspace-nav button, .segmented button, .theme-toggle),
+    :root .app-shell.app-shell.app-shell .executive-report :is(.segmented button, summary, .takeaway button){
+        min-height: var(--touch-height);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root .app-shell.app-shell.app-shell .executive-hero .kpi-link-card.kpi-link-card:hover {
+        transform: none;
+    }
+    :root .app-shell.app-shell.app-shell .executive-hero .kpi-link-card:hover .kpi-card-link-label {
+        translate: none;
+    }
+}
+
+/* ================================================================
+   Report navigation: fixed left rail
+   ----------------------------------------------------------------
+   Fixed beneath the sticky app header, so it stays put while the
+   report scrolls and runs from just below the logo to the bottom
+   of the window. Its own list scrolls only if the pages do not fit.
+   The component sets --sidenav-top and --sidenav-left from the
+   header and workspace edges. Below 900px it is one menu.
+   ================================================================ */
+
+:root .app-shell.app-shell.app-shell {
+    --sidenav-width: calc(248px * var(--ui-zoom, 1));
+    --sidenav-gap: var(--space-4);
+}
+
+:root .app-shell.app-shell.app-shell:has(.report-sidenav.is-collapsed) {
+    --sidenav-width: calc(60px * var(--ui-zoom, 1));
+}
+
+:root .app-shell.app-shell.app-shell .dashboard-frame {
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+}
+
+:root .app-shell.app-shell.app-shell .dashboard-main {
+    border-left: 0;
+    border-radius: var(--radius-lg);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-mobile-toggle {
+    display: none;
+}
+
+@media (min-width: 901px) {
+    :root .app-shell.app-shell.app-shell:has(.view-panel:not([hidden]) .report-sidenav) #workspace-main {
+        padding-left: calc(var(--sidenav-width) + var(--sidenav-gap));
+        transition: padding-left var(--motion-duration-slow) var(--ease-mechanical);
+    }
+
+    :root .app-shell.app-shell.app-shell .report-sidenav {
+        position: fixed;
+        z-index: 30;
+        top: var(--sidenav-top, 64px);
+        left: var(--sidenav-left, 24px);
+        bottom: 0;
+        width: var(--sidenav-width);
+        display: flex;
+        flex-direction: column;
+        border-right: var(--border-width) solid var(--premium-edge);
+        background: var(--color-obsidian-canvas);
+        transition: width var(--motion-duration-slow) var(--ease-mechanical);
+    }
+
+    :root .app-shell.app-shell.app-shell .report-sidenav-body {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        padding: var(--space-3) var(--space-3) var(--space-2) 0;
+    }
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: calc(34px * var(--ui-zoom, 1));
+    padding: 0 var(--space-2) 0 var(--space-3);
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-md);
+    background: var(--premium-recess);
+    color: var(--color-graphite-mid);
+    transition: border-color var(--motion-duration) var(--ease-mechanical), box-shadow var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-search:focus-within {
+    border-color: var(--color-focus);
+    box-shadow: 0 0 0 3px var(--color-accent-glow);
+    color: var(--color-signal-orange);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-search input {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    outline: none;
+    background: transparent;
+    box-shadow: none;
+    color: var(--color-bone);
+    font: inherit;
+    font-size: 13px;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-search input::-webkit-search-cancel-button {
+    display: none;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-search > button {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-graphite-mid);
+    cursor: pointer;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-groups {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-empty {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    color: var(--color-graphite-mid);
+    font-size: 13px;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-group + .report-sidenav-group {
+    padding-top: var(--space-1);
+    border-top: var(--border-width) solid color-mix(in srgb, var(--premium-edge) 70%, transparent);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    min-height: calc(34px * var(--ui-zoom, 1));
+    padding: 0 var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-graphite-mid);
+    font: inherit;
+    font-size: 12px;
+    font-weight: var(--weight-semi);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+    transition: color var(--motion-duration) var(--ease-mechanical), background-color var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-group-toggle:disabled {
+    cursor: default;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-group-toggle:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+    color: var(--color-bone);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-icon {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: calc(26px * var(--ui-zoom, 1));
+    height: calc(26px * var(--ui-zoom, 1));
+    border-radius: var(--radius-sm);
+    background: var(--premium-raised);
+    color: var(--color-graphite-mid);
+    transition: background-color var(--motion-duration) var(--ease-mechanical), color var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-group[data-current='true'] .report-sidenav-icon {
+    background: var(--color-accent-subtle);
+    color: var(--color-signal-orange);
+    box-shadow: inset 0 0 0 1px var(--color-accent-line);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-group[data-current='true'] .report-sidenav-group-toggle {
+    color: var(--color-bone);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-chevron {
+    flex: none;
+    opacity: .7;
+    transition: transform var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-group-toggle[aria-expanded='false'] .report-sidenav-chevron {
+    transform: rotate(-90deg);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-pages {
+    display: grid;
+    gap: 1px;
+    margin: 2px 0 var(--space-1);
+    padding: 0;
+    list-style: none;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-pages[hidden] {
+    display: none;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-pages button {
+    position: relative;
+    display: block;
+    width: 100%;
+    min-height: calc(32px * var(--ui-zoom, 1));
+    padding: 0 var(--space-2) 0 calc(var(--space-2) + 26px * var(--ui-zoom, 1) + var(--space-2));
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-pale-stone);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    transition: background-color var(--motion-duration) var(--ease-mechanical), color var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-pages button:hover:not([aria-current]) {
+    background: var(--color-surface-hover);
+    color: var(--color-bone);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-pages button[aria-current='page'] {
+    background: var(--color-accent-subtle);
+    color: var(--color-signal-orange);
+    font-weight: var(--weight-semi);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-pages button[aria-current='page']::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 22%;
+    bottom: 22%;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--color-signal-orange);
+}
+
+:root .app-shell.app-shell.app-shell :is(.report-sidenav-group-toggle, .report-sidenav-pages button, .report-sidenav-collapse):active {
+    scale: 1;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-collapse {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: calc(32px * var(--ui-zoom, 1));
+    padding: 0 var(--space-2);
+    border: 0;
+    border-top: var(--border-width) solid var(--premium-edge);
+    border-radius: 0;
+    background: transparent;
+    color: var(--color-graphite-mid);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-collapse:hover {
+    color: var(--color-bone);
+}
+
+/* Collapsed to an icon rail. */
+@media (min-width: 901px) {
+    :root .app-shell.app-shell.app-shell .report-sidenav.is-collapsed .report-sidenav-body {
+        padding-right: var(--space-2);
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav.is-collapsed :is(.report-sidenav-search, .report-sidenav-label, .report-sidenav-chevron, .report-sidenav-pages, .report-sidenav-collapse > span, .report-sidenav-empty) {
+        display: none;
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav.is-collapsed :is(.report-sidenav-group-toggle, .report-sidenav-collapse) {
+        justify-content: center;
+        padding: 0;
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav.is-collapsed .report-sidenav-group + .report-sidenav-group {
+        border-top: 0;
+    }
+}
+
+/* Below 900px: one "Report pages" menu above the report. */
+@media (max-width: 900px) {
+    :root .app-shell.app-shell.app-shell .report-sidenav {
+        position: relative;
+        z-index: 30;
+        padding: var(--space-2) var(--space-3);
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav-mobile-toggle {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        width: 100%;
+        min-height: var(--touch-height);
+        padding: 0 var(--space-3);
+        border: var(--border-width) solid var(--color-control-stroke);
+        border-radius: var(--radius-md);
+        background: var(--premium-raised);
+        color: var(--color-bone);
+        font: inherit;
+        font-size: var(--font-size-sm);
+        font-weight: var(--weight-semi);
+        text-align: left;
+        cursor: pointer;
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav-mobile-toggle > span {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav.is-open .report-sidenav-mobile-toggle > svg:last-child {
+        transform: rotate(180deg);
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav-body {
+        display: none;
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav.is-open .report-sidenav-body {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        margin-top: var(--space-2);
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav-collapse {
+        display: none;
+    }
+    :root .app-shell.app-shell.app-shell :is(.report-sidenav-group-toggle, .report-sidenav-pages button, .report-sidenav-search) {
+        min-height: var(--touch-height);
+    }
+}
+
+@media (pointer: coarse) {
+    :root .app-shell.app-shell.app-shell :is(.report-sidenav-group-toggle, .report-sidenav-pages button, .report-sidenav-collapse) {
+        min-height: var(--touch-height);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root .app-shell.app-shell.app-shell :is(.report-sidenav, #workspace-main) {
+        transition: none;
+    }
+}
+
+/* ================================================================
+   Enterprise layer: tables, toolbars, cards and motion
+   ================================================================ */
+
+/* Tables: compact rows, quiet headers that stay put while scrolling,
+   aligned figures and a row highlight that follows the pointer. */
+:root .app-shell.app-shell.app-shell :is(.report-table, .billing-table, .data-table) {
+    border-collapse: separate;
+    border-spacing: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+:root .app-shell.app-shell.app-shell :is(.report-table, .billing-table, .data-table) th {
+    font-size: 12px;
+    font-weight: var(--weight-semi);
+    letter-spacing: .02em;
+    text-transform: none;
+}
+
+:root .app-shell.app-shell.app-shell :is(.billing-table-scroll, .executive-table-scroll) :is(.report-table, .billing-table, .data-table) thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+:root .app-shell.app-shell.app-shell :is(.report-table, .billing-table, .data-table) :is(th, td) {
+    padding-block: calc(8px * var(--ui-zoom, 1));
+    vertical-align: middle;
+}
+
+:root .app-shell.app-shell.app-shell :is(.report-table, .billing-table, .data-table) tbody tr {
+    transition: background-color var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell :is(.report-table, .billing-table, .data-table) tbody tr:hover > :is(td, th) {
+    background: color-mix(in srgb, var(--color-signal-orange) 5%, transparent);
+}
+
+:root .app-shell.app-shell.app-shell :is(.report-table, .billing-table, .data-table) :is(td, th) small {
+    display: block;
+    margin-top: 2px;
+    color: var(--color-graphite-mid);
+    font-size: 12px;
+    font-weight: 400;
+}
+
+:root .app-shell.app-shell.app-shell :is(.billing-table-scroll, .executive-table-scroll) {
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-md);
+}
+
+/* Table toolbar: search, status filter and a live count. */
+:root .app-shell.app-shell.app-shell .table-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .table-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 0 1 calc(260px * var(--ui-zoom, 1));
+    min-width: 180px;
+    min-height: calc(32px * var(--ui-zoom, 1));
+    padding: 0 var(--space-3);
+    border: var(--border-width) solid var(--color-control-stroke);
+    border-radius: var(--radius-md);
+    background: var(--premium-recess);
+    color: var(--color-graphite-mid);
+    transition: border-color var(--motion-duration) var(--ease-mechanical), box-shadow var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .table-search:focus-within {
+    border-color: var(--color-focus);
+    box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+:root .app-shell.app-shell.app-shell .table-search input {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    box-shadow: none;
+    color: var(--color-bone);
+    font: inherit;
+    font-size: 13px;
+}
+
+:root .app-shell.app-shell.app-shell .table-toolbar .segmented button {
+    font-size: 12px;
+    min-height: calc(28px * var(--ui-zoom, 1));
+    padding: 0 var(--space-3);
+}
+
+:root .app-shell.app-shell.app-shell .table-count {
+    margin-left: auto;
+    color: var(--color-graphite-mid);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+:root .app-shell.app-shell.app-shell .budget-table .budget-status + .budget-status {
+    margin-left: var(--space-1);
+}
+
+:root .app-shell.app-shell.app-shell .budget-table .budget-status {
+    border: var(--border-width) solid currentColor;
+    background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+:root .app-shell.app-shell.app-shell .budget-forecast {
+    color: var(--color-warning);
+}
+
+/* KPI cards: a soft lift on hover for the clickable ones, and the
+   savings card reads as an opportunity rather than another figure. */
+:root .app-shell.app-shell.app-shell .executive-financial-metrics > button {
+    cursor: pointer;
+    transition: border-color var(--motion-duration) var(--ease-mechanical), box-shadow var(--motion-duration) var(--ease-mechanical), transform var(--motion-duration) var(--ease-mechanical), background-color var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell .executive-financial-metrics > button:hover {
+    border-color: var(--color-accent-line);
+    box-shadow: var(--premium-shadow);
+    transform: translateY(-1px);
+}
+
+:root .app-shell.app-shell.app-shell .executive-financial-metrics > button:focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: 2px;
+}
+
+:root .app-shell.app-shell.app-shell .executive-financial-metrics > .positive {
+    background: linear-gradient(160deg, color-mix(in srgb, var(--color-metric-green) 9%, var(--premium-raised)), var(--premium-raised) 70%);
+}
+
+:root .app-shell.app-shell.app-shell .executive-financial-metrics > .period-anomaly-link:has(.metric-count-risk) {
+    border-color: color-mix(in srgb, var(--color-cost-increase) 45%, transparent);
+    background: linear-gradient(160deg, color-mix(in srgb, var(--color-cost-increase) 9%, var(--premium-raised)), var(--premium-raised) 70%);
+}
+
+/* Section headings carry a short accent rule so each block is easy to find
+   while scrolling; captions stay quiet. */
+:root .app-shell.app-shell.app-shell .executive-report .dashboard-section-heading h2 {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .executive-report .dashboard-section-heading h2::before {
+    content: '';
+    width: 3px;
+    height: 1em;
+    border-radius: 2px;
+    background: var(--color-signal-orange);
+}
+
+/* Primary actions: one confident fill, consistent geometry everywhere. */
+:root .app-shell.app-shell.app-shell :is(.primary-button, .primary-command, .dark-button) {
+    transition: filter var(--motion-duration) var(--ease-mechanical), box-shadow var(--motion-duration) var(--ease-mechanical), transform var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell :is(.primary-button, .primary-command, .dark-button):not(:disabled):hover {
+    filter: brightness(1.08);
+    box-shadow: 0 4px 14px var(--color-accent-glow);
+}
+
+:root .app-shell.app-shell.app-shell :is(.ghost-button, .report-download-control, .focus-download-control, .cost-export-button) {
+    transition: background-color var(--motion-duration) var(--ease-mechanical), border-color var(--motion-duration) var(--ease-mechanical), color var(--motion-duration) var(--ease-mechanical);
+}
+
+:root .app-shell.app-shell.app-shell :is(.ghost-button, .report-download-control, .focus-download-control):not(:disabled):hover {
+    border-color: var(--color-accent-line);
+    background: var(--color-surface-hover);
+}
+
+/* Keyboard focus is always visible and consistent. */
+:root .app-shell.app-shell.app-shell :is(button, a, select, input, summary, [tabindex='0']):focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: 2px;
+}
+
+@media (max-width: 700px) {
+    :root .app-shell.app-shell.app-shell .table-search {
+        flex: 1 1 100%;
+    }
+    :root .app-shell.app-shell.app-shell .table-count {
+        margin-left: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root .app-shell.app-shell.app-shell .executive-financial-metrics > button:hover {
+        transform: none;
+    }
+}
+
+/* The report context sits among the page actions in the title bar. */
+:root .app-shell.app-shell.app-shell .dashboard-titlebar .report-subnav {
+    padding: 0;
+    margin-left: auto;
+    border: 0;
+}
+
+@media (max-width: 900px) {
+    :root .app-shell.app-shell.app-shell .dashboard-titlebar .report-subnav {
+        margin-left: 0;
+    }
+}

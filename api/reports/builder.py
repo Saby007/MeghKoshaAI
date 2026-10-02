@@ -181,9 +181,27 @@ def _service_display_name(service_name: str) -> str:
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", short_name).replace("_", " ")
 
 
+def _merge_case_variants(service_spend: dict[str, float]) -> dict[str, float]:
+    """Fold provider names that differ only by case into one entry.
+
+    FOCUS exports carry both ``Microsoft.App`` and ``microsoft.app`` for the
+    same service, and ranking them separately listed Azure Container Apps
+    twice while pushing a genuine service out of the top ten. The spelling
+    kept is the one carrying the larger spend.
+    """
+    totals: dict[str, float] = {}
+    spelling: dict[str, tuple[str, float]] = {}
+    for name, spend in service_spend.items():
+        key = name.lower()
+        totals[key] = totals.get(key, 0.0) + spend
+        if key not in spelling or spend > spelling[key][1]:
+            spelling[key] = (name, spend)
+    return {spelling[key][0]: total for key, total in totals.items()}
+
+
 def _top_services(service_spend: dict[str, float], total_spend: float) -> list[ServiceSpendSummary]:
     contributors = sorted(
-        ((name, spend) for name, spend in service_spend.items() if spend > 0),
+        ((name, spend) for name, spend in _merge_case_variants(service_spend).items() if spend > 0),
         key=lambda item: (-item[1], item[0].lower()),
     )[:10]
     return [
@@ -736,13 +754,26 @@ def _tag_cost_summary(
         ]
         if not rows:
             continue
+        allocated = sum(row.monthly_cost for row in rows)
         dimensions.append(
             TagDimensionCost(
                 tagKey=tag_key,
                 unallocatedCost=_round2(values.get("Unallocated", 0.0)),
+                # What this key actually explains, so the reader can choose one on the
+                # evidence rather than by opening each in turn. Carried per dimension
+                # because it is a property of the key, not of any row under it.
+                allocatedCost=_round2(allocated),
+                coverage=(allocated / total_spend) if total_spend else 0.0,
                 rows=rows,
             )
         )
+    # Most explanatory key first. Alphabetical order put `Action` at the top of this
+    # estate -- one value, 3.0% of spend -- so the page opened on its least informative
+    # dimension and said nothing about the 97% that key leaves unallocated, while
+    # `Workload` at 5.3% sat ninth in a list of fifteen. Ordering by what a key explains
+    # makes the default selection the most useful one rather than an accident of naming.
+    # Ties keep alphabetical order so the list is stable between runs.
+    dimensions.sort(key=lambda item: (-item.allocated_cost, item.tag_key.lower()))
     return TagCostSummary(
         available=bool(dimensions),
         status=(

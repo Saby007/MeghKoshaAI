@@ -3,7 +3,7 @@ import type { ErrorInfo, ReactNode } from 'react';
 import { ArrowRight, BarChart3, CalendarClock, Check, LoaderCircle, Lock, Maximize2, MessageSquareText, Moon, RefreshCw, Rows3, Settings2, ShieldCheck, Sun } from 'lucide-react';
 import { SubscriptionPicker, type Subscription } from './components/SubscriptionPicker';
 import { CostRangeControls } from './components/CostRangeControls';
-import { presetCostWindow, type CostWindow } from './report/costDetails';
+import { monthCostWindow, presetCostWindow, type CostWindow } from './report/costDetails';
 import { runCostAssessment, type StaleDays } from './collectors/costAssessment';
 import { getLatestReport, narrate, type CostAgentOutput } from './api';
 import { apiFetch, ApiIdentityRequiredError, initializeApiIdentity, redirectApiIdentity, signOutApiIdentity, IDENTITY_REQUIRED_EVENT, type VerifiedIdentity } from './apiIdentity';
@@ -49,12 +49,13 @@ class ReportErrorBoundary extends Component<{ children: ReactNode }, { error: Er
 type ClientPrincipal = VerifiedIdentity | null;
 type AssessmentPhase = 'collecting' | 'narrating' | null;
 type WorkspaceView = 'report' | 'chat' | 'schedules';
-const staleDayOptions = [7, 14, 30, 60, 90, 180, 365];
+/* Resources are judged stale after 90 days. It is a fixed policy, not a per-report choice. */
+const STALE_DAYS: StaleDays = 90;
 const scopePreferenceKey = (identity: VerifiedIdentity) => `mkai-report-scope:${identity.tenantId}:${identity.userId}`;
 
-function rememberScope(identity: VerifiedIdentity, subscriptionIds: string[], staleDays: StaleDays) {
+function rememberScope(identity: VerifiedIdentity, subscriptionIds: string[]) {
   try {
-    window.localStorage.setItem(scopePreferenceKey(identity), JSON.stringify({ subscriptionIds, staleDays }));
+    window.localStorage.setItem(scopePreferenceKey(identity), JSON.stringify({ subscriptionIds }));
   } catch {}
 }
 
@@ -110,6 +111,7 @@ function useTheme(): [Theme, () => void] {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#F3F6FA' : '#0F1214');
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
 
@@ -251,28 +253,24 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [staleDays, setStaleDays] = useState<StaleDays>(90);
   const [loadingSubscriptions, setLoadingSubscriptions] = useState(false);
   const [loadingSnapshot, setLoadingSnapshot] = useState(false);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [snapshotMissing, setSnapshotMissing] = useState(false);
-  const [autoOpenSaved, setAutoOpenSaved] = useState(() => {
-    try { return window.localStorage.getItem('mkai-open-saved-report') !== 'false'; } catch { return true; }
-  });
-  const autoOpenSavedRef = useRef(autoOpenSaved);
   const [startupVersion, setStartupVersion] = useState(0);
   const pendingStartup = useRef<AbortController | null>(null);
   const workGeneration = useRef(0);
   const [view, setView] = useState<WorkspaceView>('report');
   const [visitedViews, setVisitedViews] = useState<Set<WorkspaceView>>(() => new Set(['report']));
-  /* The cost window is presented once, beside "Open saved report", and applies
+  /* The cost window is presented once, in the scope bar, and applies
      to every tab that reads it, so it is owned here and handed to ReportView
      rather than being re-declared inside each tab. */
   const [costWindow, setCostWindow] = useState<CostWindow>({ startDate: '', endDate: '' });
   const costWindowDatesAvailable = report ? report.costDetails?.dates ?? report.dailyCostTrend?.days?.map((day) => day.date) ?? [] : [];
   useEffect(() => {
     if (!report) return;
-    setCostWindow(presetCostWindow(report.costDetails?.dates ?? report.dailyCostTrend?.days?.map((day) => day.date) ?? [], 30));
+    const dates = report.costDetails?.dates ?? report.dailyCostTrend?.days?.map((day) => day.date) ?? [];
+    setCostWindow(monthCostWindow(report.reportMetadata.periodStart, report.reportMetadata.periodEnd) ?? presetCostWindow(dates, 30));
   }, [report]);
 
   useEffect(() => {
@@ -342,7 +340,6 @@ export default function App() {
       setSelectedIds(new Set());
       setVisitedViews(new Set(['report']));
       setView('report');
-      setStaleDays(90);
       setReport(null);
       setLoadedSnapshot(null);
       setNarration(null);
@@ -383,32 +380,28 @@ export default function App() {
         if (controller.signal.aborted) return;
         const availableIds = items.map((item) => item.subscriptionId.toLowerCase());
         let subscriptionIds = availableIds;
-        let threshold: StaleDays = 90;
         try {
           const preference = startupVersion > 0
-            ? { subscriptionIds: [...selectedIds], staleDays }
+            ? { subscriptionIds: [...selectedIds] }
             : JSON.parse(window.localStorage.getItem(scopePreferenceKey(verifiedIdentity)) ?? 'null');
           if (preference && Array.isArray(preference.subscriptionIds)) {
             const remembered = new Set(preference.subscriptionIds.filter((value: unknown) => typeof value === 'string').map((value: string) => value.toLowerCase()));
             const allowed = availableIds.filter((value) => remembered.has(value));
             if (allowed.length || startupVersion > 0) subscriptionIds = allowed;
-            if (staleDayOptions.includes(preference.staleDays)) threshold = preference.staleDays;
           }
         } catch {}
         setSubscriptions(items);
         setSelectedIds(new Set(subscriptionIds));
-        setStaleDays(threshold);
         setLoadingSubscriptions(false);
         setError(null);
         if (!subscriptionIds.length) { setSnapshotMissing(true); return; }
-        if (!autoOpenSavedRef.current && startupVersion === 0) return;
         stage = 'snapshot';
         setLoadingSnapshot(true);
-        const saved = await getLatestReport(controller.signal, subscriptionIds, threshold);
+        const saved = await getLatestReport(controller.signal, subscriptionIds, STALE_DAYS);
         if (controller.signal.aborted) return;
         if (!saved) { setSnapshotMissing(true); return; }
         const expected = new Set(subscriptionIds.map((value) => value.toLowerCase()));
-        if (saved.staleDays !== threshold || saved.report.reportMetadata.staleDays !== threshold
+        if (saved.staleDays !== STALE_DAYS || saved.report.reportMetadata.staleDays !== STALE_DAYS
           || new Set(saved.subscriptionIds.map((value) => value.toLowerCase())).size !== expected.size
           || saved.subscriptionIds.length !== expected.size
           || saved.subscriptionIds.some((value) => !expected.has(value.toLowerCase()))
@@ -418,9 +411,8 @@ export default function App() {
         }
         setReport(saved.report);
         setLoadedSnapshot(saved);
-        setStaleDays(saved.staleDays);
         setNarration(null);
-        rememberScope(verifiedIdentity, subscriptionIds, threshold);
+        rememberScope(verifiedIdentity, subscriptionIds);
       })
       .catch((loadError) => {
         if (controller.signal.aborted) return;
@@ -488,24 +480,24 @@ export default function App() {
     setAssessmentPhase('collecting');
     try {
       const subscriptionIds = [...selectedIds];
-      const result = await runCostAssessment(subscriptionIds, staleDays);
+      const result = await runCostAssessment(subscriptionIds, STALE_DAYS);
       if (generation !== workGeneration.current) return;
       setReport(result);
       setLoadedSnapshot(null);
-      rememberScope(verifiedIdentity, subscriptionIds.map((value) => value.toLowerCase()), staleDays);
+      rememberScope(verifiedIdentity, subscriptionIds.map((value) => value.toLowerCase()));
       try {
-        const persisted = await getLatestReport(undefined, subscriptionIds, staleDays);
+        const persisted = await getLatestReport(undefined, subscriptionIds, STALE_DAYS);
         if (generation !== workGeneration.current) return;
         if (
           persisted
           && persisted.subscriptionIds.length === subscriptionIds.length
           && subscriptionIds.every((subscriptionId) => persisted.subscriptionIds.includes(subscriptionId.toLowerCase()))
-          && persisted.staleDays === staleDays
+          && persisted.staleDays === STALE_DAYS
         ) {
           setLoadedSnapshot(persisted);
           setReport(persisted.report);
         } else {
-          setError('Report generated, but the saved copy could not be confirmed. "Open saved report" and Chat may be unavailable until you run it again.');
+          setError('Report generated, but the saved copy could not be confirmed. Chat and reopening this report may be unavailable until you run it again.');
         }
       } catch (snapshotError) {
         if (generation !== workGeneration.current) return;
@@ -554,7 +546,6 @@ export default function App() {
   const scopeChanged = report !== null && (
     selectedIds.size !== reportIds.size
     || [...selectedIds].some((id) => !reportIds.has(id))
-    || staleDays !== report.reportMetadata.staleDays
   );
 
   return (
@@ -607,26 +598,19 @@ export default function App() {
             running={running}
             runningLabel={assessmentPhase === 'narrating' ? 'Generating narrative' : 'Collecting Azure data'}
             hasReport={report !== null}
-            periodLabel={report ? `${report.reportMetadata.periodStart} \u2013 ${report.reportMetadata.periodEnd}` : null}
+            /* The assessed period is shown by the cost window's From/To just
+               below; repeating it in the ribbon put the same dates on screen
+               twice. */
+            periodLabel={null}
             scopeChanged={scopeChanged}
-            staleDays={staleDays}
             error={error}
             onToggle={toggleSubscription}
             onSelectAll={() => { pendingStartup.current?.abort(); setLoadingSnapshot(false); setSelectedIds(new Set(subscriptions.map((item) => item.subscriptionId))); }}
             onClearAll={() => { pendingStartup.current?.abort(); setLoadingSnapshot(false); setSelectedIds(new Set()); }}
-            onStaleDaysChange={(value) => { pendingStartup.current?.abort(); setLoadingSnapshot(false); setStaleDays(value); }}
             onRun={handleRun}
-          />
-          <div className="saved-report-controls">
-            <label><input type="checkbox" checked={autoOpenSaved} onChange={(event) => {
-              const enabled = event.target.checked;
-              setAutoOpenSaved(enabled); autoOpenSavedRef.current = enabled;
-              try { window.localStorage.setItem('mkai-open-saved-report', String(enabled)); } catch {}
-              if (!enabled && loadingSnapshot) { pendingStartup.current?.abort(); setLoadingSnapshot(false); }
-            }} /> Open saved report automatically</label>
-            <button type="button" className="ghost-button" disabled={loadingSubscriptions || loadingSnapshot || running || !!identityError} onClick={() => setStartupVersion((value) => value + 1)}><RefreshCw size={15} aria-hidden="true" /> Open saved report</button>
-            {report && <CostRangeControls dates={costWindowDatesAvailable} value={costWindow} onChange={setCostWindow} />}
-          </div>
+          >
+            {report && <CostRangeControls dates={costWindowDatesAvailable} value={costWindow} onChange={setCostWindow} month={monthCostWindow(report.reportMetadata.periodStart, report.reportMetadata.periodEnd)} />}
+          </SubscriptionPicker>
           {loadingSnapshot && <section className="saved-report-status"><span role="status"><LoaderCircle className="spin" size={18} aria-hidden="true" /> Opening saved report...</span><button type="button" className="ghost-button" onClick={() => { pendingStartup.current?.abort(); setLoadingSnapshot(false); }}>Skip saved report</button></section>}
           {(snapshotError || (error && !report)) && <section className="saved-report-status">
             {snapshotError && <p role="alert">{snapshotError}</p>}

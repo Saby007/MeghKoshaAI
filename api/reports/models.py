@@ -264,6 +264,11 @@ class TagDimensionCost(BaseModel):
 
     tag_key: str = Field(alias="tagKey")
     unallocated_cost: float = Field(alias="unallocatedCost")
+    # The spend this key explains, and that as a share of total spend. Defaulted so a
+    # snapshot written before these existed still loads; such a snapshot reports 0,
+    # which the UI shows as an unknown share rather than as "explains nothing".
+    allocated_cost: float = Field(alias="allocatedCost", default=0.0)
+    coverage: float = Field(default=0.0)
     rows: list[TagValueCost]
 
 

@@ -26,13 +26,64 @@ export function presetCostWindow(dates: string[], days: number): CostWindow {
   return { startDate: shiftCostDate(endDate, 1 - days), endDate };
 }
 
+/* The report's headline figure is a calendar month. Defaulting the cost
+   window to a rolling 30 days put $487.02 (Aug 2-31) beside $494
+   (Aug 1-31) on the same page, so the default is the assessed month. */
+export function monthCostWindow(periodStart: string, periodEnd: string): CostWindow | null {
+  return validCostDate(periodStart) && validCostDate(periodEnd) && periodStart <= periodEnd
+    ? { startDate: periodStart, endDate: periodEnd }
+    : null;
+}
+
+function lastDayOfMonth(year: number, monthIndex: number): number {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+}
+
+/* A window that starts on the 1st and ends on the month's last day. */
+export function isCalendarMonth(window: CostWindow): boolean {
+  if (!validCostDate(window.startDate) || !validCostDate(window.endDate)) return false;
+  const [year, month, day] = window.startDate.split('-').map(Number);
+  return day === 1
+    && window.endDate === `${window.startDate.slice(0, 8)}${String(lastDayOfMonth(year, month - 1)).padStart(2, '0')}`;
+}
+
 export function previousCostWindow(window: CostWindow): CostWindow {
+  /* A calendar month compares with the previous calendar month, so days pair
+     by day of month (Aug 2 with Jul 2). Shifting by day count instead paired
+     Aug 2 with Jul 3, and for a 30-day month would have borrowed a day from
+     the month before that. */
+  if (isCalendarMonth(window)) {
+    const [year, month] = window.startDate.split('-').map(Number);
+    const previousYear = month === 1 ? year - 1 : year;
+    const previousMonth = month === 1 ? 12 : month - 1;
+    const prefix = `${previousYear}-${String(previousMonth).padStart(2, '0')}`;
+    return { startDate: `${prefix}-01`, endDate: `${prefix}-${String(lastDayOfMonth(previousYear, previousMonth - 1)).padStart(2, '0')}` };
+  }
   const days = costWindowDates(window).length;
   return days ? { startDate: shiftCostDate(window.startDate, -days), endDate: shiftCostDate(window.startDate, -1) } : { startDate: '', endDate: '' };
 }
 
+/* The date in the previous window that a given day is compared with. For a
+   calendar month that is the same day of the previous month; a day with no
+   counterpart (the 31st against a 30-day month) has none, rather than being
+   paired with the 30th a second time and counted twice in period totals. */
+export function comparisonDate(window: CostWindow, index: number): string {
+  const previous = previousCostWindow(window);
+  if (isCalendarMonth(window)) return costWindowDates(previous)[index] ?? '';
+  return shiftCostDate(previous.startDate, index);
+}
+
+/* Tag keys as the report shows them are normalised by the API: `azd-env-name`
+   becomes "Azd Env Name". Comparing that display form with the raw key on a cost
+   row matched nothing, so every key containing a hyphen or underscore produced an
+   empty chart and no budgets. Both sides are folded the same way here. */
+export function sameTagKey(left: string, right: string): boolean {
+  const fold = (key: string) => key.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+  return fold(left) === fold(right);
+}
+
 export function costTagValue(row: CostDetailRow, key: string): string | undefined {
-  return Object.entries(row.tags).find(([name]) => name.toLowerCase() === key.toLowerCase())?.[1];
+  return Object.entries(row.tags).find(([name]) => sameTagKey(name, key))?.[1];
 }
 
 export function matchesCostFilter(row: CostDetailRow, filter: CostFilter): boolean {
@@ -78,7 +129,11 @@ export function compareCostGroups(details: CostDetailSummary | undefined, window
         : dimension === 'region' ? row.region : dimension === 'resourceGroup' ? row.resourceGroup : costTagValue(row, filter.tagKey ?? '') ?? null;
     const name = dimension === 'resource' ? row.resourceName || 'Unattributed charge'
       : dimension === 'subscription' ? row.subscriptionName : value ?? 'Untagged';
-    const key = JSON.stringify([row.subscriptionId, value]);
+    /* Azure resource ids and resource group names are case-insensitive, and FOCUS
+       exports carry both spellings (`SRE` and `sre`), so grouping on the raw text
+       split one resource group into two rows with half the cost each. */
+    const folded = dimension === 'resource' || dimension === 'resourceGroup' ? value?.toLowerCase() ?? null : value;
+    const key = JSON.stringify([row.subscriptionId.toLowerCase(), folded]);
     const group = groups.get(key) ?? { id: key, name, subscriptionId: row.subscriptionId, subscriptionName: row.subscriptionName, current: 0, previous: 0, sources: [] };
     group.sources.push(row);
     for (const [day, amount] of Object.entries(row.dailyCosts)) {
@@ -109,8 +164,8 @@ export function dailySubscriptionCosts(details: CostDetailSummary | undefined, w
       for (const [day, amount] of Object.entries(row.dailyCosts)) totals.set(day, (totals.get(day) ?? 0) + amount);
     }
     return { subscriptionId, subscriptionName, days: dates.map((date, index) => {
-      const previousDate = shiftCostDate(previous.startDate, index);
-      return { date, previousDate, current: available.has(date) ? totals.get(date) ?? 0 : null, previous: available.has(previousDate) ? totals.get(previousDate) ?? 0 : null };
+      const previousDate = comparisonDate(window, index);
+      return { date, previousDate, current: available.has(date) ? totals.get(date) ?? 0 : null, previous: previousDate && available.has(previousDate) ? totals.get(previousDate) ?? 0 : null };
     }) };
   });
 }
