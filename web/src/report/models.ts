@@ -404,6 +404,7 @@ export type BudgetWriteRequest = {
   amount: number;
   timeGrain: BudgetTimeGrain;
   startDate: string;
+  endDate?: string | null;
   alertThresholdPercent?: number | null;
   alertEmail?: string | null;
 };

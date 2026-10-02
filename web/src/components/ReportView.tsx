@@ -55,7 +55,7 @@ import { billingDates, billingWindow } from '../report/billingHistory';
 import { CostExportButton, CostFilters, CostWindowMetrics, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, ResourceCostTable, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
 import { costWindowDates, matchesCostFilter, monthCostWindow, presetCostWindow, previousCostWindow, sameTagKey, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
-import { BudgetContext, BudgetDailyChart, budgetDailySummary, budgetSummaryText, budgetTargetsTag, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
+import { BudgetContext, BudgetDailyChart, BudgetExpiry, budgetDailySummary, budgetSummaryText, budgetTargetsTag, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
 import { buildTakeaways, ExecutiveTakeaways } from './ExecutiveTakeaways';
 import { ServiceRetirements } from './ServiceRetirements';
 import { DailyBarChart, DayAxis, dayAxis, useChartWidth } from './TrendChart';
@@ -3793,6 +3793,7 @@ function CostByTagsTab({
             commonly carry a budget of the same name, and without it they read
             as one budget listed twice. */}
         <p className="billing-provenance">{subscriptionNames.get(budget.subscriptionId.toLowerCase()) ?? budget.subscriptionId} · {relation} · {budget.timeGrain} · {native(budget.currentSpend)} of {native(budget.amount)} reported by Azure for the current cycle.</p>
+        <p className="billing-provenance">Expiry: <BudgetExpiry periodEnd={budget.periodEnd} /></p>
         {report.costDetails?.status === 'complete' && summary.observedDays > 0 && (
           <p className="billing-provenance">{budgetSummaryText(budget, summary, formatMoney, scopeLabel)}</p>
         )}
@@ -3988,6 +3989,7 @@ function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; c
     amount: 0,
     timeGrain: 'Monthly',
     startDate: defaultStartDate(),
+    endDate: null,
     alertThresholdPercent: null,
     alertEmail: '',
   });
@@ -4039,6 +4041,7 @@ function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; c
       amount: budget.amount,
       timeGrain: (budget.timeGrain as BudgetTimeGrain) || 'Monthly',
       startDate: budget.periodStart ? budget.periodStart.slice(0, 10) : defaultStartDate(),
+      endDate: budget.periodEnd ? budget.periodEnd.slice(0, 10) : null,
       alertThresholdPercent: null,
       alertEmail: '',
     });
@@ -4050,17 +4053,29 @@ function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; c
   }
 
   async function submit() {
+    if (form.endDate && form.endDate <= form.startDate) {
+      setError('Budget end date must be after the start date.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
+      let saved: Budget;
       if (editing) {
         const updated = await updateBudget(editing.subscriptionId, editing.name, form);
+        saved = updated;
         setBudgets((current) => current.map((budget) => (
           budget.subscriptionId === editing.subscriptionId && budget.name === editing.name ? updated : budget
         )));
       } else {
         const created = await createBudget(form);
+        saved = created;
         setBudgets((current) => [...current, created]);
+      }
+      if (form.endDate && saved.periodEnd.slice(0, 10) !== form.endDate) {
+        setEditing({ subscriptionId: saved.subscriptionId, name: saved.name });
+        setError(`Budget "${saved.name}" was saved, but the requested end date ${form.endDate} was not applied (Azure returned ${saved.periodEnd.slice(0, 10) || 'no end date'}). The deployed API may not support end dates yet. Do not create it again; update this budget after the API is upgraded.`);
+        return;
       }
       cancelEdit();
     } catch (err) {
@@ -4152,7 +4167,18 @@ function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; c
           type="date"
           aria-label="Budget start date"
           value={form.startDate}
+          max={form.endDate ?? undefined}
           onChange={(event) => setForm((current) => ({ ...current, startDate: event.target.value }))}
+        />
+        </label>
+        <label><span>End date</span>
+        <input
+          type="date"
+          aria-label="Budget end date"
+          min={form.startDate}
+          value={form.endDate ?? ''}
+          onChange={(event) => setForm((current) => ({ ...current, endDate: event.target.value || null }))}
+          title="Budget expiry date; leave blank to use Azure's default end date"
         />
         </label>
         <label><span>Alert threshold (%)</span>
@@ -4236,7 +4262,7 @@ function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; c
                       </span>
                     )}
                   </td>
-                  <td>{budget.timeGrain}</td>
+                  <td>{budget.timeGrain}<small>Expiry: <BudgetExpiry periodEnd={budget.periodEnd} highlightNearExpiry /></small></td>
                   <td className="budget-actions">
                     <button type="button" onClick={() => edit(budget)}>Edit</button>
                     <button type="button" onClick={() => void remove(budget)}>Delete</button>

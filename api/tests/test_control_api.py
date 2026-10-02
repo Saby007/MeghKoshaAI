@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 import httpx
+from pydantic import ValidationError
 from fastapi import HTTPException
 
 os.environ.setdefault("AI_PROJECT_ENDPOINT", "https://example.test/api/projects/test")
@@ -23,6 +24,41 @@ _BUDGET_BODY = {
     "timeGrain": "Monthly",
     "startDate": "2026-09-01",
 }
+
+@pytest.mark.parametrize("end_date", ["2026-09-01", "2026-08-31", "2026-02-30", "not-a-date"])
+def test_budget_end_date_must_be_valid_and_after_start(end_date):
+    with pytest.raises(ValidationError):
+        main.BudgetWriteRequest(**_BUDGET_BODY, endDate=end_date)
+
+
+def test_budget_properties_include_selected_end_date():
+    body = main.BudgetWriteRequest(**_BUDGET_BODY, endDate="2027-09-01")
+    assert main._budget_properties(body)["timePeriod"] == {
+        "startDate": "2026-09-01T00:00:00Z",
+        "endDate": "2027-09-01T00:00:00Z",
+    }
+
+
+@pytest.mark.parametrize("end_fields, expected_end", [
+    ({}, "2030-09-01T00:00:00Z"),
+    ({"endDate": "2027-10-01"}, "2027-10-01T00:00:00Z"),
+    ({"endDate": None}, None),
+])
+def test_budget_update_preserves_omitted_end_date_and_honours_explicit_change(monkeypatch, end_fields, expected_end):
+    async def existing(subscription_id, name):
+        return {"eTag": "version-1", "properties": {"timePeriod": {"endDate": "2030-09-01T00:00:00Z"}}}
+
+    async def put(subscription_id, name, properties, e_tag):
+        assert properties["timePeriod"].get("endDate") == expected_end
+        assert e_tag == "version-1"
+        return {"name": name, "properties": properties}
+
+    monkeypatch.setattr(main.arm_client, "get_native_budget", existing)
+    monkeypatch.setattr(main.arm_client, "put_native_budget", put)
+    asyncio.run(main.update_budget(
+        FakeRequest(), _SUBSCRIPTION_ID, "monthly-budget",
+        main.BudgetWriteRequest(**_BUDGET_BODY, **end_fields),
+    ))
 
 
 class FakeRequest:

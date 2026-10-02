@@ -2,15 +2,15 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { getCostAnomalies, getExchangeRates, getRateOptimization, getResourceAvailability, getServiceRetirements, listBudgets } from '../api';
+import { createBudget, updateBudget, getCostAnomalies, getExchangeRates, getRateOptimization, getResourceAvailability, getServiceRetirements, listBudgets } from '../api';
 import { anomalyFixture, detailReportFixture, pricingReportFixture, reportFixture, resourceReportFixture, tagReportFixture } from '../report/testFixtures';
 import { ReportView } from './ReportView';
 import type { FullReport } from '../report/models';
 import { compareCostGroups, dailySubscriptionCosts } from '../report/costDetails';
 import { CostComparisonChart } from './CostExplorer';
-import { BudgetContext, budgetCycle, budgetFilterMatches, budgetThreshold } from './BudgetContext';
+import { BudgetContext, BudgetExpiry, budgetCycle, budgetFilterMatches, budgetThreshold } from './BudgetContext';
 
-vi.mock('../api', async (importOriginal) => ({ ...await importOriginal<typeof import('../api')>(), getCostAnomalies: vi.fn(), getExchangeRates: vi.fn(), getRateOptimization: vi.fn(), getResourceAvailability: vi.fn(), getServiceRetirements: vi.fn(), listBudgets: vi.fn() }));
+vi.mock('../api', async (importOriginal) => ({ ...await importOriginal<typeof import('../api')>(), createBudget: vi.fn(), updateBudget: vi.fn(), getCostAnomalies: vi.fn(), getExchangeRates: vi.fn(), getRateOptimization: vi.fn(), getResourceAvailability: vi.fn(), getServiceRetirements: vi.fn(), listBudgets: vi.fn() }));
 let container: HTMLDivElement;
 let root: Root;
 const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.trim() === label)!;
@@ -36,6 +36,105 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
+
+it('loads and submits the budget end date when editing, rejecting dates before the start', async () => {
+  const budget = { subscriptionId: 'sub-1', name: 'Finance', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '2027-09-01T00:00:00Z', currentSpend: 10, forecastSpend: 20 };
+  vi.mocked(listBudgets).mockResolvedValue([budget]);
+  vi.mocked(updateBudget).mockResolvedValue({ ...budget, periodEnd: '2028-09-01' });
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="form-report" />));
+  await act(async () => button('Budgets').click());
+  await act(async () => button('Edit').click());
+  const end = container.querySelector<HTMLInputElement>('[aria-label="Budget end date"]')!;
+  expect(end.value).toBe('2027-09-01');
+  const changeEnd = async (value: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(end, value);
+    end.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await changeEnd('2026-08-01');
+  await act(async () => container.querySelector('form.budget-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(updateBudget).not.toHaveBeenCalled();
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('end date must be after');
+  await changeEnd('2028-09-01');
+  await act(async () => container.querySelector('form.budget-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(updateBudget).toHaveBeenCalledWith('sub-1', 'Finance', expect.objectContaining({ endDate: '2028-09-01' }));
+});
+
+it('submits the chosen expiry date when adding a budget', async () => {
+  const created = { subscriptionId: 'sub-1', name: 'New-budget', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '2027-09-01', currentSpend: 0, forecastSpend: null };
+  vi.mocked(createBudget).mockResolvedValue(created);
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="form-report" />));
+  await act(async () => button('Budgets').click());
+  for (const [label, value] of [['Budget name', 'New-budget'], ['Budget amount', '100'], ['Budget start date', '2026-09-01'], ['Budget end date', '2027-09-01']]) {
+    const input = container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+  await act(async () => container.querySelector('form.budget-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(createBudget).toHaveBeenCalledWith(expect.objectContaining({ name: 'New-budget', endDate: '2027-09-01' }));
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Budget end date"]')?.value).toBe('');
+});
+
+it('reports an ignored end date and switches to editing rather than offering to recreate the saved budget', async () => {
+  const saved = { subscriptionId: 'sub-1', name: 'Demo', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-10-01', periodEnd: '2036-10-01T00:00:00Z', currentSpend: null, forecastSpend: null };
+  vi.mocked(createBudget).mockResolvedValue(saved);
+  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="ignored-end-date" />));
+  await act(async () => button('Budgets').click());
+  for (const [label, value] of [['Budget name', 'Demo'], ['Budget amount', '100'], ['Budget start date', '2026-10-01'], ['Budget end date', '2026-12-01']]) {
+    const input = container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+  await act(async () => container.querySelector('form.budget-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('was saved, but the requested end date 2026-12-01 was not applied');
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('2036-10-01');
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Budget end date"]')?.value).toBe('2026-12-01');
+  expect(button('Save changes')).toBeDefined();
+  expect(button('Add budget')).toBeUndefined();
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Budget name"]')?.disabled).toBe(true);
+});
+
+it('shows the actual budget expiry date without timezone shifts or invented dates', async () => {
+  await act(async () => root.render(<BudgetExpiry periodEnd="2027-03-31T00:00:00Z" />));
+  expect(container.querySelector('time')?.dateTime).toBe('2027-03-31');
+  expect(container.textContent).toContain('2027');
+  await act(async () => root.render(<BudgetExpiry periodEnd="" />));
+  expect(container.textContent).toBe('Open-ended');
+  await act(async () => root.render(<BudgetExpiry periodEnd="2027-02-30" />));
+  expect(container.textContent).toBe('Unavailable');
+});
+
+it('flags the inclusive 30-day expiry window on the Budgets tab, including today and expired budgets', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-02T10:59:59Z'));
+  try {
+    const budget = { subscriptionId: 'sub-1', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-01-01', currentSpend: 10, forecastSpend: 20 };
+    vi.mocked(listBudgets).mockResolvedValue([
+      { ...budget, name: 'Thirty days', periodEnd: '2026-11-01T00:00:00Z' },
+      { ...budget, name: 'Thirty-one days', periodEnd: '2026-11-02' },
+      { ...budget, name: 'Today', periodEnd: '2026-10-02' },
+      { ...budget, name: 'Past', periodEnd: '2026-10-01' },
+      { ...budget, name: 'No end', periodEnd: '' },
+    ]);
+    await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="expiry-report" />));
+    expect(container.querySelector('.budget-expiry-warning')).toBeNull();
+    await act(async () => button('Budgets').click());
+    const rows = [...container.querySelectorAll('.budget-table tbody tr')];
+    const expiry = (name: string) => rows.find((row) => row.firstElementChild?.textContent === name)?.querySelector('.budget-expiry');
+    expect(expiry('Thirty days')?.classList.contains('budget-expiry-warning')).toBe(true);
+    expect(expiry('Thirty days')?.textContent).toContain('30 days left');
+    expect(expiry('Thirty-one days')?.classList.contains('budget-expiry-warning')).toBe(false);
+    expect(expiry('Today')?.textContent).toContain('Expires today');
+    expect(expiry('Past')?.textContent).toContain('Expired');
+    expect(expiry('No end')?.textContent).toBe('Open-ended');
+    expect(expiry('No end')?.classList.contains('budget-expiry-warning')).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 it('shows point data on hover and keyboard focus while preserving day drilldown', async () => {
   const costWindow = { startDate: '2026-09-01', endDate: '2026-09-07' };
@@ -252,6 +351,7 @@ it('keeps budget matching, forecast variance and status thresholds explicit', as
   expect(container.textContent).toContain('Filter applicability unverified');
   expect(container.textContent).toContain('$5.00 over');
   expect(container.textContent).toContain('Overrun $40.00');
+  expect(container.textContent).toContain('Expiry: Open-ended');
   expect(budgetThreshold(budget).label).toBe('Over by 5%');
   // A monthly budget checked on 30 Sep reports September to date, not the report month.
   expect(budgetCycle({ ...budget, periodStart: '2026-01-01' }, '2026-09-30T10:00:00Z')).toEqual({ start: '2026-09-01', end: '2026-09-30' });
@@ -574,6 +674,7 @@ it('lists only budgets whose own filter names the chosen key and value', async (
   const budgets = container.querySelector('.tag-cost-budgets')!;
   expect(budgets.textContent).toContain('Budget for application = Finance');
   expect(budgets.textContent).toContain('Finance app budget');
+  expect(budgets.textContent).toContain('Expiry: Open-ended');
   // Same-named budgets in different subscriptions are told apart by subscription.
   expect(budgets.textContent).toContain('Demo subscription');
   // Budgets that merely contain the spend are not this application's budget.

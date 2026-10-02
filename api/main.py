@@ -16,7 +16,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, StrictBool
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 
 from agents.cost_agent import CostFindingsReport, narrate, narration_status
 from anomalies.engine import detect_anomalies
@@ -228,8 +228,24 @@ class BudgetWriteRequest(BaseModel):
     amount: float = Field(gt=0)
     time_grain: Literal["Monthly", "Quarterly", "Annually"] = Field(alias="timeGrain")
     start_date: str = Field(alias="startDate", min_length=10, max_length=10)
+    end_date: str | None = Field(default=None, alias="endDate", min_length=10, max_length=10)
     alert_threshold_percent: float | None = Field(default=None, alias="alertThresholdPercent", gt=0, le=1000)
     alert_email: str | None = Field(default=None, alias="alertEmail", max_length=320)
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def validate_budget_date(cls, value: str | None) -> str | None:
+        if value is not None:
+            parsed = date.fromisoformat(value)
+            if parsed.isoformat() != value:
+                raise ValueError("Budget dates must use YYYY-MM-DD")
+        return value
+
+    @model_validator(mode="after")
+    def validate_budget_period(self):
+        if self.end_date is not None and self.end_date <= self.start_date:
+            raise ValueError("Budget end date must be after the start date")
+        return self
 
 
 def _budget_properties(body: BudgetWriteRequest) -> dict:
@@ -241,6 +257,8 @@ def _budget_properties(body: BudgetWriteRequest) -> dict:
         "filter": {},
         "notifications": {},
     }
+    if body.end_date is not None:
+        properties["timePeriod"]["endDate"] = f"{body.end_date}T00:00:00Z"
     if body.alert_threshold_percent and body.alert_email:
         properties["notifications"] = {
             "actual_GreaterThan_threshold": {
@@ -1156,11 +1174,16 @@ async def update_budget(request: Request, subscription_id: str, budget_name: str
     existing = await arm_client.get_native_budget(normalized, budget_name)
     if existing is None:
         raise HTTPException(status_code=404, detail="Azure budget was not found")
+    properties = _budget_properties(body)
+    if "end_date" not in body.model_fields_set:
+        existing_end = (existing.get("properties", {}).get("timePeriod") or {}).get("endDate")
+        if existing_end:
+            properties["timePeriod"]["endDate"] = existing_end
     try:
         result = await arm_client.put_native_budget(
             normalized,
             budget_name,
-            _budget_properties(body),
+            properties,
             e_tag=existing.get("eTag"),
         )
     except httpx.HTTPStatusError as error:
