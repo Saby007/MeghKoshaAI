@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Search } from 'lucide-react';
 import { listBudgets } from '../api';
 import type { Budget, CostDetailRow, CostDetailSummary, FullReport } from '../report/models';
 import { costTagValue, costWindowDates, matchesCostFilter, sameTagKey, type CostFilter, type CostWindow } from '../report/costDetails';
@@ -177,6 +177,33 @@ export function budgetDailyAllowance(budget: Budget, window: CostWindow): number
    budget's own filter. It is NOT the ActualCost figure behind currentSpend, so
    the two will not tie out and the caller must not present them as the same
    number. */
+/* The daily series behind a budget, scoped to its own filter and any caller
+   selection, with the even daily share and how many days exceed it. Shared by
+   the budget chart and by pages that show one budget's figures beside their own
+   graph instead of drawing a second one. */
+export function budgetDailySummary(budget: Budget, details: CostDetailSummary | undefined, window: CostWindow, filters: CostFilter = {}) {
+  const { rows, verified } = budgetScopedRows(budget, details, filters);
+  const dates = costWindowDates(window);
+  const values = dates.map((date) => {
+    const covered = rows.filter((row) => row.dailyCosts[date] !== undefined);
+    return covered.length ? covered.reduce((sum, row) => sum + row.dailyCosts[date], 0) : null;
+  });
+  const observed = values.filter((value): value is number => value !== null);
+  const total = observed.reduce((sum, value) => sum + value, 0);
+  const allowance = budgetDailyAllowance(budget, window);
+  const over = allowance === null ? 0 : observed.filter((value) => value > allowance).length;
+  return { dates, values, observedDays: observed.length, total, allowance, over, verified };
+}
+
+export function budgetSummaryText(budget: Budget, summary: ReturnType<typeof budgetDailySummary>, formatMoney: (value: number) => string, scopeLabel?: string) {
+  return `${formatMoney(summary.total)} across ${summary.observedDays} covered ${summary.observedDays === 1 ? 'day' : 'days'}${scopeLabel ? ` for ${scopeLabel}` : ''}`
+    + (summary.allowance === null
+      ? `. ${budget.timeGrain} budgets have no single daily share, so no allowance line is drawn.`
+      : `, against an even daily share of ${formatMoney(summary.allowance)}. ${summary.over} ${summary.over === 1 ? 'day is' : 'days are'} above that share.`)
+    + " Selected-window EffectiveCost scoped to this budget's filter, not the current-cycle ActualCost behind its reported spend, so these totals are not expected to match."
+    + (summary.verified ? '' : ' Azure did not return an evaluable filter for this budget, so this is the whole subscription and may be wider than the budget really covers.');
+}
+
 export function BudgetDailyChart({
   budget,
   details,
@@ -196,16 +223,8 @@ export function BudgetDailyChart({
   selectedDate?: string | null;
   onSelectDate?: (date: string) => void;
 }) {
-  const { rows, verified } = budgetScopedRows(budget, details, filters);
-  const dates = costWindowDates(window);
-  const values = dates.map((date) => {
-    const covered = rows.filter((row) => row.dailyCosts[date] !== undefined);
-    return covered.length ? covered.reduce((sum, row) => sum + row.dailyCosts[date], 0) : null;
-  });
-  const observed = values.filter((value): value is number => value !== null);
-  const total = observed.reduce((sum, value) => sum + value, 0);
-  const allowance = budgetDailyAllowance(budget, window);
-  const over = allowance === null ? 0 : observed.filter((value) => value > allowance).length;
+  const summary = budgetDailySummary(budget, details, window, filters);
+  const { dates, values, allowance } = summary;
   return (
     <section className="budget-daily-chart" aria-label={`Daily spend for ${budget.name}`}>
       <DailyBarChart
@@ -222,17 +241,7 @@ export function BudgetDailyChart({
         onSelectDate={onSelectDate}
         selectLabel={(date) => `Resource costs for ${date}`}
       />
-      {observed.length > 0 && (
-        <p className="billing-provenance">
-          {formatMoney(total)} across {observed.length} covered {observed.length === 1 ? 'day' : 'days'}
-          {scopeLabel ? ` for ${scopeLabel}` : ''}
-          {allowance === null
-            ? `. ${budget.timeGrain} budgets have no single daily share, so no allowance line is drawn.`
-            : `, against an even daily share of ${formatMoney(allowance)}. ${over} ${over === 1 ? 'day is' : 'days are'} above that share.`}
-          {' '}Selected-window EffectiveCost scoped to this budget&apos;s filter, not the current-cycle ActualCost behind its reported spend, so these totals are not expected to match.
-          {!verified && ' Azure did not return an evaluable filter for this budget, so this is the whole subscription and may be wider than the budget really covers.'}
-        </p>
-      )}
+      {summary.observedDays > 0 && <p className="billing-provenance">{budgetSummaryText(budget, summary, formatMoney, scopeLabel)}</p>}
     </section>
   );
 }
@@ -263,11 +272,32 @@ export function relateBudgets(budgets: Budget[], rows: CostDetailRow[], filters:
 
 export function BudgetContext({ state, details, filters = {}, showHeading = true, window, formatMoney }: { state: BudgetState; details?: CostDetailSummary; filters?: CostFilter; showHeading?: boolean; window?: CostWindow; formatMoney?: (value: number) => string }) {
   const [openBudget, setOpenBudget] = useState<string | null>(null);
+  const [budgetQuery, setBudgetQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'attention' | 'within' | 'unknown'>('all');
   const rows = details?.rows.filter((row) => matchesCostFilter(row, filters)) ?? [];
-  const budgets = relateBudgets(state.budgets, rows, filters);
+  const related = relateBudgets(state.budgets, rows, filters);
+  const query = budgetQuery.trim().toLocaleLowerCase();
+  /* Over budget now, or forecast by Azure to finish the cycle over it. */
+  const needsAttention = (budget: Budget) => ['warning', 'over'].includes(budgetThreshold(budget).tone)
+    || (budget.forecastSpend !== null && Number.isFinite(budget.amount) && budget.forecastSpend > budget.amount);
+  const budgets = related.filter(({ budget, relation }) => {
+    if (query && ![budget.name, budget.scope, budget.subscriptionId, relation].filter(Boolean).join(' ').toLocaleLowerCase().includes(query)) return false;
+    if (statusFilter === 'attention') return needsAttention(budget);
+    if (statusFilter === 'within') return budgetThreshold(budget).tone === 'within' && !needsAttention(budget);
+    if (statusFilter === 'unknown') return budgetThreshold(budget).tone === 'unknown';
+    return true;
+  });
+  const attentionCount = related.filter(({ budget }) => needsAttention(budget)).length;
   return <section className="cost-budget-context" aria-label="Applicable Azure budgets" aria-busy={state.loading}>
     {showHeading && <header className="cost-section-heading"><h3>Azure budget context</h3><button type="button" className="ghost-button" disabled={state.loading} onClick={state.refresh} aria-label="Refresh budget context" title="Refresh budget context"><RefreshCw size={16} /></button></header>}
-    {state.loading ? <p role="status">Checking subscription budgets...</p> : state.error ? <p role="alert">{state.error}</p> : !budgets.length ? <p role="status">No matching subscription-scope budgets were returned.</p> : <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Azure budget status"><table className="data-table billing-table budget-table"><thead><tr><th>Budget / scope</th><th>Budget</th><th>Spend this cycle</th><th>Remaining</th><th>Azure forecast</th><th>Status</th></tr></thead><tbody>{budgets.map(({ budget, relation }) => {
+    {!state.loading && !state.error && related.length > 0 && <div className="table-toolbar" role="search" aria-label="Filter budgets">
+      <label className="table-search"><Search size={15} aria-hidden="true" /><input type="search" aria-label="Search budgets" placeholder="Search budgets" value={budgetQuery} onChange={(event) => setBudgetQuery(event.target.value)} /></label>
+      <div className="segmented" role="group" aria-label="Budget status">
+        {([['all', 'All'], ['attention', `Needs attention${attentionCount ? ` (${attentionCount})` : ''}`], ['within', 'On track'], ['unknown', 'Unavailable']] as const).map(([value, label]) => <button key={value} type="button" className={statusFilter === value ? 'active' : ''} aria-pressed={statusFilter === value} onClick={() => setStatusFilter(value)}>{label}</button>)}
+      </div>
+      <span className="table-count" role="status">{budgets.length} of {related.length} budgets</span>
+    </div>}
+    {state.loading ? <p role="status">Checking subscription budgets...</p> : state.error ? <p role="alert">{state.error}</p> : !related.length ? <p role="status">No matching subscription-scope budgets were returned.</p> : !budgets.length ? <p role="status">No budgets match this search or status.</p> : <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Azure budget status"><table className="data-table billing-table budget-table"><thead><tr><th>Budget / scope</th><th>Budget</th><th>Spend this cycle</th><th>Remaining</th><th>Azure forecast</th><th>Status</th></tr></thead><tbody>{budgets.map(({ budget, relation }) => {
       const status = budgetThreshold(budget);
       const key = `${budget.subscriptionId}:${budget.name}`;
       /* The drilldown needs a period to chart and a formatter to label it, so
@@ -284,7 +314,7 @@ export function BudgetContext({ state, details, filters = {}, showHeading = true
         <td>{native(budget.currentSpend)}{cycle && <small>{cycleLabel(cycle)} to date</small>}</td>
         <td className={remaining !== null && remaining < 0 ? 'cost-increase' : ''}>{remaining === null ? 'Unavailable' : remaining < 0 ? `${money(-remaining)} over` : `${money(remaining)} left`}</td>
         <td>{native(budget.forecastSpend)}{budget.forecastSpend !== null && <small>{budget.forecastSpend > budget.amount ? `Overrun ${money(budget.forecastSpend - budget.amount)}` : 'Within budget'}</small>}</td>
-        <td><span className={`budget-status budget-${status.tone}`}>{status.label}</span></td></tr>
+        <td><span className={`budget-status budget-${status.tone}`}>{status.label}</span>{status.tone === 'within' && budget.forecastSpend !== null && budget.forecastSpend > budget.amount && <span className="budget-status budget-forecast">Forecast over</span>}</td></tr>
       {drillable && openBudget === key && window && formatMoney && <tr><td colSpan={6}><BudgetDailyChart budget={budget} details={details} window={window} formatMoney={formatMoney} /></td></tr>}
       </Fragment>;
     })}</tbody></table></div>}

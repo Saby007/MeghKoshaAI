@@ -2374,80 +2374,9 @@ body {
     min-width: 0;
 }
 
-
-/* Persistent left navigation (overrides the earlier top-only hover-menu design;
-   see ADO Task 781, comment 8538467, item 8). */
-
-.left-nav-sidebar {
-    flex: none;
-    width: 208px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 12px 8px;
-    background: transparent;
-    border-right: 1px solid var(--glass-border);
-    overflow-y: auto;
-    position: sticky;
-    top: 12px;
-    align-self: flex-start;
-    max-height: calc(100vh - 24px);
-}
-
-.left-nav-group {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.left-nav-group-label {
-    padding: 0 10px;
-    margin-bottom: 4px;
-    font-family: var(--font-geist-mono);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--color-warm-granite);
-}
-
-.left-nav-group button {
-    display: block;
-    width: 100%;
-    min-height: 32px;
-    padding: 6px 8px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--color-pale-stone);
-    font-family: var(--font-geist);
-    font-size: 13px;
-    text-align: left;
-    cursor: pointer;
-}
-
-.left-nav-group button:hover {
-    background: var(--glass-highlight);
-}
-
-.left-nav-group button.active {
-    background: var(--color-signal-orange);
-    color: var(--color-on-action);
-    font-weight: 600;
-}
-
 @media (max-width: 900px) {
     .dashboard-frame {
         flex-direction: column;
-    }
-    .left-nav-sidebar {
-        width: 100%;
-        flex-direction: row;
-        flex-wrap: wrap;
-        border-right: none;
-        border-bottom: 1px solid var(--glass-border);
-        position: static;
-        max-height: none;
     }
 }
 
@@ -2772,18 +2701,6 @@ body {
     color: var(--color-warm-granite);
 }
 
-
-/* Persistent category spend pills — quick jump to a domain tab */
-
-.category-pill-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--glass-border);
-    background: rgba(255, 255, 255, 0.015);
-}
-
 .time-range-selector {
     display: flex;
     gap: 4px;
@@ -2809,56 +2726,6 @@ body {
 
 .range-spend-kpi-grid {
     margin: 0 24px 16px;
-}
-
-.category-pill {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 100px;
-    padding: 6px 12px;
-    border: 1px solid var(--glass-border);
-    border-radius: 999px;
-    background: var(--glass-bg);
-    cursor: pointer;
-    text-align: left;
-    transition: border-color 0.2s var(--ease-glass), background-color 0.2s var(--ease-glass), box-shadow 0.2s var(--ease-glass), transform 0.2s var(--ease-glass);
-}
-
-.category-pill span {
-    font-family: var(--font-geist-mono);
-    font-size: 10px;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--color-warm-granite);
-}
-
-.category-pill strong {
-    font-family: var(--font-geist);
-    font-size: 15px;
-    color: var(--color-bone);
-}
-
-.category-pill:hover {
-    border-color: var(--glass-highlight);
-    background: var(--glass-bg-strong);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
-}
-
-.category-pill:active {
-    transform: translateY(0) scale(0.97);
-}
-
-.category-pill.active {
-    border-color: rgb(var(--color-glow-rgb) / 0.5);
-    background: linear-gradient(135deg, rgb(var(--color-glow-rgb) / 0.32), rgb(var(--color-glow-rgb) / 0.12));
-    box-shadow: var(--shadow-sm);
-}
-
-.category-pill-static {
-    cursor: default;
-    opacity: 0.75;
 }
 
 @media (max-width: 860px) {
@@ -2918,13 +2785,6 @@ body {
     .summary-tile {
         flex: none;
         min-width: 150px;
-    }
-    .category-pill-row {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-    }
-    .category-pill {
-        flex: none;
     }
 }
 
@@ -3501,14 +3361,6 @@ body {
     color: var(--color-warm-granite);
 }
 
-.executive-narrative {
-    font-size: 14px;
-    color: var(--color-pale-stone);
-    border-left: 2px solid var(--color-signal-orange);
-    padding: 12px 16px;
-    margin-top: 16px;
-}
-
 .executive-report {
     padding: 0;
     overflow: hidden;
@@ -3575,32 +3427,6 @@ body {
     color: var(--color-metric-green);
 }
 
-.executive-provenance {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    border-bottom: 1px solid var(--color-carbon-lift);
-}
-
-.executive-provenance span {
-    min-width: 0;
-    padding: 8px 10px;
-    border-right: 1px solid var(--color-carbon-lift);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--font-geist-mono);
-    font-size: 11px;
-    color: var(--color-pale-stone);
-}
-
-.executive-provenance b {
-    display: block;
-    font-size: 10px;
-    font-weight: 400;
-    text-transform: uppercase;
-    color: var(--color-warm-granite);
-}
-
 .executive-section-band {
     padding: 10px 18px;
     border-top: 1px solid var(--color-ash-stroke);
@@ -3621,10 +3447,6 @@ body {
     font-family: var(--font-geist-mono);
     font-size: 9px;
     color: var(--color-warm-granite);
-}
-
-.executive-report .executive-narrative {
-    margin: 20px 24px;
 }
 
 .executive-signal-grid {
@@ -3764,9 +3586,6 @@ body {
         align-items: flex-start;
         flex-direction: column;
         padding: 22px 18px;
-    }
-    .executive-provenance {
-        grid-template-columns: 1fr 1fr;
     }
     .executive-signal-grid {
         grid-template-columns: 1fr;
@@ -5202,143 +5021,39 @@ body {
     text-align: right;
 }
 
-.spend-compute,
-.donut-segment.spend-compute {
+.spend-compute {
     background: var(--color-category-compute);
     stroke: var(--color-category-compute);
 }
 
-.spend-storage,
-.donut-segment.spend-storage {
+.spend-storage {
     background: var(--color-category-storage);
     stroke: var(--color-category-storage);
 }
 
-.spend-networking,
-.donut-segment.spend-networking {
+.spend-networking {
     background: var(--color-category-networking);
     stroke: var(--color-category-networking);
 }
 
-.spend-databases,
-.donut-segment.spend-databases {
+.spend-databases {
     background: var(--color-category-databases);
     stroke: var(--color-category-databases);
 }
 
-.spend-ai-ml,
-.donut-segment.spend-ai-ml {
+.spend-ai-ml {
     background: var(--color-category-ai);
     stroke: var(--color-category-ai);
 }
 
-.spend-other,
-.donut-segment.spend-other {
+.spend-other {
     background: var(--color-category-other);
     stroke: var(--color-category-other);
 }
 
-.donut-layout {
-    min-height: 280px;
-    display: grid;
-    grid-template-columns: minmax(150px, .8fr) minmax(180px, 1fr);
-    align-items: center;
-    gap: 20px;
-    padding: 20px;
-}
-
-.donut-chart {
-    position: relative;
-    width: min(100%, 210px);
-    aspect-ratio: 1;
-    margin: 0 auto;
-}
-
-.donut-chart svg {
-    display: block;
-    width: 100%;
-    height: 100%;
-}
-
-.donut-track,
-.donut-segment {
-    fill: none;
-    stroke-width: 14;
-}
-
-.donut-track {
-    stroke: var(--color-carbon-lift);
-}
-
-.donut-segment {
-    transition: stroke-width .15s var(--ease-mechanical);
-}
-
-.donut-segment:hover {
-    stroke-width: 18;
-}
-
-.donut-chart>span {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-content: center;
-    text-align: center;
-    pointer-events: none;
-}
-
-.donut-chart>span strong {
-    color: var(--color-bone);
-    font-size: 34px;
-    font-weight: 400;
-    line-height: 1;
-}
-
-.donut-chart>span small {
-    color: var(--color-warm-granite);
-    font-family: var(--font-geist-mono);
-    font-size: 8px;
-    text-transform: uppercase;
-}
-
-.spend-legend {
-    display: grid;
-}
-
-.spend-legend>span {
-    min-width: 0;
-    display: grid;
-    grid-template-columns: 8px minmax(72px, 1fr) auto 40px;
-    align-items: center;
-    gap: 8px;
-    min-height: 34px;
-    border-bottom: 1px solid var(--color-carbon-lift);
-    font-size: 10px;
-}
-
-.spend-legend i,
 .tier-legend i {
     width: 8px;
     height: 8px;
-}
-
-.spend-legend b,
-.spend-legend strong {
-    overflow: hidden;
-    color: var(--color-pale-stone);
-    font-weight: 400;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.spend-legend strong,
-.spend-legend small {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-}
-
-.spend-legend small {
-    color: var(--color-warm-granite);
 }
 
 .monthly-chart-scroll {
@@ -6448,12 +6163,8 @@ body {
     .executive-report .executive-hero-grid {
         grid-template-columns: 1fr;
     }
-    .donut-layout,
     .storage-tier-comparison {
         grid-template-columns: 1fr;
-    }
-    .donut-layout {
-        padding-inline: 14px;
     }
     .executive-visual>header {
         align-items: flex-start;
@@ -7982,7 +7693,6 @@ body {
 }
 
 :root .pill,
-:root .category-pill,
 :root .evidence-badge,
 :root .live-badge,
 :root .data-freshness-badge,
@@ -7990,37 +7700,6 @@ body {
     border-radius: 999px;
     border-color: var(--glass-border);
     background: var(--glass-bg);
-}
-
-
-/* ---- Panels and left navigation ------------------------------------ */
-
-:root .left-nav-sidebar {
-    border-right-color: var(--glass-border);
-}
-
-:root .left-nav-group-label {
-    letter-spacing: var(--tracking-overline);
-    font-weight: var(--weight-semi);
-    color: var(--color-graphite-mid);
-}
-
-:root .left-nav-sidebar button {
-    border-radius: var(--radius-sm);
-    transition:
-        background-color var(--motion-duration) var(--ease-glass),
-        color var(--motion-duration) var(--ease-glass),
-        box-shadow var(--motion-duration) var(--ease-glass);
-}
-
-:root .left-nav-sidebar button:hover {
-    background: var(--glass-bg-strong);
-}
-
-:root .left-nav-sidebar button[aria-current='true'],
-:root .left-nav-sidebar button[aria-selected='true'] {
-    background: var(--color-accent-subtle);
-    box-shadow: inset 2px 0 0 var(--color-signal-orange);
 }
 
 
@@ -8096,7 +7775,6 @@ body {
 
 /* ---- Charts and visuals -------------------------------------------- */
 
-:root .donut-chart,
 :root .daily-line-chart,
 :root .monthly-chart,
 :root .region-map,
@@ -8211,35 +7889,6 @@ body {
     border-left: var(--border-width) solid var(--glass-border);
 }
 
-:root .app-shell .left-nav-sidebar {
-    padding: var(--space-4) var(--space-3);
-    background: transparent;
-}
-
-:root .app-shell .left-nav-group-toggle {
-    letter-spacing: var(--tracking-overline);
-    text-transform: uppercase;
-    color: var(--color-graphite-mid);
-}
-
-:root .app-shell :is(.left-nav-group button, .left-nav-children button) {
-    border-radius: var(--radius-sm);
-}
-
-:root .app-shell :is(.left-nav-group button:hover, .left-nav-children button:hover) {
-    background: var(--color-surface-hover);
-}
-
-:root .app-shell .left-nav-children button.active {
-    position: relative;
-    background: var(--color-accent-subtle);
-    box-shadow: inset 2px 0 0 var(--color-signal-orange);
-}
-
-:root .app-shell .left-nav-group button.active {
-    box-shadow: var(--shadow-sm);
-}
-
 
 /* Scope ribbon: kept flat, as the workspace intends, but closed with a hairline
    so the header block reads as one piece rather than stopping arbitrarily. */
@@ -8296,20 +7945,6 @@ body {
     color: var(--color-signal-orange);
     box-shadow: inset 0 0 0 1px var(--color-accent-line);
     font-weight: var(--weight-semi);
-}
-
-:root .app-shell .category-pill {
-    border-color: var(--glass-border);
-    background: var(--color-surface);
-}
-
-:root .app-shell .category-pill:hover {
-    border-color: var(--color-accent-line);
-    background: var(--color-surface-hover);
-}
-
-:root .app-shell .category-pill.active {
-    box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--color-signal-orange);
 }
 
 :root .app-shell .time-range-selector button[aria-pressed='true'],
@@ -8535,22 +8170,6 @@ body {
 }
 
 :root .app-shell .summary-tile-value {
-    font-variant-numeric: var(--nums);
-    letter-spacing: var(--tracking-heading);
-}
-
-:root .app-shell .category-pill {
-    padding: var(--space-1) var(--space-3);
-    gap: 0;
-    border-radius: var(--radius-sm);
-}
-
-:root .app-shell .category-pill>span:first-child {
-    font-size: var(--font-size-xs);
-    letter-spacing: var(--tracking-overline);
-}
-
-:root .app-shell .category-pill strong {
     font-variant-numeric: var(--nums);
     letter-spacing: var(--tracking-heading);
 }
@@ -8786,14 +8405,6 @@ body {
     pointer-events: none;
 }
 
-/* The nav rail is a different plane from the report it navigates, so
-   it sits on the canvas tint rather than on the content surface. */
-
-:root .app-shell .left-nav-sidebar {
-    background: color-mix(in srgb, var(--color-obsidian-canvas) 40%, transparent);
-    border-right: 1px solid var(--color-ash-stroke);
-}
-
 /* Cards read against the surface, not the canvas, so they need only a
    quiet edge - the separation is already carried by the frame. */
 
@@ -8930,20 +8541,6 @@ body {
 :root .app-shell button:disabled {
     opacity: .55;
     cursor: not-allowed;
-}
-
-/* Nav rail. The active page is marked by an accent edge rather than by
-   a filled block, so the rail stays quiet while you read the report. */
-
-:root .app-shell .left-nav-children button {
-    border-radius: var(--radius-sm);
-    transition:
-        background-color var(--motion-duration) var(--ease-glass),
-        color var(--motion-duration) var(--ease-glass);
-}
-
-:root .app-shell .left-nav-children button:hover:not(.active) {
-    background: var(--color-surface-hover);
 }
 
 /* Data cards lift off the surface, matching the frame's own language. */
@@ -9131,8 +8728,6 @@ body {
     font-size: var(--font-size-xs);
 }
 
-:root .app-shell.app-shell .donut-chart>span small,
-:root .app-shell.app-shell .spend-legend>span,
 :root .app-shell.app-shell :is(.monthly-column>strong, .monthly-column>span),
 :root .app-shell.app-shell .daily-line-chart-axis-labels span,
 :root .app-shell.app-shell .daily-trend-legend-item,
@@ -9141,25 +8736,10 @@ body {
     font-size: var(--font-size-xs);
 }
 
-/* Sized in em against a parent that was itself reduced, so it
-   compounded down to 8.3px. Pinned to the scale instead. */
-
-:root .app-shell.app-shell .spend-legend :is(small, b, strong) {
-    font-size: var(--font-size-xs);
-}
-
 /* A sentence of prose, not a caption - it takes the body size. */
 
 :root .app-shell.app-shell .visual-empty {
     font-size: var(--font-size-sm);
-}
-
-/* The one display figure in these panels; 34px is not a step on the
-   scale, 28px is. */
-
-:root .app-shell.app-shell .donut-chart>span strong {
-    font-size: var(--font-size-xl);
-    font-variant-numeric: var(--nums);
 }
 
 
@@ -9732,62 +9312,6 @@ body {
     font-weight: var(--weight-semi);
 }
 
-
-/* ================================================================
-   DESIGN SYSTEM — 2. Navigation
-   ----------------------------------------------------------------
-   The rail carried the loudest weight in the product (700) while
-   doing the quietest job, and its rows sat at 38px against a 32px
-   control ladder. Selection was also signalled three different ways
-   across the three navigations - a fill here, an inset bar there, a
-   ring on the top nav.
-
-   Settled: one selected language - accent text, a tinted ground and
-   a 2px leading marker - applied consistently, with weight used to
-   separate group headers from their children rather than to shout.
-   ---------------------------------------------------------------- */
-
-:root .app-shell.app-shell :is(.left-nav-children button, .left-nav-group button, .left-nav-group-toggle) {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    min-height: var(--control-md);
-    padding: 0 var(--space-3);
-    border-radius: var(--control-radius);
-    font-size: var(--font-size-sm);
-    font-weight: var(--weight-medium);
-    text-align: start;
-    transition:
-        background-color var(--press-duration) var(--press-ease),
-        color var(--press-duration) var(--press-ease);
-}
-
-/* Group headers are the only overline in the rail: smaller, tracked
-   out, and muted, so they read as labels rather than as options. */
-
-:root .app-shell.app-shell .left-nav-group-toggle {
-    justify-content: space-between;
-    gap: var(--space-2);
-    color: var(--color-graphite-mid);
-    font-size: var(--font-size-xs);
-    font-weight: var(--weight-semi);
-    letter-spacing: var(--tracking-overline);
-}
-
-:root .app-shell.app-shell :is(.left-nav-children button, .left-nav-group button):hover:not(.active) {
-    background: var(--color-surface-hover);
-    color: var(--color-bone);
-}
-
-/* One selected treatment, used everywhere a page is current. */
-
-:root .app-shell.app-shell :is(.left-nav-children button.active, .left-nav-group button.active) {
-    background: var(--color-accent-subtle);
-    color: var(--color-signal-orange);
-    font-weight: var(--weight-semi);
-    box-shadow: inset 2px 0 0 var(--color-signal-orange);
-}
-
 /* The top workspace nav is a segmented control, so it keeps its pill
    geometry but adopts the same selected colour language. */
 
@@ -9962,27 +9486,6 @@ body {
     line-height: 1.4;
 }
 
-/* The category chips are metrics too, not buttons, so they follow
-   the same ranking and stop competing with the command ladder. */
-
-:root .app-shell.app-shell .category-pill {
-    align-items: flex-start;
-    gap: 0;
-    padding: var(--space-2) var(--space-3);
-    text-align: start;
-}
-
-:root .app-shell.app-shell .category-pill>span:first-child {
-    color: var(--color-graphite-mid);
-    font-size: var(--font-size-xs);
-    font-weight: var(--weight-medium);
-}
-
-:root .app-shell.app-shell .category-pill strong {
-    font-variant-numeric: var(--nums);
-    font-weight: var(--weight-semi);
-}
-
 
 /* ================================================================
    DESIGN SYSTEM — 6. States
@@ -10062,7 +9565,7 @@ body {
     stroke: var(--color-ash-stroke);
 }
 
-:root .app-shell.app-shell :is(.cost-chart-legend, .daily-trend-legend, .spend-legend) {
+:root .app-shell.app-shell :is(.cost-chart-legend, .daily-trend-legend) {
     color: var(--color-graphite-mid);
     font-size: var(--font-size-xs);
 }
@@ -10974,9 +10477,8 @@ body {
 /* ================================================================
    Section headings — disclosure parity
    ----------------------------------------------------------------
-   "Explore costs and findings" and "Daily subscription amounts" are
-   top-level sections of the report, the same rank as "Subscription
-   cost comparison", but they were set at body size because they
+   "Daily subscription amounts" is a disclosure in the cost views.
+   It was set at body size because it
    happen to be rendered as a <summary> rather than an <h2>. Being a
    disclosure is a behaviour, not a demotion, so they now take the
    same size, weight and tracking as the heading they sit beside.
@@ -10986,19 +10488,11 @@ body {
    promoting it would flatten that distinction.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(.cost-analysis-details, .cost-daily-values)>summary {
+:root .app-shell.app-shell .cost-daily-values>summary {
     font-size: var(--font-size-lg);
     font-weight: var(--weight-semi);
     letter-spacing: var(--tracking-heading);
     color: var(--color-bone);
-}
-
-/* The caption beside the title stays a caption. */
-
-:root .app-shell.app-shell .cost-analysis-details>summary>span {
-    font-size: var(--font-size-xs);
-    font-weight: 400;
-    letter-spacing: normal;
 }
 
 /* The daily figures are a plain <details>, so they get the same
@@ -11178,13 +10672,6 @@ body {
     background: transparent;
 }
 
-/* Report details is a footnote to the overview, not a peer of it. */
-
-:root .app-shell.app-shell .dashboard-section-body>.report-evidence-details {
-    border-top: 0;
-    padding-top: 0;
-}
-
 :root .app-shell.app-shell .executive-hero-grid {
     gap: var(--space-3);
     margin: 0;
@@ -11202,7 +10689,6 @@ body {
         padding: var(--space-4);
     }
 }
-
 
 
 /* ==========================================================================
@@ -11480,11 +10966,6 @@ body {
 }
 
 /* --- Card: field affordance and a gradient primary ------------- */
-
-
-
-
-
 
 
 /* --- Trust line: the design pairs it with a progress cue -------- */
@@ -12010,27 +11491,6 @@ body {
     line-height: 1.2;
 }
 
-/* The category strip is navigation, so it reads as a row of controls
-   rather than a row of cards. */
-:root .app-shell.app-shell .category-pill-row {
-    padding: var(--space-1) var(--space-3);
-    gap: var(--space-1);
-}
-
-:root .app-shell.app-shell .category-pill {
-    padding: calc(3px * var(--ui-zoom)) var(--space-3);
-    line-height: 1.25;
-}
-
-:root .app-shell.app-shell .category-pill>span {
-    font-size: calc(9.5px * var(--ui-zoom));
-}
-
-:root .app-shell.app-shell .category-pill strong {
-    font-size: calc(13px * var(--ui-zoom));
-    line-height: 1.2;
-}
-
 /* Controls in the title and utility bands were sized for touch even on
    pointer devices, which is what kept those rows tall. */
 :root .app-shell.app-shell .dashboard-titlebar :is(select, button) {
@@ -12517,12 +11977,6 @@ body {
     border-bottom: var(--border-width) solid var(--color-ash-stroke);
 }
 
-:root .app-shell.app-shell .report-subnav .category-pill-row {
-    flex: 1;
-    min-width: 0;
-    border-bottom: 0;
-}
-
 :root .app-shell.app-shell .report-subnav .report-context-details {
     position: relative;
     flex: none;
@@ -12575,74 +12029,6 @@ body {
 
 
 /* ================================================================
-   Collapsible sidebar
-   ================================================================ */
-
-:root .app-shell.app-shell .left-nav-sidebar {
-    position: relative;
-}
-
-:root .app-shell.app-shell .left-nav-collapse {
-    position: absolute;
-    z-index: 2;
-    top: var(--space-2);
-    right: var(--space-2);
-    display: inline-grid;
-    place-items: center;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    border: var(--border-width) solid transparent;
-    border-radius: var(--radius-sm);
-    background: none;
-    color: var(--color-graphite-mid);
-    cursor: pointer;
-}
-
-:root .app-shell.app-shell .left-nav-collapse:hover {
-    border-color: var(--color-ash-stroke);
-    color: var(--color-bone);
-}
-
-/* Leave room for the toggle beside the page search. */
-:root .app-shell.app-shell .left-nav-sidebar:not(.is-collapsed) .report-nav-search {
-    margin-right: 30px;
-}
-
-@media (min-width: 1051px) {
-    :root .app-shell.app-shell .dashboard-frame:has(.left-nav-sidebar.is-collapsed) {
-        grid-template-columns: calc(52px * var(--ui-zoom)) minmax(0, 1fr);
-    }
-
-    :root .app-shell.app-shell .left-nav-sidebar.is-collapsed {
-        padding-top: calc(40px * var(--ui-zoom));
-    }
-
-    :root .app-shell.app-shell .left-nav-sidebar.is-collapsed .left-nav-collapse {
-        right: 50%;
-        transform: translateX(50%);
-    }
-
-    :root .app-shell.app-shell .left-nav-sidebar.is-collapsed :is(.report-nav-search, .left-nav-children, .report-nav-chevron, .left-nav-group-toggle>span, .report-nav-empty) {
-        display: none;
-    }
-
-    :root .app-shell.app-shell .left-nav-sidebar.is-collapsed .left-nav-group-toggle {
-        justify-content: center;
-        padding-inline: 0;
-    }
-}
-
-/* Below this width the sidebar is the mobile page menu; collapsing does not
-   apply there, so a remembered collapsed state cannot hide the menu. */
-@media (max-width: 1050px) {
-    :root .app-shell.app-shell .left-nav-collapse {
-        display: none;
-    }
-}
-
-
-/* ================================================================
    Minimum text size
    ----------------------------------------------------------------
    Successive compaction passes drove some labels to 9.5-10px, and the
@@ -12655,7 +12041,6 @@ body {
     .executive-hero .kpi-label,
     .billing-metrics>*>span:first-child,
     .scope-panel-title,
-    .category-pill>span,
     .completeness-stamp :is(span, small)
 ) {
     font-size: max(11px, calc(11px * var(--ui-zoom)));

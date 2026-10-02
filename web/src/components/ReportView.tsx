@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, Inbox, LayoutDashboard, LoaderCircle, Mail, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronDown, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, Inbox, LayoutDashboard, LoaderCircle, Mail, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
 import worldMapUrl from '@svg-maps/world/world.svg?url';
 import { CountUp } from './CountUp';
 import {
@@ -50,12 +50,12 @@ import type {
 import { CATEGORY_DISPLAY_NAMES } from '../findings/categories';
 import { SqlOptimization } from './SqlOptimization';
 import { BillingHistoryTab, HourlyCostPanel } from './BillingHistory';
-import { AICostAlerts, AnomalyOverview, useAnomalySummary, type AnomalyState } from './AnomalyOverview';
+import { AICostAlerts, useAnomalySummary, type AnomalyState } from './AnomalyOverview';
 import { billingDates, billingWindow } from '../report/billingHistory';
-import { CostExportButton, CostFilters, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, ResourceCostTable, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
+import { CostExportButton, CostFilters, CostWindowMetrics, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, ResourceCostTable, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
 import { costWindowDates, matchesCostFilter, monthCostWindow, presetCostWindow, previousCostWindow, sameTagKey, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
-import { BudgetContext, BudgetDailyChart, budgetTargetsTag, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
+import { BudgetContext, BudgetDailyChart, budgetDailySummary, budgetSummaryText, budgetTargetsTag, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
 import { buildTakeaways, ExecutiveTakeaways } from './ExecutiveTakeaways';
 import { ServiceRetirements } from './ServiceRetirements';
 import { DailyBarChart, DayAxis, dayAxis, useChartWidth } from './TrendChart';
@@ -331,104 +331,195 @@ function SubscriptionReferences({ subscriptions }: { subscriptions: Subscription
   );
 }
 
-// Persistent left-side navigation (overrides the earlier "top-only nav, no left
-// sidebar" decision per explicit ADO Task 781 instruction, comment 8538467, item 8).
-export function LeftNavSidebar({ activeTab, onSelect }: { activeTab: Tab; onSelect: (tab: Tab) => void }) {
-  /* Every group starts open: with two of six open, ten of the nineteen pages were hidden and the
-     rail's lower half was empty. A group the reader closes stays closed. */
+/* Report navigation is a left rail fixed beneath the app header: it stays put
+   while the report scrolls and runs from just below the logo to the bottom of
+   the window, scrolling on its own only if its pages do not fit. Every area
+   starts open; an area the reader closes stays closed until its own page is
+   opened. The rail collapses to icons, and below 900px it becomes one
+   "Report pages" menu above the report. */
+export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelect: (tab: Tab) => void }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<PrimaryNav>>(() => new Set(PRIMARY_NAV_ORDER));
   const [mobileOpen, setMobileOpen] = useState(false);
-  /* The sidebar held ~230px on every page but its menu ends about a third of
-     the way down. Collapsed, it keeps only the group icons and gives the
-     width to the report; the choice is remembered. */
   const [collapsed, setCollapsed] = useState(() => {
     try { return window.localStorage.getItem('mkai-nav-collapsed') === 'true'; } catch { return false; }
   });
-  useEffect(() => {
-    try { window.localStorage.setItem('mkai-nav-collapsed', String(collapsed)); } catch { /* storage unavailable */ }
-  }, [collapsed]);
   const [pageQuery, setPageQuery] = useState('');
+  const [placement, setPlacement] = useState<{ top: number; left: number } | null>(null);
+  const navRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const query = pageQuery.trim().toLocaleLowerCase();
   const groups = PRIMARY_NAV_ORDER.map((group) => ({
     group,
     pages: PRIMARY_NAV_TABS[group].filter((page) => !query || `${PRIMARY_NAV_LABELS[group]} ${page}`.toLocaleLowerCase().includes(query)),
   })).filter(({ pages }) => pages.length > 0);
+  const firstMatch = groups[0]?.pages[0];
+
+  useEffect(() => {
+    try { window.localStorage.setItem('mkai-nav-collapsed', String(collapsed)); } catch { /* storage unavailable */ }
+  }, [collapsed]);
+
   useEffect(() => {
     const activeGroup = PRIMARY_NAV_ORDER.find((group) => PRIMARY_NAV_TABS[group].includes(activeTab));
-    // Opening a page reveals its group, but does not reset the others.
     if (activeGroup) setExpandedGroups((current) => current.has(activeGroup) ? current : new Set([...current, activeGroup]));
   }, [activeTab]);
+
+  /* The rail is fixed to the viewport, so it is placed from the sticky header's
+     bottom edge and the workspace's left edge, and re-placed when either moves. */
+  useLayoutEffect(() => {
+    const header = document.querySelector<HTMLElement>('.app-header');
+    const workspace = navRef.current?.closest<HTMLElement>('#workspace-main') ?? navRef.current?.parentElement ?? null;
+    if (!header || !workspace) return;
+    let frame = 0;
+    const place = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const top = Math.max(0, Math.round(header.getBoundingClientRect().bottom));
+        const left = Math.round(workspace.getBoundingClientRect().left);
+        setPlacement((current) => current && current.top === top && current.left === left ? current : { top, left });
+      });
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(header);
+    observer?.observe(workspace);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!navRef.current?.contains(event.target as Node)) setMobileOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMobileOpen(false);
+      navRef.current?.querySelector<HTMLButtonElement>('.report-sidenav-mobile-toggle')?.focus();
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [mobileOpen]);
+
   function selectPage(page: Tab) {
     setPageQuery('');
     setMobileOpen(false);
     onSelect(page);
   }
+
+  function toggleGroup(group: PrimaryNav) {
+    if (collapsed) {
+      setCollapsed(false);
+      setExpandedGroups((current) => new Set([...current, group]));
+      return;
+    }
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }
+
   return (
-    <nav className={`left-nav-sidebar${mobileOpen ? ' is-open' : ''}${collapsed ? ' is-collapsed' : ''}`} aria-label="Report navigation">
-      <button type="button" className="left-nav-collapse" aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'} title={collapsed ? 'Expand navigation' : 'Collapse navigation'} aria-expanded={!collapsed} onClick={() => setCollapsed((value) => !value)}>
-        {collapsed ? <PanelLeftOpen size={16} aria-hidden="true" /> : <PanelLeftClose size={16} aria-hidden="true" />}
+    <nav
+      ref={navRef}
+      className={`report-sidenav${collapsed ? ' is-collapsed' : ''}${mobileOpen ? ' is-open' : ''}`}
+      aria-label="Report navigation"
+      style={placement ? { '--sidenav-top': `${placement.top}px`, '--sidenav-left': `${placement.left}px` } as React.CSSProperties : undefined}
+    >
+      <button
+        type="button"
+        className="report-sidenav-mobile-toggle"
+        aria-label="Report pages"
+        aria-expanded={mobileOpen}
+        aria-controls="report-sidenav-body"
+        onClick={() => setMobileOpen((open) => !open)}
+      >
+        <Menu size={18} aria-hidden="true" />
+        <span>{activeTab}</span>
+        <ChevronDown size={16} aria-hidden="true" />
       </button>
-      <button type="button" className="report-nav-mobile-toggle" aria-label="Report pages" aria-expanded={mobileOpen} aria-controls="report-nav-groups" onClick={() => setMobileOpen((open) => !open)}>
-        <Menu size={18} aria-hidden="true" /><span>{activeTab}</span><ChevronRight size={16} aria-hidden="true" />
-      </button>
-      <div id="report-nav-groups" className="report-nav-groups">
-        <div className="report-nav-search">
-          <Search size={16} aria-hidden="true" />
-          <input ref={searchRef} type="search" aria-label="Find a report page" placeholder="Find a page" value={pageQuery} onChange={(event) => setPageQuery(event.target.value)} onKeyDown={(event) => {
-            if (event.key === 'Escape') setPageQuery('');
-            if (event.key === 'Enter' && query && groups.length) { event.preventDefault(); selectPage(groups[0].pages[0]); }
-          }} />
-          {pageQuery && <button type="button" aria-label="Clear page search" title="Clear page search" onClick={() => { setPageQuery(''); searchRef.current?.focus(); }}><X size={14} aria-hidden="true" /></button>}
-        </div>
-        {groups.length === 0 && <p className="report-nav-empty" role="status">No matching pages</p>}
-      {groups.map(({ group, pages }) => {
-        const Icon = PRIMARY_NAV_ICONS[group];
-        return (
-        <div className="left-nav-group" key={group}>
-          <button
-            type="button"
-            className="left-nav-group-toggle"
-            aria-expanded={!!query || expandedGroups.has(group)}
-            aria-controls={`report-nav-${group}`}
-            disabled={!!query}
-            title={collapsed ? PRIMARY_NAV_LABELS[group] : undefined}
-            onClick={() => {
-              /* In the icon rail a group icon reopens the sidebar on that group. */
-              if (collapsed) {
-                setCollapsed(false);
-                setExpandedGroups((current) => new Set([...current, group]));
-                return;
-              }
-              setExpandedGroups((current) => {
-                const next = new Set(current);
-                if (next.has(group)) next.delete(group);
-                else next.add(group);
-                return next;
-              });
+      <div id="report-sidenav-body" className="report-sidenav-body">
+        <div className="report-sidenav-search">
+          <Search size={15} aria-hidden="true" />
+          <input
+            ref={searchRef}
+            type="search"
+            aria-label="Find a report page"
+            placeholder="Find a page"
+            value={pageQuery}
+            onChange={(event) => setPageQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') { event.stopPropagation(); setPageQuery(''); }
+              if (event.key === 'Enter' && query && firstMatch) { event.preventDefault(); selectPage(firstMatch); }
             }}
-          >
-            <Icon className="report-nav-group-icon" size={16} aria-hidden="true" />
-            <span>{PRIMARY_NAV_LABELS[group]}</span>
-            <ChevronRight className="report-nav-chevron" size={14} aria-hidden="true" />
-          </button>
-          <ul id={`report-nav-${group}`} className="left-nav-children" hidden={!query && !expandedGroups.has(group)}>
-            {pages.map((childTab) => (
-              <li key={childTab}>
+          />
+          {pageQuery && (
+            <button type="button" aria-label="Clear page search" title="Clear page search" onClick={() => { setPageQuery(''); searchRef.current?.focus(); }}>
+              <X size={14} aria-hidden="true" />
+            </button>
+          )}
+        </div>
+        <div className="report-sidenav-groups">
+          {groups.length === 0 && <p className="report-sidenav-empty" role="status">No matching pages</p>}
+          {groups.map(({ group, pages }) => {
+            const Icon = PRIMARY_NAV_ICONS[group];
+            const open = !!query || expandedGroups.has(group);
+            const current = PRIMARY_NAV_TABS[group].includes(activeTab);
+            return (
+              <section key={group} className="report-sidenav-group" data-current={current || undefined}>
                 <button
                   type="button"
-                  className={childTab === activeTab ? 'active' : ''}
-                  onClick={() => selectPage(childTab)}
-                  aria-current={childTab === activeTab ? 'page' : undefined}
+                  className="report-sidenav-group-toggle"
+                  aria-expanded={open}
+                  aria-controls={`report-sidenav-${group}`}
+                  disabled={!!query}
+                  title={collapsed ? PRIMARY_NAV_LABELS[group] : undefined}
+                  onClick={() => toggleGroup(group)}
                 >
-                  {childTab}
+                  <span className="report-sidenav-icon"><Icon size={16} aria-hidden="true" /></span>
+                  <span className="report-sidenav-label">{PRIMARY_NAV_LABELS[group]}</span>
+                  <ChevronDown className="report-sidenav-chevron" size={14} aria-hidden="true" />
                 </button>
-              </li>
-            ))}
-          </ul>
+                <ul id={`report-sidenav-${group}`} className="report-sidenav-pages" hidden={!open}>
+                  {pages.map((page) => (
+                    <li key={page}>
+                      <button
+                        type="button"
+                        aria-current={page === activeTab ? 'page' : undefined}
+                        title={page}
+                        onClick={() => selectPage(page)}
+                      >
+                        {page}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
         </div>
-        );
-      })}
+        <button
+          type="button"
+          className="report-sidenav-collapse"
+          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          aria-expanded={!collapsed}
+          onClick={() => setCollapsed((value) => !value)}
+        >
+          {collapsed ? <PanelLeftOpen size={16} aria-hidden="true" /> : <PanelLeftClose size={16} aria-hidden="true" />}
+          <span>Collapse</span>
+        </button>
       </div>
     </nav>
   );
@@ -483,65 +574,6 @@ function TopSummaryBar({ report, formatMoney }: { report: FullReport; formatMone
         <small>{reportDate(metadata.periodStart)} – {reportDate(metadata.periodEnd)}</small>
       </div>
     </div>
-  );
-}
-
-const CATEGORY_PILL_DOMAINS: { domain: string; label: string }[] = [
-  { domain: 'compute', label: 'Compute' },
-  { domain: 'storage', label: 'Storage' },
-  { domain: 'network', label: 'Networking' },
-  { domain: 'sql', label: 'Azure SQL' },
-  { domain: 'ai', label: 'AI & ML' },
-];
-
-// A persistent, clickable "spend by category" strip that jumps straight to the
-// matching domain tab — quick-glance nav that stays put regardless of the
-// active sidebar section.
-function CategorySpendPills({
-  report,
-  formatMoney,
-  activeTab,
-  onSelect,
-}: {
-  report: FullReport;
-  formatMoney: MoneyFormatter;
-  activeTab: Tab;
-  onSelect: (t: Tab) => void;
-}) {
-  const domainEntries = CATEGORY_PILL_DOMAINS.map(({ domain, label }) => ({
-    domain,
-    label,
-    tab: DOMAIN_TABS[domain],
-  }));
-  /* These are the optimisation areas, not a spend breakdown. Each domain's
-     spend is what that tab assesses (Compute = virtual machines), which is a
-     narrower set than the billing category of the same name - Container Apps
-     bills as compute but is not assessed by the Compute tab. Printing both
-     figures on one page produced "Compute $15" beside "Compute $313", so the
-     strip navigates and the spend-by-resource-type chart owns the numbers. */
-  return (
-    <nav className="category-pill-row" aria-label="Report areas">
-      <button
-        type="button"
-        aria-pressed={activeTab === 'Executive Summary'}
-        className={`category-pill ${activeTab === 'Executive Summary' ? 'active' : ''}`}
-        onClick={() => onSelect('Executive Summary')}
-      >
-        <span>Overview</span>
-        <strong>{formatMoney(report.executiveSummary.currentMonthlySpend)}</strong>
-      </button>
-      {domainEntries.map((item) => (
-        <button
-          key={item.domain}
-          type="button"
-          aria-pressed={activeTab === item.tab}
-          className={`category-pill category-pill-nav ${activeTab === item.tab ? 'active' : ''}`}
-          onClick={() => onSelect(item.tab)}
-        >
-          <span>{item.label}</span>
-        </button>
-      ))}
-    </nav>
   );
 }
 
@@ -667,7 +699,7 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
 
   return (
     <div className="dashboard-frame" data-report-page={tab}>
-      <LeftNavSidebar activeTab={tab} onSelect={selectTab} />
+      <ReportSideNav activeTab={tab} onSelect={selectTab} />
       <div className="dashboard-main">
       <div className="dashboard-titlebar">
         <div className="report-page-title">
@@ -676,6 +708,46 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
         </div>
         {/* The period badge ("2026-08") repeated the cost window's From/To,
             which sit directly above; removed so the dates appear once. */}
+        {/* Report context opens as a popover beside the page actions. */}
+      <div className="report-subnav">
+        <details className="report-context-details" aria-label="Report context">
+          <summary>
+            <span>Report context</span>
+            <span>{snapshotId ? 'Saved snapshot' : 'Unsaved assessment'} · {report.subscriptionBreakdown.length} subscription{report.subscriptionBreakdown.length === 1 ? '' : 's'}</span>
+            {exchangeError && <span className="context-warning">Exchange rates unavailable</span>}
+          </summary>
+          <div className="report-context-body">
+            <dl className="report-context-metadata">
+              <div><dt>Assessment completed</dt><dd>{new Date(snapshotCreatedAt ?? report.reportMetadata.generatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</dd></div>
+              <div><dt>Billing period</dt><dd>{reportDate(report.reportMetadata.periodStart)} - {reportDate(report.reportMetadata.periodEnd)}</dd></div>
+              <div><dt>Cost basis</dt><dd>{report.reportMetadata.costBasis} · {sourceCurrency}</dd></div>
+            </dl>
+            <div className={`currency-provenance ${exchangeError ? 'has-error' : ''}`} role="status" aria-live="polite">
+          {loadingExchangeRates && <span>Loading ECB reference rates</span>}
+          {!loadingExchangeRates && exchangeError && (
+            <span>{sourceCurrency} billing values shown · {exchangeError}</span>
+          )}
+          {!loadingExchangeRates && exchangeRates && (
+            <>
+              <span>
+                {displayCurrency === sourceCurrency
+                  ? `${sourceCurrency} billing currency · no conversion applied`
+                  : `1 ${sourceCurrency} = ${conversionRate.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${displayCurrency}`}
+              </span>
+              <span>{exchangeRates.provider} · {reportDate(exchangeRates.publishedDate)}{exchangeRates.stale ? ' · cached rate' : ''}</span>
+              <a href={exchangeRates.providerUrl} target="_blank" rel="noreferrer">
+                Indicative rate <ExternalLink size={12} aria-hidden="true" />
+              </a>
+            </>
+          )}
+            </div>
+            {/* On the Executive Summary the overview already carries these
+                figures directly beneath this disclosure, so repeating them here
+                only duplicated the page. Other tabs keep them as context. */}
+            {tab !== 'Executive Summary' && <TopSummaryBar report={report} formatMoney={formatMoney} />}
+          </div>
+        </details>
+      </div>
         <button
           className="focus-download-control"
           type="button"
@@ -747,57 +819,13 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           onClose={() => setShowCustomReportBuilder(false)}
         />
       )}
-      {/* Report context rides at the end of the area navigation instead of
-          taking a band of its own above it; it opens as a popover. */}
-      <div className="report-subnav">
-        <CategorySpendPills report={report} formatMoney={formatMoney} activeTab={tab} onSelect={selectTab} />
-        <details className="report-context-details" aria-label="Report context">
-          <summary>
-            <span>Report context</span>
-            <span>{snapshotId ? 'Saved snapshot' : 'Unsaved assessment'} · {report.subscriptionBreakdown.length} subscription{report.subscriptionBreakdown.length === 1 ? '' : 's'}</span>
-            {exchangeError && <span className="context-warning">Exchange rates unavailable</span>}
-          </summary>
-          <div className="report-context-body">
-            <dl className="report-context-metadata">
-              <div><dt>Assessment completed</dt><dd>{new Date(snapshotCreatedAt ?? report.reportMetadata.generatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</dd></div>
-              <div><dt>Billing period</dt><dd>{reportDate(report.reportMetadata.periodStart)} - {reportDate(report.reportMetadata.periodEnd)}</dd></div>
-              <div><dt>Cost basis</dt><dd>{report.reportMetadata.costBasis} · {sourceCurrency}</dd></div>
-            </dl>
-            <div className={`currency-provenance ${exchangeError ? 'has-error' : ''}`} role="status" aria-live="polite">
-          {loadingExchangeRates && <span>Loading ECB reference rates</span>}
-          {!loadingExchangeRates && exchangeError && (
-            <span>{sourceCurrency} billing values shown · {exchangeError}</span>
-          )}
-          {!loadingExchangeRates && exchangeRates && (
-            <>
-              <span>
-                {displayCurrency === sourceCurrency
-                  ? `${sourceCurrency} billing currency · no conversion applied`
-                  : `1 ${sourceCurrency} = ${conversionRate.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${displayCurrency}`}
-              </span>
-              <span>{exchangeRates.provider} · {reportDate(exchangeRates.publishedDate)}{exchangeRates.stale ? ' · cached rate' : ''}</span>
-              <a href={exchangeRates.providerUrl} target="_blank" rel="noreferrer">
-                Indicative rate <ExternalLink size={12} aria-hidden="true" />
-              </a>
-            </>
-          )}
-            </div>
-            {/* On the Executive Summary the overview already carries these
-                figures directly beneath this disclosure, so repeating them here
-                only duplicated the page. Other tabs keep them as context. */}
-            {tab !== 'Executive Summary' && <TopSummaryBar report={report} formatMoney={formatMoney} />}
-          </div>
-        </details>
-      </div>
       <div className="dashboard-body">
         <div className="tab-panel" key={tab}>
           {tab === 'Executive Summary' && (
             <ExecutiveSummaryTab
               report={report}
-              narrativeSummary={narration?.executive_summary}
               onOpenFinding={openFinding}
               formatMoney={formatMoney}
-              formatHourlyMoney={formatHourlyMoney}
               formatExactMoney={formatExactMoney}
               displayCurrency={displayCurrency}
               anomalyState={anomalyState}
@@ -1487,6 +1515,9 @@ function ReportSection({
   );
 }
 
+/* The executive summary is a page of many sections, so its comparison chart is drawn shorter than the 300px used where the chart is the whole subject. */
+const EXECUTIVE_CHART_HEIGHT = 160;
+
 /* A top-level, always-visible section of the dashboard. Distinct from
    ReportSection, which is the collapsible block used inside a section: this
    one names a phase of reading the report and never hides its contents.
@@ -1510,7 +1541,7 @@ function DashboardSection({
     <section className="dashboard-section" aria-labelledby={headingId} data-dashboard-section={id}>
       <header className="dashboard-section-header">
         <div className="dashboard-section-heading">
-          <h2 id={headingId}>{title}</h2>
+          <h2 id={headingId} tabIndex={-1}>{title}</h2>
           {caption && <p>{caption}</p>}
         </div>
         {aside && <div className="dashboard-section-aside">{aside}</div>}
@@ -1522,10 +1553,8 @@ function DashboardSection({
 
 function ExecutiveSummaryTab({
   report,
-  narrativeSummary,
   onOpenFinding,
   formatMoney,
-  formatHourlyMoney,
   formatExactMoney,
   displayCurrency,
   anomalyState,
@@ -1539,10 +1568,8 @@ function ExecutiveSummaryTab({
   onNavigate,
 }: {
   report: FullReport;
-  narrativeSummary?: string;
   onOpenFinding: (category: string) => void;
   formatMoney: MoneyFormatter;
-  formatHourlyMoney: MoneyFormatter;
   formatExactMoney: MoneyFormatter;
   displayCurrency: string;
   anomalyState: AnomalyState;
@@ -1559,8 +1586,6 @@ function ExecutiveSummaryTab({
   const metadata = report.reportMetadata;
   const completeness = report.completeness;
   /* One window for the whole page: the report-wide cost window. */
-  const rangeDays = costWindowDates(costWindow).length || 30;
-  const [costDetailsOpened, setCostDetailsOpened] = useState(true);
   const takeaways = useMemo(() => buildTakeaways({
     report,
     budgets: budgetState && !budgetState.loading && !budgetState.error
@@ -1574,6 +1599,14 @@ function ExecutiveSummaryTab({
      chart, so the day selection they drive is owned here and handed to the
      cost window instead of living inside it. */
   const [selectedDay, setSelectedDay] = useState<SelectedDay | null>(null);
+  function revealComparison(date: string, previousDate: string, subscriptionId: string) {
+    setSelectedDay({ date, previousDate, subscriptionId });
+    requestAnimationFrame(() => {
+      const heading = document.getElementById('dashboard-section-cost-comparison');
+      heading?.scrollIntoView({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
+      heading?.focus({ preventScroll: true });
+    });
+  }
   return (
     <div className="panel executive-report">
       <DashboardSection
@@ -1588,48 +1621,31 @@ function ExecutiveSummaryTab({
           </div>
         }
       >
-        <ExecutiveTakeaways
-          items={takeaways}
-          onNavigate={(target) => {
-            /* Budgets have their own section further down this page; the rest
-               are report areas of their own. */
-            if (target === 'Budgets') document.querySelector('[data-dashboard-section="budget-context"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            else onNavigate(target);
-          }}
-        />
         <div className="executive-hero">
-          <button type="button" className={`kpi-card kpi-link-card exec-primary ${s.spendChangePercentage === null || s.spendChangePercentage === 0 ? '' : s.spendChangePercentage > 0 ? 'cost-increase' : 'cost-decrease'}`.trim()} onClick={() => onNavigate('History')} aria-label="Open cost history">
-            <div className="kpi-label">Total monthly spend</div>
-            <div className="kpi-value"><CountUp value={s.currentMonthlySpend} format={formatMoney} /></div>
-            <div className="kpi-note">
-              {s.spendChangePercentage === null
-                ? `${completeness.availableSubscriptions} complete exports · comparison accrues next month`
-                : (
-                  <>
-                    <span className={`exec-delta ${s.spendChangePercentage >= 0 ? 'up' : 'down'}`}>
-                      {s.spendChangePercentage >= 0 ? '▲' : '▼'} {Math.abs(s.spendChangePercentage * 100).toFixed(1)}%
-                    </span>
-                    <span className="exec-delta-caption">vs previous complete month</span>
-                  </>
-                )}
-            </div>
-            <span className="kpi-card-link-label">Open history <ChevronRight size={14} aria-hidden="true" /></span>
-          </button>
-
-          <div className="executive-hero-money">
-            <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open stale and orphaned resources">
-              <div className="kpi-label">Estimated wastage</div>
+          <CostWindowMetrics
+            report={report}
+            window={costWindow}
+            filters={costFilters}
+            formatMoney={formatExactMoney}
+            onOpenAnomalies={onOpenAnomalies}
+            onOpenHistory={() => onNavigate('History')}
+            monthlyContext={s.spendChangePercentage === null
+              ? 'Monthly comparison accrues next month'
+              : <>{s.spendChangePercentage >= 0 ? '▲' : '▼'} {Math.abs(s.spendChangePercentage * 100).toFixed(1)}% vs previous complete month</>}
+          >
+            <button type="button" className={`kpi-card kpi-link-card ${s.estimatedWastageMonth > 0 ? 'risk' : 'neutral'}`} onClick={() => onNavigate('Stale Resources')} aria-label="Open stale and orphaned resources">
+              <div className="kpi-label"><span className="exec-metric-icon"><Gauge size={16} aria-hidden="true" /></span>Estimated wastage</div>
               <div className="kpi-value"><CountUp value={s.estimatedWastageMonth} format={formatMoney} /></div>
-              <div className="kpi-note">{percent(s.pctWastage)} of total · includes billed cost at risk</div>
-              <span className="kpi-card-link-label">Review waste <ChevronRight size={14} aria-hidden="true" /></span>
+              <div className="kpi-note">{percent(s.pctWastage)} of assessed month · billed cost at risk</div>
+              <span className="kpi-card-link-label" title="Review waste"><ChevronRight size={16} aria-hidden="true" /></span>
             </button>
             <button type="button" className="kpi-card kpi-link-card positive" onClick={() => onNavigate('Savings Roadmap')} aria-label="Open savings roadmap">
-              <div className="kpi-label">Potential savings</div>
+              <div className="kpi-label"><span className="exec-metric-icon"><TrendingDown size={16} aria-hidden="true" /></span>Potential savings</div>
               <div className="kpi-value"><CountUp value={s.potentialSavingsMonth} format={formatMoney} /></div>
-              <div className="kpi-note">{percent(s.pctRecoverable)} of total bill · estimated / month</div>
-              <span className="kpi-card-link-label">Open roadmap <ChevronRight size={14} aria-hidden="true" /></span>
+              <div className="kpi-note">{percent(s.pctRecoverable)} of assessed month · estimated / month</div>
+              <span className="kpi-card-link-label" title="Open roadmap"><ChevronRight size={16} aria-hidden="true" /></span>
             </button>
-          </div>
+          </CostWindowMetrics>
 
           <div className="executive-hero-context">
             <div className="kpi-card">
@@ -1637,12 +1653,12 @@ function ExecutiveSummaryTab({
               <div className="kpi-value">{s.activeResources.toLocaleString()}</div>
               <div className="kpi-note">Cost-bearing resources across {completeness.availableSubscriptions} subscriptions</div>
             </div>
-            <button type="button" className="kpi-card kpi-link-card risk" onClick={() => onNavigate('Stale Resources')} aria-label="Open confirmed idle resources">
+            <button type="button" className={`kpi-card kpi-link-card ${s.idleResources > 0 ? 'risk' : 'neutral'}`} onClick={() => onNavigate('Stale Resources')} aria-label="Open confirmed idle resources">
               <div className="kpi-label">{s.idleReviewCandidates == null ? 'Idle resources (legacy)' : 'Confirmed idle resources'}</div>
               <div className="kpi-value">{s.idleResources.toLocaleString()}</div>
               {s.idleReviewCandidates != null && <div className="kpi-note">{s.idleReviewCandidates.toLocaleString()} candidates require evidence or owner review</div>}
               <div className="kpi-note">{percent(s.idleResourcePercentage)} of assessed active + idle resources</div>
-              <span className="kpi-card-link-label">Review resources <ChevronRight size={14} aria-hidden="true" /></span>
+              <span className="kpi-card-link-label" title="Review resources"><ChevronRight size={16} aria-hidden="true" /></span>
             </button>
             <div className="kpi-card">
               <div className="kpi-label">Advisor score</div>
@@ -1656,16 +1672,10 @@ function ExecutiveSummaryTab({
           </div>
         </div>
 
-        <details className="overview-details report-evidence-details">
-          <summary>Report details <span>Source, integrity and narrative</span></summary>
-          <div className="executive-provenance">
-            <span><b>Period</b>{metadata.period}</span>
-            <span><b>Cost basis</b>{metadata.costBasis}</span>
-            <span><b>Source</b>{metadata.source}</span>
-            <span><b>Integrity</b>Completed runs + blob size verified</span>
-          </div>
-          {narrativeSummary && <div className="executive-narrative">{narrativeSummary}</div>}
-        </details>
+        <ExecutiveTakeaways
+          items={takeaways.filter((item) => item.key !== 'spend')}
+          onNavigate={onNavigate}
+        />
       </DashboardSection>
 
       <DashboardSection
@@ -1687,6 +1697,8 @@ function ExecutiveSummaryTab({
           showBudget={false}
           showDailyValues={false}
           showHeading={false}
+          showMetrics={false}
+          chartHeight={EXECUTIVE_CHART_HEIGHT}
           selectedDay={selectedDay}
           onSelectDay={setSelectedDay}
         />
@@ -1695,30 +1707,12 @@ function ExecutiveSummaryTab({
       <DashboardSection
         id="spend-distribution-overview"
         title="Spend Distribution"
-        caption="Where the money goes, by type, application, tag and region"
-        aside={<span className="dashboard-section-figure">{formatMoney(s.currentMonthlySpend)}</span>}
       >
-        <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} formatHourlyMoney={formatHourlyMoney} rangeDays={rangeDays} costWindow={costWindow} />
+        <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} />
       </DashboardSection>
 
-      <DashboardSection
-        id="insights-findings"
-        title="Insights & Findings"
-        caption="Anomalies, distribution and prioritised actions"
-      >
-        <AnomalyOverview state={anomalyState} onOpenDetails={onOpenAnomalies} formatMoney={formatMoney} />
-
-        <details className="overview-details cost-analysis-details" open onToggle={(event) => {
-          if (event.currentTarget.open) setCostDetailsOpened(true);
-        }}>
-      <summary>Explore costs and findings <span>Signals, services, subscriptions and prioritised findings</span></summary>
-      {costDetailsOpened && <>
-      {/* This block had its own analysis range and embedded the hourly panel
-          with its own filter row: a third time control and a second set of
-          filters on one page, and a third copy of the daily series. The page
-          window now drives everything, and hourly cost lives on its own tab. */}
-      <div className="report-section-stack">
-
+      <div className={`executive-evidence-grid${report.prioritizedFindings.length ? ' has-findings' : ''}`}>
+        <div className="executive-evidence-notes">
         {report.operationalSignals.length > 0 && (() => {
           /* The badge counted checks run, not issues found, so three clean
              checks read as "3 signals". A value that parses to zero is a
@@ -1729,12 +1723,10 @@ function ExecutiveSummaryTab({
             return !Number.isFinite(amount) || amount !== 0;
           });
           return (
-            <ReportSection
+            <DashboardSection
               id="operational-signals"
               title="Operational signals"
-              caption="Platform observations across the assessed estate"
-              defaultOpen={false}
-              meta={raised.length ? `${raised.length} ${raised.length === 1 ? 'signal' : 'signals'}` : 'All clear'}
+              aside={<span className="executive-section-count">{raised.length ? `${raised.length} ${raised.length === 1 ? 'signal' : 'signals'}` : 'All clear'}</span>}
             >
               {raised.length === 0 ? (
                 <p className="executive-signal-clear" role="status">
@@ -1751,88 +1743,16 @@ function ExecutiveSummaryTab({
                   ))}
                 </div>
               )}
-            </ReportSection>
+            </DashboardSection>
           );
         })()}
 
-        {report.topServices.length > 0 && (
-          <ReportSection
-            id="top-services"
-            title="Top Azure services"
-            caption="Ranked by closed-period spend"
-            defaultOpen={false}
-            meta={`${report.topServices.length} ${report.topServices.length === 1 ? 'service' : 'services'}`}
-          >
-            <div className="top-services" aria-label="Top Azure services by monthly spend">
-              {report.topServices.map((service) => (
-                <div className="top-service-row" key={service.serviceName}>
-                  <span className="top-service-rank">{String(service.rank).padStart(2, '0')}</span>
-                  <span className="top-service-name">
-                    <strong>{service.displayName}</strong>
-                    <small>{service.serviceName}</small>
-                  </span>
-                  <span className="top-service-bar" aria-hidden="true">
-                    <i style={{ width: `${Math.min(service.pctOfTotal * 100, 100)}%` }} />
-                  </span>
-                  <strong className="top-service-spend">{formatMoney(service.monthlySpend)}</strong>
-                  <span className="top-service-share">{percent(service.pctOfTotal)}</span>
-                </div>
-              ))}
-            </div>
-          </ReportSection>
-        )}
-
-        {/* With one subscription the table was a single row followed by an
-            identical Total row - it restated the headline and nothing else. */}
-        {report.subscriptionBreakdown.length > 1 && (
-        <ReportSection
-          id="subscriptions"
-          title="Subscriptions"
-          caption="Spend against verified saving"
-          defaultOpen={false}
-          meta={`${report.subscriptionBreakdown.length} subscriptions`}
-        >
-          <div className="executive-table-scroll">
-            <table className="report-table executive-subscription-table">
-              <thead>
-                <tr>
-                  <th>Subscription</th>
-                  <th className="num">Effective spend ({displayCurrency})</th>
-                  <th className="num">Verified saving ({displayCurrency})</th>
-                  <th className="num">% recoverable</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.subscriptionBreakdown.map((row) => (
-                  <tr key={row.subscriptionId}>
-                    <td>{row.subscriptionName}</td>
-                    <td className="num">{formatMoney(row.currentSpend)}</td>
-                    <td className="num positive-text">{formatMoney(row.totalWaste)}</td>
-                    <td className="num">{percent(row.pctSaved)}</td>
-                  </tr>
-                ))}
-                <tr className="executive-total-row">
-                  <td>Total</td>
-                  <td className="num">{formatMoney(s.currentMonthlySpend)}</td>
-                  <td className="num">{formatMoney(s.potentialSavingsMonth)}</td>
-                  <td className="num">{percent(s.pctRecoverable)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </ReportSection>
-        )}
-
-        <ReportSection
+        <DashboardSection
           id="prioritised-findings"
           title="Prioritised findings"
-          caption="Ranked by monthly impact"
-          defaultOpen={false}
-          meta={report.prioritizedFindings.length === 0 ? 'None' : `${report.prioritizedFindings.length} ${report.prioritizedFindings.length === 1 ? 'finding' : 'findings'}`}
+          aside={report.prioritizedFindings.length > 0 ? <span className="executive-section-count">{report.prioritizedFindings.length} {report.prioritizedFindings.length === 1 ? 'finding' : 'findings'}</span> : undefined}
         >
           {report.prioritizedFindings.length === 0 ? (
-            /* An empty table with five column headers read as a failed load;
-               the statement stands on its own. */
             <p className="executive-signal-clear" role="status">No prioritised findings in this snapshot. Review coverage and domain evidence before concluding that no action is needed.</p>
           ) : (
           <div className="executive-table-scroll">
@@ -1871,17 +1791,81 @@ function ExecutiveSummaryTab({
             </table>
           </div>
           )}
-        </ReportSection>
+        </DashboardSection>
+        </div>
+
+        {report.topServices.length > 0 && (
+          <DashboardSection
+            id="top-services"
+            title="Top Azure services"
+            aside={<span className="executive-section-count">{report.topServices.length} {report.topServices.length === 1 ? 'service' : 'services'}</span>}
+          >
+            <div className="top-services" aria-label="Top Azure services by monthly spend">
+              {report.topServices.map((service) => (
+                <div className="top-service-row" key={service.serviceName}>
+                  <span className="top-service-rank">{String(service.rank).padStart(2, '0')}</span>
+                  <span className="top-service-name">
+                    <strong>{service.displayName}</strong>
+                    <small>{service.serviceName}</small>
+                  </span>
+                  <span className="top-service-bar" aria-hidden="true">
+                    <i style={{ width: `${Math.min(service.pctOfTotal * 100, 100)}%` }} />
+                  </span>
+                  <strong className="top-service-spend">{formatMoney(service.monthlySpend)}</strong>
+                  <span className="top-service-share">{percent(service.pctOfTotal)}</span>
+                </div>
+              ))}
+            </div>
+          </DashboardSection>
+        )}
+
+        {/* With one subscription the table was a single row followed by an
+            identical Total row - it restated the headline and nothing else. */}
+        {report.subscriptionBreakdown.length > 1 && (
+        <DashboardSection
+          id="subscriptions"
+          title="Subscriptions"
+          caption="Spend against verified saving"
+          aside={<span className="executive-section-count">{report.subscriptionBreakdown.length} subscriptions</span>}
+        >
+          <div className="executive-table-scroll">
+            <table className="report-table executive-subscription-table">
+              <thead>
+                <tr>
+                  <th>Subscription</th>
+                  <th className="num">Effective spend ({displayCurrency})</th>
+                  <th className="num">Verified saving ({displayCurrency})</th>
+                  <th className="num">% recoverable</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.subscriptionBreakdown.map((row) => (
+                  <tr key={row.subscriptionId}>
+                    <td>{row.subscriptionName}</td>
+                    <td className="num">{formatMoney(row.currentSpend)}</td>
+                    <td className="num positive-text">{formatMoney(row.totalWaste)}</td>
+                    <td className="num">{percent(row.pctSaved)}</td>
+                  </tr>
+                ))}
+                <tr className="executive-total-row">
+                  <td>Total</td>
+                  <td className="num">{formatMoney(s.currentMonthlySpend)}</td>
+                  <td className="num">{formatMoney(s.potentialSavingsMonth)}</td>
+                  <td className="num">{percent(s.pctRecoverable)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </DashboardSection>
+        )}
+
       </div>
-      </>}
-      </details>
-      </DashboardSection>
 
       {budgetState && (
         <DashboardSection
           id="budget-context"
           title="Budget Context"
-          caption="Native Azure budgets against the assessed scope"
+          caption="Azure budgets · current budget cycle"
           aside={
             <button
               type="button"
@@ -1902,15 +1886,14 @@ function ExecutiveSummaryTab({
       <DashboardSection
         id="daily-breakdown"
         title="Daily Cost Breakdown"
-        caption="Per-day figures behind the comparison"
       >
         <DailySubscriptionValues
           details={report.costDetails}
           window={costWindow}
           filters={costFilters}
           formatMoney={formatExactMoney}
-          collapsible={false}
-          onSelectDay={(date, previousDate, subscriptionId) => setSelectedDay({ date, previousDate, subscriptionId })}
+          onSelectDay={revealComparison}
+          defaultOpen
         />
       </DashboardSection>
     </div>
@@ -1919,62 +1902,6 @@ function ExecutiveSummaryTab({
 
 const SPEND_CATEGORY_ORDER = ['Compute', 'Storage', 'Networking', 'Databases', 'AI/ML', 'Other'];
 const spendCategoryClass = (category: string) => `spend-${category.toLowerCase().replaceAll('/', '-').replaceAll(' ', '-')}`;
-
-function SpendCategoryDonut({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
-  const categories = report.spendCategories.filter((item) => item.monthlySpend > 0);
-  const total = categories.reduce((sum, item) => sum + item.monthlySpend, 0);
-  const radius = 48;
-  const circumference = 2 * Math.PI * radius;
-  let cumulative = 0;
-  const segments = categories.map((item) => {
-    const share = total > 0 ? item.monthlySpend / total : 0;
-    const segment = { ...item, share, offset: cumulative };
-    cumulative += share;
-    return segment;
-  });
-  return (
-    <section className="executive-visual executive-donut-panel">
-      <header><span>Spend by resource type</span><strong>{formatMoney(total)}</strong></header>
-      {total > 0 ? (
-        <div className="donut-layout">
-          <div className="donut-chart">
-            <svg viewBox="0 0 120 120" role="img" aria-label="Spend by resource type donut chart">
-              <circle className="donut-track" cx="60" cy="60" r={radius} />
-              {segments.map((segment) => (
-                <circle
-                  className={`donut-segment ${spendCategoryClass(segment.category)}`}
-                  cx="60"
-                  cy="60"
-                  r={radius}
-                  key={segment.category}
-                  strokeDasharray={`${segment.share * circumference} ${circumference}`}
-                  strokeDashoffset={-segment.offset * circumference}
-                  transform="rotate(-90 60 60)"
-                >
-                  <title>{segment.category}: {formatMoney(segment.monthlySpend)} ({percent(segment.pctOfTotal)})</title>
-                </circle>
-              ))}
-            </svg>
-            <span><strong>{categories.length}</strong><small>cost groups</small></span>
-          </div>
-          <div className="spend-legend">
-            {SPEND_CATEGORY_ORDER.map((category) => {
-              const item = report.spendCategories.find((value) => value.category === category);
-              return (
-                <span key={category}>
-                  <i className={spendCategoryClass(category)} />
-                  <b>{category}</b>
-                  <strong>{formatMoney(item?.monthlySpend ?? 0)}</strong>
-                  <small>{percent(item?.pctOfTotal ?? 0)}</small>
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      ) : <p className="visual-empty">No positive resource-type spend is available.</p>}
-    </section>
-  );
-}
 
 function MonthlySpendChart({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
   const months = report.spendHistory.months;
@@ -2162,17 +2089,16 @@ function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMon
   );
 }
 
-function ExecutiveSpendVisuals({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter; formatHourlyMoney: MoneyFormatter; rangeDays: number; costWindow: CostWindow }) {
-  /* Four views of where the money goes, in a balanced two-by-two. The daily
-     per-tag trend repeated the comparison chart below it, and the tag-set
-     donut was 87% one slice; both belong with tag analysis and now live on
-     the Cost by Tags page, while the untagged share is stated as a takeaway. */
+function ExecutiveSpendVisuals({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
   return (
-    <div className="executive-visual-grid">
-      <SpendCategoryDonut report={report} formatMoney={formatMoney} />
-      <MonthlySpendChart report={report} formatMoney={formatMoney} />
-      <CostTreemap report={report} formatMoney={formatMoney} />
-      <RegionSpendMap report={report} formatMoney={formatMoney} />
+    <div className="executive-distribution">
+      <div className="executive-trend">
+        <MonthlySpendChart report={report} formatMoney={formatMoney} />
+      </div>
+      <div className="executive-visual-grid">
+        <CostTreemap report={report} formatMoney={formatMoney} />
+        <RegionSpendMap report={report} formatMoney={formatMoney} />
+      </div>
     </div>
   );
 }
@@ -3838,21 +3764,24 @@ function CostByTagsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionMade, report.costDetails, JSON.stringify(scopedFilters), costWindow.startDate, costWindow.endDate]);
   const selectionTotal = selectionValues.reduce<number>((sum, value) => sum + (value ?? 0), 0);
-  /* Picking a day on a budget chart asks "what did this application run that
-     day", so the answer is resource-level and stays inside the selection. */
-  const [budgetDay, setBudgetDay] = useState<{ key: string; date: string } | null>(null);
-  /* The same question asked of the application's own graph: the day picked there, whether or
-     not any budget tracks this application. */
+  /* Picking a day on the application's graph lists what it ran that day,
+     whether or not any budget tracks this application. */
   const [selectionDay, setSelectionDay] = useState<string | null>(null);
   useEffect(() => {
-    setBudgetDay(null);
     setSelectionDay(null);
   }, [selectedKey, activeValue, costWindow.startDate, costWindow.endDate]);
   const selectionDayTotal = selectionDay === null ? null : selectionValues[selectionDates.indexOf(selectionDay)] ?? null;
-  const budgetCard = ({ budget, relation }: { budget: Budget; relation: string }) => {
+  /* One graph per application: a budget adds its even daily share to that graph
+     (when it is the only budget) and its figures to a card, never a second chart. */
+  const budgetSummaries = allocatedBudgets.map(({ budget }) => budgetDailySummary(budget, report.costDetails, costWindow, scopedFilters));
+  const graphBudget = allocatedBudgets.length === 1 && budgetSummaries[0].allowance !== null ? allocatedBudgets[0].budget : null;
+  const graphReference = graphBudget && budgetSummaries[0].allowance !== null
+    ? { value: budgetSummaries[0].allowance, label: `${graphBudget.name}: even daily share of ${graphBudget.currency} ${graphBudget.amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}` }
+    : null;
+  const budgetCard = ({ budget, relation }: { budget: Budget; relation: string }, index: number) => {
     const status = budgetThreshold(budget);
     const key = `${budget.subscriptionId}:${budget.name}`;
-    const selectedDay = budgetDay?.key === key ? budgetDay.date : null;
+    const summary = budgetSummaries[index];
     const native = (value: number | null) => value === null ? 'Unavailable' : `${budget.currency} ${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
     return (
       <article className="tag-budget-card" key={key}>
@@ -3864,33 +3793,8 @@ function CostByTagsTab({
             commonly carry a budget of the same name, and without it they read
             as one budget listed twice. */}
         <p className="billing-provenance">{subscriptionNames.get(budget.subscriptionId.toLowerCase()) ?? budget.subscriptionId} · {relation} · {budget.timeGrain} · {native(budget.currentSpend)} of {native(budget.amount)} reported by Azure for the current cycle.</p>
-        <BudgetDailyChart
-          budget={budget}
-          details={report.costDetails}
-          window={costWindow}
-          formatMoney={formatMoney}
-          filters={scopedFilters}
-          scopeLabel={scopeLabel}
-          selectedDate={selectedDay}
-          onSelectDate={report.costDetails?.status === 'complete'
-            ? (date) => setBudgetDay((value) => value?.key === key && value.date === date ? null : { key, date })
-            : undefined}
-        />
-        {selectedDay && report.costDetails?.status === 'complete' && (
-          <section className="budget-day-drilldown" aria-label={`Resource costs on ${selectedDay} for ${budget.name}`}>
-            <header className="cost-section-heading">
-              <h4>{reportDate(selectedDay)} · {scopeLabel}</h4>
-              <button type="button" className="ghost-button" onClick={() => setBudgetDay(null)} aria-label="Close budget day details">Close</button>
-            </header>
-            <ResourceCostTable
-              details={report.costDetails}
-              window={{ startDate: selectedDay, endDate: selectedDay }}
-              previous={previousCostWindow({ startDate: selectedDay, endDate: selectedDay })}
-              filters={{ ...scopedFilters, subscriptionId: budget.subscriptionId }}
-              formatMoney={formatHourlyMoney}
-              snapshotId={snapshotId}
-            />
-          </section>
+        {report.costDetails?.status === 'complete' && summary.observedDays > 0 && (
+          <p className="billing-provenance">{budgetSummaryText(budget, summary, formatMoney, scopeLabel)}</p>
         )}
       </article>
     );
@@ -4013,6 +3917,7 @@ function CostByTagsTab({
               emptyMessage={`No daily cost evidence covers ${scopeLabel} in the selected period.`}
               selectedDate={selectionDay}
               onSelectDate={(date) => setSelectionDay((value) => value === date ? null : date)}
+              reference={graphReference}
             />
           ) : (
             <p className="section-subtitle">Daily cost detail is not available in this report.</p>
