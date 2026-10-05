@@ -1622,11 +1622,16 @@
     padding: var(--space-4) 0;
 }
 
-.app-shell .schedule-editor input {
+.app-shell .schedule-editor input,
+.app-shell .schedule-editor select {
     background: var(--color-surface);
     font-family: var(--font-geist);
     font-size: var(--font-size-sm);
     min-height: var(--touch-height);
+}
+
+.app-shell .schedule-editor .schedule-daily-toggle input {
+    min-height: 0;
 }
 
 .app-shell :is(.primary-command, .outline-command, .icon-command, .schedule-actions button, .budget-form button, .budget-actions button, .ghost-button) {
@@ -1705,6 +1710,13 @@
         width: 100%;
         margin-top: var(--space-3);
     }
+}
+
+/* At most two periods: last month's late charges (days 1-5) and this month through yesterday. */
+.app-shell .daily-progress {
+    grid-template-columns: repeat(2, minmax(6.5rem, max-content));
+    column-gap: var(--space-3);
+    min-width: 0;
 }
 
 .app-shell .schedule-editor {

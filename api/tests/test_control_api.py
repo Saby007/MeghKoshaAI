@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 import httpx
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 os.environ.setdefault("AI_PROJECT_ENDPOINT", "https://example.test/api/projects/test")
 os.environ.setdefault("AZURE_TENANT_ID", "11111111-1111-1111-1111-111111111111")
@@ -308,10 +309,11 @@ def test_create_uses_server_verified_subscription_not_client_metadata(monkeypatc
         assert subscription_ids == [_SUBSCRIPTION_ID]
         return [{"subscriptionId": _SUBSCRIPTION_ID, "displayName": "Verified name"}]
 
-    async def create(subscription, actor, schedule_start):
+    async def create(subscription, actor, schedule_start, window_months, *, daily_enabled, daily_time):
         assert subscription == {"subscriptionId": _SUBSCRIPTION_ID, "displayName": "Verified name"}
         assert actor == "22222222-2222-2222-2222-222222222222"
         assert schedule_start == "2030-09-05T03:00:00Z"
+        assert window_months == 6 and daily_enabled is True and daily_time == "06:00"
         return {"windowMonths": 6}
 
     monkeypatch.setattr(main.user_arm_client, "discover_schedule_subscriptions", verified)
@@ -319,3 +321,37 @@ def test_create_uses_server_verified_subscription_not_client_metadata(monkeypatc
     result = asyncio.run(main.create_schedule(FakeRequest(), main.ScheduleCreateRequest(
         subscriptionId=_SUBSCRIPTION_ID, scheduleStartAt="2030-09-05T03:00:00Z")))
     assert result == {"windowMonths": 6}
+
+
+def test_schedule_requests_forward_a_supported_window_and_reject_others(monkeypatch):
+    calls = []
+
+    async def verified(principal, subscription_ids, probe_cost=True):
+        return [{"subscriptionId": _SUBSCRIPTION_ID, "displayName": "Verified name"}]
+
+    async def create(subscription, actor, schedule_start, window_months, *, daily_enabled, daily_time):
+        calls.append(("create", window_months, daily_enabled, daily_time))
+        return {"windowMonths": window_months}
+
+    async def update(subscription, actor, state, schedule_start, window_months, *, daily_enabled, daily_time):
+        calls.append(("update", window_months, daily_enabled, daily_time))
+        return {"windowMonths": window_months}
+
+    monkeypatch.setattr(main.user_arm_client, "discover_schedule_subscriptions", verified)
+    monkeypatch.setattr(main.focus_schedules, "create", create)
+    monkeypatch.setattr(main.focus_schedules, "update", update)
+    asyncio.run(main.create_schedule(FakeRequest(), main.ScheduleCreateRequest(
+        subscriptionId=_SUBSCRIPTION_ID, scheduleStartAt="2030-09-05T03:00:00Z", windowMonths=4, dailyTimeUtc="04:30")))
+    asyncio.run(main.update_schedule(FakeRequest(), _SUBSCRIPTION_ID, main.ScheduleStateRequest(state="paused", windowMonths=3, dailyEnabled=False)))
+    asyncio.run(main.update_schedule(FakeRequest(), _SUBSCRIPTION_ID, main.ScheduleStateRequest(state="active")))
+    assert calls == [("create", 4, True, "04:30"), ("update", 3, False, None), ("update", None, None, None)]
+    for window in (2, 7, 12):
+        with pytest.raises(ValidationError):
+            main.ScheduleCreateRequest(subscriptionId=_SUBSCRIPTION_ID, scheduleStartAt="2030-09-05T03:00:00Z", windowMonths=window)
+        with pytest.raises(ValidationError):
+            main.ScheduleStateRequest(state="active", windowMonths=window)
+    for daily_time in ("24:00", "6:00", "06:60", "06:00Z"):
+        with pytest.raises(ValidationError):
+            main.ScheduleCreateRequest(subscriptionId=_SUBSCRIPTION_ID, scheduleStartAt="2030-09-05T03:00:00Z", dailyTimeUtc=daily_time)
+        with pytest.raises(ValidationError):
+            main.ScheduleStateRequest(state="active", dailyTimeUtc=daily_time)

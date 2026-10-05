@@ -11,13 +11,18 @@
       3. Creates the azd environment and applies the recommended `ai` profile settings.
       4. Previews the infrastructure, then runs `azd up` until the deployment settles, retrying
          the known transient Foundry/image-handoff/ACR conditions with a wait in between.
-      5. Enables the scheduled six-month processor using the image azd built for the API.
+      5. Enables the scheduled export processor using the image azd built for the API.
       6. Runs scripts/bootstrap-identity.ps1, feeds the two client IDs back into the environment,
          and redeploys so the app gets a real Microsoft sign-in screen.
       7. Grants Reader / Cost Management Contributor on every subscription you want to assess.
 
     Every phase is idempotent and re-entrant: rerunning the script against an existing environment
     only repeats the `azd up` calls that still have work to do, so a failed run can simply be rerun.
+
+    The run never waits on a question you cannot see. azd's output is captured so known transient
+    errors can be recognised and retried, so every azd command runs with --no-prompt. Anything that
+    genuinely needs an answer - a question azd asks, or the Service Tree ID some tenants require on
+    app registrations - is asked in this terminal instead.
 
 .PARAMETER EnvironmentName
     azd environment name. Lowercase letters, digits and hyphens only - it is also used to name the
@@ -50,6 +55,11 @@
     One or more subscriptions to assess, as separate values or a single comma-separated string,
     for example -TargetSubscriptionId '1111...,2222...'. Defaults to the subscription you deploy into.
 
+.PARAMETER ServiceManagementReference
+    Service Tree ID put on the two sign-in app registrations, for tenants that refuse registrations
+    without one. When it is omitted and the tenant asks for one, the script asks in the terminal and
+    offers the ID your existing registrations use. The answer is kept in the azd environment for reruns.
+
 .EXAMPLE
     pwsh ./scripts/deploy-end-to-end.ps1 -EnvironmentName my-environment -TargetSubscriptionId 'sub-a,sub-b'
 
@@ -70,6 +80,8 @@ param(
     [string] $FoundryLocation = 'eastus2',
     [string] $SubscriptionId = '',
     [string[]] $TargetSubscriptionId = @(),
+    [ValidatePattern('^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$')]
+    [string] $ServiceManagementReference = '',
     [string] $RepoUrl = 'https://github.com/Saby007/MeghKoshaAI.git',
     [string] $RepoDirectory = '',
     [ValidateRange(1, 10)]
@@ -112,6 +124,10 @@ $settings = [ordered]@{
 # A registry that denies public access cannot be reached by azd's remote build, so those runs
 # provision only and the images are built separately on the registry's own in-VNet agent pool.
 $deployVerb = if ($PrivateRegistry) { 'provision' } else { 'up' }
+# azd's output is captured to classify failures, which would also hide any question azd asked, so azd
+# always runs with --no-prompt. These are the errors it reports when it needed an answer instead; the
+# command is then rerun attached to the terminal so the question can be answered there.
+$azdNeedsInput = 'prompting (for|to) |interactive mode required|missing required inputs|no default response'
 # The availability gate checks exactly what Bicep will deploy, so the approved model, version and
 # SKU are read back out of APP_MODEL_DEPLOYMENTS rather than repeated as literals here.
 $requiredModels = @($modelRouter | ConvertFrom-Json)
@@ -150,6 +166,7 @@ if ($PlanOnly) {
         preview = -not $SkipPreview
         enableProcessor = -not $SkipProcessor
         bootstrapIdentity = -not $SkipIdentityBootstrap
+        serviceManagementReference = $ServiceManagementReference
         assessedSubscriptions = $subscriptionIds
         maxAttempts = $MaxAttempts
         settleSeconds = $SettleSeconds
@@ -182,7 +199,7 @@ function Wait-Settle {
 
 function Get-AzdValue {
     param([Parameter(Mandatory)][string] $Name)
-    $value = & azd env get-value --environment $EnvironmentName $Name 2>$null
+    $value = & azd env get-value --environment $EnvironmentName $Name --no-prompt 2>$null
     if ($LASTEXITCODE -ne 0) { return '' }
     $text = Get-CliText $value
     # azd prints the literal string "ERROR: ..." for keys the environment has never held.
@@ -192,7 +209,7 @@ function Get-AzdValue {
 
 function Set-AzdValue {
     param([Parameter(Mandatory)][string] $Name, [Parameter(Mandatory)][AllowEmptyString()][string] $Value)
-    & azd env set --environment $EnvironmentName $Name $Value | Out-Null
+    & azd env set --environment $EnvironmentName $Name $Value --no-prompt | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Unable to set $Name in azd environment '$EnvironmentName'." }
 }
 
@@ -286,6 +303,9 @@ function Wait-ActiveDeployment {
     for ($attempt = 1; $attempt -le 40; $attempt++) {
         $active = Get-CliText (& az deployment group list --resource-group $resourceGroup @subscriptionArgs --query "[?properties.provisioningState=='Running' || properties.provisioningState=='Accepted'].name" --output tsv --only-show-errors 2>$null)
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($active)) { return }
+        if ($attempt % 4 -eq 1) {
+            Write-Host "  Waiting for the earlier Azure deployment to finish ($(($attempt - 1) / 4) min so far, up to 10)..." -ForegroundColor DarkGray
+        }
         Start-Sleep -Seconds 15
     }
     Write-Warning 'A previous deployment is still running on Azure; continuing anyway.'
@@ -300,23 +320,48 @@ function Wait-BuildAgentPool {
     for ($attempt = 1; $attempt -le 40; $attempt++) {
         $state = Get-CliText (& az acr agentpool show --registry $registry --name 'build-agents' @subscriptionArgs --query provisioningState --output tsv --only-show-errors 2>$null)
         if ($LASTEXITCODE -eq 0 -and $state -and $state -notin @('Creating', 'Updating')) { return }
+        if ($attempt % 4 -eq 1) {
+            Write-Host "  Waiting for build agent pool 'build-agents' to finish provisioning ($(($attempt - 1) / 4) min so far, up to 10)..." -ForegroundColor DarkGray
+        }
         Start-Sleep -Seconds 15
     }
     Write-Warning 'Timed out waiting for the build agent pool to finish provisioning; continuing anyway.'
+}
+
+function Invoke-AzdCaptured {
+    # Echoes azd's output and returns it, so failures can be classified. A question asked into captured
+    # output would never be seen, so azd may not ask one here.
+    param([Parameter(Mandatory)][string[]] $Arguments)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    & azd @Arguments --environment $EnvironmentName --no-prompt 2>&1 | ForEach-Object {
+        $line = $_.ToString()
+        $lines.Add($line)
+        Write-Host $line
+    }
+    return ($lines -join "`n")
+}
+
+function Invoke-AzdInTerminal {
+    # Reruns an azd command that stopped because it needed an answer, attached to this terminal so its
+    # question is shown and can be answered here. Call it as a statement: capturing its output would
+    # hide the question again.
+    param([Parameter(Mandatory)][string[]] $Arguments)
+    Write-Host ''
+    Write-Host "azd needs an answer to continue. Running 'azd $($Arguments -join ' ')' in this terminal - answer its question below." -ForegroundColor Yellow
+    & azd @Arguments --environment $EnvironmentName
 }
 
 function Invoke-AzdUp {
     param([Parameter(Mandatory)][string] $Reason)
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         Write-Step "azd $deployVerb - $Reason (attempt $attempt of $MaxAttempts)"
-        $lines = [System.Collections.Generic.List[string]]::new()
-        & azd $deployVerb --environment $EnvironmentName 2>&1 | ForEach-Object {
-            $line = $_.ToString()
-            $lines.Add($line)
-            Write-Host $line
-        }
+        Write-Host 'This can take several minutes; azd reports each resource as it finishes.' -ForegroundColor DarkGray
+        $text = Invoke-AzdCaptured @($deployVerb)
         if ($LASTEXITCODE -eq 0) { return }
-        $text = $lines -join "`n"
+        if ($text -match $azdNeedsInput) {
+            Invoke-AzdInTerminal @($deployVerb)
+            if ($LASTEXITCODE -eq 0) { return }
+        }
         # Region, SKU and policy refusals are decisions, not races: every retry reproduces them
         # exactly, so retrying only delays the report and wastes the remaining attempts.
         if ($text -match 'LocationNotAvailableForResourceType|SkuNotAvailable|LocationNotAvailable|RequestDisallowedByPolicy|InvalidTemplateDeployment.*not available in the current region') {
@@ -458,6 +503,31 @@ function Add-RoleAssignment {
     return $false
 }
 
+function Read-ServiceTreeId {
+    # Some tenants (Microsoft's among them) refuse new app registrations without a Service Tree ID.
+    # The ID the signed-in user's own registrations already carry is offered, so Enter accepts it.
+    $used = @((Get-CliText (& az ad app list --show-mine --query '[?serviceManagementReference].serviceManagementReference' --output tsv --only-show-errors 2>$null)) -split "`n" |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $suggested = ''
+    if ($used.Count) { $suggested = (@($used | Group-Object -NoElement | Sort-Object Count -Descending))[0].Name }
+    Write-Host ''
+    Write-Host 'This tenant requires a Service Tree ID (serviceManagementReference) on new app registrations.' -ForegroundColor Yellow
+    if ($suggested) { Write-Host "Your existing app registrations use $suggested - press Enter to use it." }
+    $prompt = if ($suggested) { "Service Tree ID [$suggested]" } else { 'Service Tree ID' }
+    for ($try = 1; $try -le 3; $try++) {
+        try {
+            $answer = "$(Read-Host $prompt)".Trim()
+        } catch {
+            throw 'This tenant requires a Service Tree ID for the sign-in app registrations, and this session cannot ask for one. Rerun with -ServiceManagementReference <id>.'
+        }
+        if (-not $answer) { $answer = $suggested }
+        $parsed = [guid]::Empty
+        if ([guid]::TryParse($answer, [ref] $parsed)) { return $parsed.ToString() }
+        Write-Warning "'$answer' is not a Service Tree ID. It is a GUID, for example 00000000-0000-0000-0000-000000000000."
+    }
+    throw 'No valid Service Tree ID was entered. Rerun with -ServiceManagementReference <id>.'
+}
+
 # ---------------------------------------------------------------------------
 # 1. Prerequisites and repository
 # ---------------------------------------------------------------------------
@@ -492,6 +562,10 @@ if (Test-Path -LiteralPath (Join-Path $repoRoot 'azure.yaml')) {
 $repoRoot = (Resolve-Path -LiteralPath $repoRoot).Path
 
 $deployed = $null
+# A missing az extension would otherwise be offered through a yes/no question that the captured az
+# calls below never show, so it installs without asking for the duration of the run.
+$previousDynamicInstall = $env:AZURE_EXTENSION_USE_DYNAMIC_INSTALL
+$env:AZURE_EXTENSION_USE_DYNAMIC_INSTALL = 'yes_without_prompt'
 Push-Location -LiteralPath $repoRoot
 try {
     # -----------------------------------------------------------------------
@@ -503,7 +577,8 @@ try {
         Write-Step 'Signing in'
         & azd auth login --check-status | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            & azd auth login | Out-Host
+            # Not piped: the sign-in instructions must reach the terminal as azd prints them.
+            & azd auth login
             if ($LASTEXITCODE -ne 0) { throw 'azd auth login failed.' }
         }
         & az account show --output none --only-show-errors 2>$null
@@ -533,7 +608,7 @@ try {
     # 3. Environment and settings
     # -----------------------------------------------------------------------
     Write-Step "Preparing azd environment '$EnvironmentName'"
-    $environmentList = Get-CliText (& azd env list --output json 2>$null)
+    $environmentList = Get-CliText (& azd env list --output json --no-prompt 2>$null)
     if ($LASTEXITCODE -ne 0) { throw 'Unable to list azd environments.' }
     $environments = @()
     if (-not [string]::IsNullOrWhiteSpace($environmentList)) { $environments = @($environmentList | ConvertFrom-Json) }
@@ -541,11 +616,14 @@ try {
         $null -ne $_ -and $null -ne $_.PSObject.Properties['Name'] -and $_.Name -eq $EnvironmentName
     }).Count -gt 0
     if ($environmentExists) {
-        & azd env select $EnvironmentName | Out-Null
+        & azd env select $EnvironmentName --no-prompt | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Unable to select azd environment '$EnvironmentName'." }
         Write-Host "Reusing the existing environment '$EnvironmentName'."
     } else {
-        & azd env new $EnvironmentName --location $Location --subscription $deploymentSubscription | Out-Host
+        # Without --no-prompt azd asks whether the new environment should become the default, and that
+        # question never reaches the terminal through the pipe. It becomes the default either way, the
+        # same as selecting an existing one.
+        & azd env new $EnvironmentName --location $Location --subscription $deploymentSubscription --no-prompt | Out-Host
         if ($LASTEXITCODE -ne 0) { throw "Unable to create azd environment '$EnvironmentName'." }
     }
     # azd otherwise stops mid-deployment to prompt for these interactively, which strands an
@@ -571,7 +649,8 @@ try {
         Write-Step 'Skipping the infrastructure preview (-SkipPreview)'
     } else {
         Write-Step 'Previewing the infrastructure (azd provision --preview)'
-        & azd provision --environment $EnvironmentName --preview | Out-Host
+        $previewText = Invoke-AzdCaptured @('provision', '--preview')
+        if ($LASTEXITCODE -ne 0 -and $previewText -match $azdNeedsInput) { Invoke-AzdInTerminal @('provision', '--preview') }
         if ($LASTEXITCODE -ne 0) { throw 'Infrastructure preview failed. Nothing was deployed.' }
     }
 
@@ -612,7 +691,7 @@ try {
     if ($SkipProcessor) {
         Write-Step 'Skipping the scheduled processor (-SkipProcessor)'
     } else {
-        Write-Step 'Enabling the scheduled six-month processor'
+        Write-Step 'Enabling the scheduled export processor'
         $processorEnabled = Get-AzdValue 'APP_ENABLE_PROCESSOR'
         $processorImage = Get-AzdValue 'SERVICE_PROCESSOR_IMAGE_NAME'
         Set-AzdValue 'APP_ENABLE_PROCESSOR' 'true'
@@ -661,15 +740,27 @@ try {
         if ($IncludeLocalhostRedirects) { $parameters.IncludeLocalhostRedirects = $true }
         if ($GrantAdminConsent) { $parameters.GrantAdminConsent = $true }
 
+        $serviceTreeId = if ($ServiceManagementReference) { $ServiceManagementReference } else { Get-AzdValue 'APP_SERVICE_MANAGEMENT_REFERENCE' }
         $hadApproval = Test-Path Env:APP_ALLOW_AZURE_CHANGES
         $previousApproval = [Environment]::GetEnvironmentVariable('APP_ALLOW_AZURE_CHANGES', 'Process')
         try {
             $env:APP_ALLOW_AZURE_CHANGES = 'true'
-            $bootstrapOutput = & $bootstrap @parameters
+            for ($pass = 1; $pass -le 2; $pass++) {
+                if ($serviceTreeId) { $parameters.ServiceManagementReference = $serviceTreeId }
+                try {
+                    $bootstrapOutput = & $bootstrap @parameters
+                    break
+                } catch {
+                    # A missing Service Tree ID is the one refusal the operator can answer here.
+                    if ($pass -eq 2 -or $serviceTreeId -or "$($_.Exception.Message) $_" -notmatch 'serviceManagementReference') { throw }
+                    $serviceTreeId = Read-ServiceTreeId
+                }
+            }
         } finally {
             if ($hadApproval) { [Environment]::SetEnvironmentVariable('APP_ALLOW_AZURE_CHANGES', $previousApproval, 'Process') }
             else { Remove-Item Env:APP_ALLOW_AZURE_CHANGES -ErrorAction SilentlyContinue }
         }
+        if ($serviceTreeId) { Set-AzdValue 'APP_SERVICE_MANAGEMENT_REFERENCE' $serviceTreeId }
         $identity = Get-CliText $bootstrapOutput | ConvertFrom-Json -AsHashtable
         if ($null -eq $identity -or -not $identity.ContainsKey('MEGHKOSHA_API_CLIENT_ID') -or -not $identity.ContainsKey('MEGHKOSHA_WEB_CLIENT_ID')) {
             throw 'bootstrap-identity.ps1 did not report the API and SPA client IDs.'
@@ -768,6 +859,7 @@ try {
     }
 } finally {
     Pop-Location
+    $env:AZURE_EXTENSION_USE_DYNAMIC_INSTALL = $previousDynamicInstall
 }
 
 $deployed | ConvertTo-Json -Depth 5

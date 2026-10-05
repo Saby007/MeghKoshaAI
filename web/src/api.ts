@@ -21,33 +21,64 @@ export type CostAgentOutput = { executive_summary: string; prioritized_findings:
 export type ScheduleState = 'active' | 'paused' | 'not_scheduled' | 'unknown';
 export type ScheduleMonthStatus = 'pending' | 'submitting' | 'queued' | 'running' | 'succeeded' | 'failed';
 export type ScheduleMonth = { period: string; status: ScheduleMonthStatus };
+// Anomaly detection needs 60 complete days, so three closed months is the shortest window.
+export type ScheduleWindowMonths = 3 | 4 | 5 | 6;
+export const SCHEDULE_WINDOW_MONTHS: readonly ScheduleWindowMonths[] = [3, 4, 5, 6];
+export const isScheduleWindow = (value: unknown): value is ScheduleWindowMonths =>
+  SCHEDULE_WINDOW_MONTHS.includes(value as ScheduleWindowMonths);
 export type ScheduleRun = {
   runId: string;
   subscriptionId: string;
   period: string;
+  // "full" re-pulls the whole window (Export); "close" pulls only months without a finalized copy.
+  kind?: 'full' | 'close';
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'unknown';
   startedAt: string | null;
   completedAt: string | null;
   durationSeconds: number | null;
   error: string | null;
   completedMonths?: number;
-  windowMonths?: 6;
+  windowMonths?: ScheduleWindowMonths;
   months?: ScheduleMonth[];
 };
+export type DailyPullStatus = 'idle' | 'running' | 'succeeded' | 'failed' | 'unavailable';
+export type ScheduleDailyRun = { start: string; end: string; status: ScheduleMonthStatus };
+export type ScheduleDailyPull = {
+  enabled: boolean;
+  timeUtc: string;
+  status: DailyPullStatus;
+  dataThrough: string | null;
+  lastRunAt: string | null;
+  error: string | null;
+  // The UTC day the latest pull ran for, the periods it refreshed, and when the worker starts the next one.
+  day?: string | null;
+  completedAt?: string | null;
+  nextRunAt?: string | null;
+  runs?: ScheduleDailyRun[];
+};
+export const DAILY_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+export const DEFAULT_DAILY_TIME = '06:00';
 export type CostSchedule = {
   subscriptionId: string;
   displayName: string;
   readAccess?: boolean;
   costAccess?: boolean;
   accessCheckMode?: 'permissions' | 'live';
-  windowMonths?: 6;
+  windowMonths?: ScheduleWindowMonths;
   state: ScheduleState;
   recurrence: string;
   scheduleStartAt: string | null;
   nextRunAt: string | null;
   latestRun: ScheduleRun | null;
+  daily?: ScheduleDailyPull | null;
   availability?: 'available' | 'access_unavailable' | 'configuration_unavailable' | 'export_unavailable' | 'history_unavailable';
   statusMessage?: string | null;
+};
+export type FocusDailyExportConfiguration = {
+  exportName: string;
+  rootFolderPath: string;
+  state: 'missing' | 'configured';
+  canConfigure: boolean;
 };
 export type FocusExportConfiguration = {
   subscriptionId: string;
@@ -63,6 +94,7 @@ export type FocusExportConfiguration = {
   destinationRoleScope: string;
   state: 'missing' | 'configured';
   canConfigure: boolean;
+  daily?: FocusDailyExportConfiguration;
 };
 export type ExchangeRates = {
   baseCurrency: string;
@@ -335,17 +367,46 @@ export function deleteBudget(subscriptionId: string, name: string): Promise<void
   });
 }
 
+const DAILY_PULL_STATUSES: readonly DailyPullStatus[] = ['idle', 'running', 'succeeded', 'failed', 'unavailable'];
+const MONTH_STATUSES: readonly ScheduleMonthStatus[] = ['pending', 'submitting', 'queued', 'running', 'succeeded', 'failed'];
+const isIsoDay = (value: unknown): value is string =>
+  typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+const isOptionalTimestamp = (value: unknown): boolean =>
+  value === undefined || value === null || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
+
+// Each period starts on the 1st and ends within the same month: last month in full, or this month to yesterday.
+function isDailyRun(run: ScheduleDailyRun): boolean {
+  return !!run && typeof run === 'object' && isIsoDay(run.start) && isIsoDay(run.end) && run.start.endsWith('-01')
+    && run.start.slice(0, 7) === run.end.slice(0, 7) && run.start <= run.end && MONTH_STATUSES.includes(run.status);
+}
+
+function isDailyPull(value: ScheduleDailyPull): boolean {
+  return !!value && typeof value === 'object' && typeof value.enabled === 'boolean'
+    && typeof value.timeUtc === 'string' && DAILY_TIME_PATTERN.test(value.timeUtc)
+    && DAILY_PULL_STATUSES.includes(value.status)
+    && (value.dataThrough === null || (typeof value.dataThrough === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.dataThrough)))
+    && (value.lastRunAt === null || typeof value.lastRunAt === 'string')
+    && (value.error === null || typeof value.error === 'string')
+    && (value.day === undefined || value.day === null || isIsoDay(value.day))
+    && isOptionalTimestamp(value.completedAt) && isOptionalTimestamp(value.nextRunAt)
+    && (value.runs === undefined || (Array.isArray(value.runs) && value.runs.length <= 2 && value.runs.every(isDailyRun)
+      && new Set(value.runs.map((run) => run.start)).size === value.runs.length));
+}
+
 export async function listCostSchedules(signal?: AbortSignal): Promise<CostSchedule[]> {
   const schedules = await apiRequest<CostSchedule[]>('/api/schedules', { signal, cache: 'no-store' });
   if (!Array.isArray(schedules) || schedules.some((item) => !item || typeof item.subscriptionId !== 'string'
     || typeof item.displayName !== 'string' || typeof item.readAccess !== 'boolean' || typeof item.costAccess !== 'boolean'
-    || (item.latestRun?.months !== undefined && (item.latestRun.months.length !== 6
-      || new Set(item.latestRun.months.map((month) => month.period)).size !== 6
+    // A close cycle may pull fewer months than its window, but never more and never duplicates.
+    || (item.latestRun?.months !== undefined && (!isScheduleWindow(item.latestRun.windowMonths)
+      || item.latestRun.months.length < 1 || item.latestRun.months.length > item.latestRun.windowMonths
+      || new Set(item.latestRun.months.map((month) => month.period)).size !== item.latestRun.months.length
       || item.latestRun.months.some((month) => !/^\d{4}-(0[1-9]|1[0-2])$/.test(month.period)
         || !['pending', 'submitting', 'queued', 'running', 'succeeded', 'failed'].includes(month.status))))
-    || item.windowMonths !== 6 || ((item.readAccess !== true || item.costAccess !== true)
+    || (item.daily !== undefined && item.daily !== null && !isDailyPull(item.daily))
+    || !isScheduleWindow(item.windowMonths) || ((item.readAccess !== true || item.costAccess !== true)
       && (item.state !== 'unknown' || item.availability !== 'access_unavailable'
-        || typeof item.statusMessage !== 'string' || !item.statusMessage.trim()
+        || typeof item.statusMessage !== 'string' || !item.statusMessage.trim() || (item.daily !== undefined && item.daily !== null)
         || item.latestRun !== null || item.nextRunAt !== null || item.scheduleStartAt !== null)))) {
     throw new ApiRequestError('Schedule access or readiness information is missing from the subscription response.', 502);
   }
@@ -360,7 +421,12 @@ function validateExportConfiguration(value: FocusExportConfiguration, subscripti
   }) || value.rootFolderPath !== `focus/${subscriptionId}` || value.windowMonths !== 6
     || value.format !== 'Csv' || value.nativeSchedule !== 'Inactive' || value.destinationRole !== 'Storage Blob Data Contributor'
     || value.destinationRoleScope !== `${value.storageResourceId}/blobServices/default/containers/${value.container}`
-    || !((value.state === 'missing' && value.canConfigure === true) || (value.state === 'configured' && value.canConfigure === false))) {
+    || !((value.state === 'missing' && value.canConfigure === true) || (value.state === 'configured' && value.canConfigure === false))
+    || (value.daily !== undefined && (!value.daily || typeof value.daily.exportName !== 'string' || !value.daily.exportName.trim()
+      || value.daily.exportName.length > 2048 || value.daily.exportName === value.exportName
+      || value.daily.rootFolderPath !== `focus-daily/${subscriptionId}`
+      || !((value.daily.state === 'missing' && value.daily.canConfigure === true)
+        || (value.daily.state === 'configured' && value.daily.canConfigure === false))))) {
     throw new ApiRequestError('The export configuration response could not be verified for this subscription.', 502);
   }
 }
@@ -377,16 +443,23 @@ export async function configureCostExport(subscriptionId: string, allowDestinati
     method: 'PUT', cache: 'no-store', signal, body: JSON.stringify({ allowDestinationRoleAssignment }),
   });
   validateExportConfiguration(value, subscriptionId);
-  if (value.state !== 'configured' || typeof value.created !== 'boolean') {
+  if (value.state !== 'configured' || (value.daily !== undefined && value.daily.state !== 'configured') || typeof value.created !== 'boolean') {
     throw new ApiRequestError('Export configuration could not be confirmed. Refresh its status before trying again.', 502);
   }
   return value;
 }
 
-export function createCostSchedule(subscriptionId: string, scheduleStartAt: string): Promise<CostSchedule> {
+export type DailyPullSettings = { enabled: boolean; timeUtc: string };
+
+export function createCostSchedule(
+  subscriptionId: string,
+  scheduleStartAt: string,
+  windowMonths: ScheduleWindowMonths,
+  daily?: DailyPullSettings,
+): Promise<CostSchedule> {
   return apiRequest('/api/schedules', {
     method: 'POST',
-    body: JSON.stringify({ subscriptionId, scheduleStartAt }),
+    body: JSON.stringify({ subscriptionId, scheduleStartAt, windowMonths, dailyEnabled: daily?.enabled, dailyTimeUtc: daily?.timeUtc }),
   });
 }
 
@@ -394,10 +467,12 @@ export function setCostScheduleState(
   subscriptionId: string,
   state: Extract<ScheduleState, 'active' | 'paused'>,
   scheduleStartAt?: string,
+  windowMonths?: ScheduleWindowMonths,
+  daily?: DailyPullSettings,
 ): Promise<CostSchedule> {
   return apiRequest(`/api/schedules/${subscriptionId}`, {
     method: 'PATCH',
-    body: JSON.stringify({ state, scheduleStartAt }),
+    body: JSON.stringify({ state, scheduleStartAt, windowMonths, dailyEnabled: daily?.enabled, dailyTimeUtc: daily?.timeUtc }),
   });
 }
 

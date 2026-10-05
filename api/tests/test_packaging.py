@@ -510,6 +510,29 @@ def test_compiled_data_ai_and_processor_do_not_add_queues_or_implicit_credential
     assert job["properties"]["configuration"]["scheduleTriggerConfig"]["parallelism"] == 1
 
 
+def test_compiled_storage_expires_daily_snapshots_sooner_than_closed_months(compiled_profiles):
+    parameters, template = compiled_profiles["data"]
+    values = {name: item["value"] for name, item in parameters["parameters"].items()}
+    assert values["dailyExportRetentionDays"] == 60 and values["closedMonthRetentionDays"] == 214
+    assert values["processorSchedule"] == "*/5 * * * *" and values["exportParallelMonths"] == 1
+    modules = resource_map(template)
+    data = list(resource_map(modules["data"]["properties"]["template"]).values())
+    policy = next(resource for resource in data if resource["type"] == "Microsoft.Storage/storageAccounts/managementPolicies")
+    rules = {rule["name"]: rule["definition"] for rule in policy["properties"]["policy"]["rules"]}
+    assert rules["focus-daily-snapshots"]["filters"]["prefixMatch"] == ["cost-exports/focus-daily/"]
+    assert rules["focus-closed-months"]["filters"]["prefixMatch"] == ["cost-exports/focus/"]
+    assert "parameters('dailyExportRetentionDays')" in rules["focus-daily-snapshots"]["actions"]
+    assert "parameters('closedMonthRetentionDays')" in rules["focus-closed-months"]["actions"]
+    api_environment = {item["name"]: item["value"] for item in modules["apps"]["properties"]["parameters"]["apiEnvironment"]["value"]}
+    assert api_environment["COST_EXPORT_DAILY_NAME"] == "[variables('dailyExportName')]"
+    assert api_environment["FOCUS_EXPORT_PARALLEL_MONTHS"] == "[string(parameters('exportParallelMonths'))]"
+    processor = list(resource_map(modules["processor"]["properties"]["template"]).values())
+    job = next(resource for resource in processor if resource["type"] == "Microsoft.App/jobs")
+    environment = {item["name"]: item["value"] for item in job["properties"]["template"]["containers"][0]["env"]}
+    assert environment["COST_EXPORT_DAILY_NAME"] == "[parameters('dailyExportName')]"
+    assert environment["FOCUS_EXPORT_PARALLEL_MONTHS"] == "[string(parameters('exportParallelMonths'))]"
+
+
 def test_operational_model_router_template_only_targets_the_existing_account_child():
     compiler = shutil.which("bicep") or str(Path.home() / ".azure" / "bin" / "bicep.exe")
     if not Path(compiler).is_file():

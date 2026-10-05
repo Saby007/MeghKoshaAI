@@ -5,6 +5,9 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-z0-9][a-z0-9-]{0,63}$')][string] $EnvironmentName,
     [Parameter(Mandatory)][uri] $WebOrigin,
     [Parameter(Mandatory)][string] $OboManagedIdentityResourceId,
+    # Service Tree ID for tenants that refuse new app registrations without one.
+    [ValidatePattern('^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$')]
+    [string] $ServiceManagementReference = '',
     [switch] $IncludeLocalhostRedirects,
     [switch] $GrantAdminConsent,
     [switch] $Apply
@@ -36,6 +39,7 @@ $plan = [ordered]@{
     environmentName = $EnvironmentName
     registrations = @($apiName, $webName)
     ownershipTag = $ownershipTag
+    serviceManagementReference = $(if ($ServiceManagementReference) { $ServiceManagementReference } else { $null })
     callbacks = $callbacks
     managedIdentityResourceId = $OboManagedIdentityResourceId
     delegatedPermissions = @('SPA -> API: access_as_user', 'API -> Azure Resource Manager: user_impersonation')
@@ -82,6 +86,10 @@ function Invoke-IdentityGraph([string] $Path, [string] $Method = 'GET', [object]
     } catch [Microsoft.PowerShell.Commands.HttpResponseException] {
         if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::Forbidden) {
             throw "Microsoft Graph $Method $($uri.AbsolutePath) was denied (HTTP 403). Completed setup is retained; check Entra permissions and rerun with an authorized administrator. No client-secret fallback was created."
+        }
+        $details = if ($_.ErrorDetails) { $_.ErrorDetails.Message } else { '' }
+        if ($details -match 'ServiceManagementReference') {
+            throw "Microsoft Graph $Method $($uri.AbsolutePath) was refused because this tenant requires a Service Tree ID (serviceManagementReference) on new app registrations. Rerun with -ServiceManagementReference <id>."
         }
         throw
     }
@@ -224,9 +232,9 @@ try {
         if (@($web.spa.redirectUris | Where-Object { $_ -notin $callbacks }).Count) { throw 'Unexpected SPA callbacks require explicit migration, not silent replacement.' }
     }
     if (-not $api) {
-        $api = Invoke-IdentityGraph 'applications' 'POST' @{
-            displayName = $apiName; signInAudience = 'AzureADMyOrg'; tags = @($ownershipTag); isFallbackPublicClient = $false
-        }
+        $apiRegistration = @{ displayName = $apiName; signInAudience = 'AzureADMyOrg'; tags = @($ownershipTag); isFallbackPublicClient = $false }
+        if ($ServiceManagementReference) { $apiRegistration.serviceManagementReference = $ServiceManagementReference }
+        $api = Invoke-IdentityGraph 'applications' 'POST' $apiRegistration
     }
     $scopes = @($api.api.oauth2PermissionScopes | Where-Object { $_.value -eq 'access_as_user' })
     if ($scopes.Count -gt 1) { throw 'Duplicate API scopes require operator review.' }
@@ -260,6 +268,7 @@ try {
         $webConfiguration.signInAudience = 'AzureADMyOrg'
         $webConfiguration.tags = @($ownershipTag)
         $webConfiguration.isFallbackPublicClient = $false
+        if ($ServiceManagementReference) { $webConfiguration.serviceManagementReference = $ServiceManagementReference }
         $web = Invoke-IdentityGraph 'applications' 'POST' $webConfiguration
     } else {
         Invoke-IdentityGraph "applications/$($web.id)" 'PATCH' $webConfiguration | Out-Null

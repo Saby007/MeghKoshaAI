@@ -57,6 +57,7 @@ def build_cost_details(
         status="complete",
         statusMessage="Complete daily FOCUS EffectiveCost, including credits and unattributed charges. Hourly amounts are daily averages, not metered hourly cost or uptime.",
         dates=dates,
+        partialPeriod=history.partial_period,
         rows=[
             CostDetailRow(
                 **dimensions,

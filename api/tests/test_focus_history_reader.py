@@ -121,7 +121,7 @@ def test_loads_complete_daily_history_and_rejects_missing_subscription_day(monke
             files[name] = _content(subscription_id, period)
 
     async def list_runs(subscription_id, export_name):
-        return runs[subscription_id]
+        return runs[subscription_id] if export_name == focus_history_reader.focus_cost_reader._FOCUS_EXPORT_NAME else []
 
     async def group_tags(subscription_ids):
         return {}
@@ -179,3 +179,89 @@ def test_history_group_tag_fallback_keeps_resource_tags_and_provenance(monkeypat
         {(SUB_1, "rg"): {"team": "Group Owner", "project": "Current Group Project"}})
     assert result.records[0].tags == {"team": "Resource Owner", "project": "Current Group Project"}
     assert result.records[0].tag_attribution_source == "exported_resource_tags_with_current_group_fallback"
+
+
+def _period_run(run_id: str, start: str, end: str, processed: str | None = None, export: str | None = None):
+    run = {"name": run_id, "properties": {"status": "Completed", "startDate": f"{start}T00:00:00Z",
+                                          "endDate": f"{end}T23:59:59Z", "processingEndTime": processed or f"{end}T23:59:59Z"}}
+    return {**run, "_export": export} if export else run
+
+
+def test_month_to_date_daily_run_extends_history_through_yesterday():
+    runs = {SUB_1: [
+        _period_run("june", "2026-06-01", "2026-06-30"),
+        _period_run("july", "2026-07-01", "2026-07-31"),
+        _period_run("july-to-30th", "2026-07-01", "2026-07-30", "2026-07-31T06:00:00Z", "daily"),
+        _period_run("august-to-10th", "2026-08-01", "2026-08-10", "2026-08-11T06:00:00Z", "daily"),
+    ]}
+    available = focus_history_reader._select_available_history_runs([SUB_1], runs, 12)
+    assert [(period, path) for period, _, path in available] == [
+        ("2026-06", "20260601-20260630"), ("2026-07", "20260701-20260731"), ("2026-08", "20260801-20260810")]
+    assert available[1][1][SUB_1]["name"] == "july"
+    assert [period for period, *_ in focus_history_reader._select_history_runs([SUB_1], runs, 60)] == ["2026-06", "2026-07", "2026-08"]
+    # The month to date doesn't take one of the whole-month slots.
+    assert [period for period, *_ in focus_history_reader._select_available_history_runs([SUB_1], runs, 1)] == ["2026-07", "2026-08"]
+
+
+def test_latest_processed_whole_month_wins_and_partial_months_only_lead():
+    runs = {SUB_1: [
+        _period_run("july-close", "2026-07-01", "2026-07-31", "2026-08-06T03:00:00Z"),
+        _period_run("july-repull", "2026-07-01", "2026-07-31", "2026-08-04T06:00:00Z", "daily"),
+        _period_run("june-partial", "2026-06-01", "2026-06-20", export="daily"),
+        _period_run("august-to-3rd", "2026-08-01", "2026-08-03", export="daily"),
+    ]}
+    selected = focus_history_reader._select_available_history_runs([SUB_1], runs, 12)
+    assert [period for period, *_ in selected] == ["2026-07", "2026-08"]
+    assert selected[0][1][SUB_1]["name"] == "july-close"
+
+
+def _files_for_runs(subscription_ids, selected_runs, period_path):
+    return {f"{value}.csv.gz": _content(value, str(selected_runs[value]["properties"]["startDate"])[:7]) for value in subscription_ids}
+
+
+def test_subscriptions_align_on_the_earliest_month_to_date_end(monkeypatch):
+    runs = {
+        SUB_1: [_period_run("july-1", "2026-07-01", "2026-07-31"), _period_run("aug-1", "2026-08-01", "2026-08-10", export="daily")],
+        SUB_2: [_period_run("july-2", "2026-07-01", "2026-07-31"), _period_run("aug-2", "2026-08-01", "2026-08-08", export="daily")],
+    }
+    selected = focus_history_reader._select_available_history_runs([SUB_1, SUB_2], runs, 12)
+    assert [path for *_, path in selected] == ["20260701-20260731", "20260801-20260808"]
+    monkeypatch.setattr(focus_history_reader.focus_cost_reader, "_download_run_files", _files_for_runs)
+    result = focus_history_reader._parse_history_files([SUB_1, SUB_2], selected)
+    assert result.periods == ["2026-07", "2026-08"] and result.partial_period == "2026-08"
+    assert result.history_end == "2026-08-08" and result.complete_days == 39
+    assert max(record.date for record in result.records) == "2026-08-08"
+
+
+def test_history_ends_where_retention_removed_older_files(monkeypatch):
+    runs = {SUB_1: [_period_run("june", "2026-06-01", "2026-06-30"), _period_run("july", "2026-07-01", "2026-07-31")]}
+    selected = focus_history_reader._select_available_history_runs([SUB_1], runs, 12)
+
+    def files(subscription_ids, selected_runs, period_path):
+        if period_path.startswith("202606"):
+            raise focus_history_reader.focus_cost_reader.FocusCostFilesMissingError("removed by retention")
+        return _files_for_runs(subscription_ids, selected_runs, period_path)
+
+    monkeypatch.setattr(focus_history_reader.focus_cost_reader, "_download_run_files", files)
+    result = focus_history_reader._parse_history_files([SUB_1], selected)
+    assert result.periods == ["2026-07"] and result.history_start == "2026-07-01" and result.partial_period is None
+
+
+def test_daily_export_runs_are_tagged_and_a_missing_daily_export_is_ignored(monkeypatch):
+    import httpx
+
+    async def list_runs(subscription_id, export_name):
+        return [_period_run(export_name, "2026-08-01", "2026-08-03")]
+
+    monkeypatch.setattr(focus_history_reader.arm_client, "list_cost_export_runs", list_runs)
+    runs = asyncio.run(focus_history_reader._export_runs(SUB_1))
+    assert [(run["name"], run.get("_export")) for run in runs] == [
+        ("focus-closed-month-meghkoshaai", None), ("focus-daily-meghkoshaai", "daily")]
+
+    async def no_daily(subscription_id, export_name):
+        if export_name == "focus-daily-meghkoshaai":
+            raise httpx.HTTPStatusError("missing", request=httpx.Request("GET", "https://management.azure.com"), response=httpx.Response(404))
+        return [_period_run("july", "2026-07-01", "2026-07-31")]
+
+    monkeypatch.setattr(focus_history_reader.arm_client, "list_cost_export_runs", no_daily)
+    assert [run["name"] for run in asyncio.run(focus_history_reader._export_runs(SUB_1))] == ["july"]

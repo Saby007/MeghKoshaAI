@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 from uuid import UUID
 
 import httpx
@@ -13,12 +14,26 @@ from brand import BRAND_NAME
 from services import arm_client
 
 EXPORT_NAME = "focus-closed-month-meghkoshaai"
+DAILY_EXPORT_NAME = "focus-daily-meghkoshaai"
 API_VERSION = "2025-03-01"
 DATA_VERSION = "1.2-preview"
+ExportKind = Literal["monthly", "daily"]
 
 
 def normalize_subscription_id(value: str) -> str:
     return str(UUID(value.strip())).lower()
+
+
+def export_name(kind: ExportKind = "monthly") -> str:
+    if kind == "daily":
+        return os.environ.get("COST_EXPORT_DAILY_NAME", DAILY_EXPORT_NAME)
+    return os.environ.get("COST_EXPORT_NAME", EXPORT_NAME)
+
+
+def root_folder(subscription_id: str, kind: ExportKind = "monthly") -> str:
+    # Each export gets its own top-level prefix so storage lifecycle rules can keep
+    # closed months longer than the daily month-to-date snapshots.
+    return f"{'focus-daily' if kind == 'daily' else 'focus'}/{normalize_subscription_id(subscription_id)}"
 
 
 def _storage_resource_id() -> str:
@@ -36,12 +51,11 @@ def _location() -> str:
     return os.environ.get("COST_EXPORT_LOCATION", "eastus2")
 
 
-def _export_path(subscription_id: str) -> str:
+def _export_path(subscription_id: str, kind: ExportKind = "monthly") -> str:
     subscription_id = normalize_subscription_id(subscription_id)
-    export_name = os.environ.get("COST_EXPORT_NAME", EXPORT_NAME)
     return (
         f"/subscriptions/{subscription_id}/providers/Microsoft.CostManagement/"
-        f"exports/{export_name}?api-version={API_VERSION}"
+        f"exports/{export_name(kind)}?api-version={API_VERSION}"
     )
 
 
@@ -70,7 +84,8 @@ def _validate_schedule_start(value: str) -> str:
     return parsed.isoformat().replace("+00:00", "Z")
 
 
-def _new_properties(subscription_id: str, schedule_start: str, status: str) -> dict:
+def _new_properties(subscription_id: str, schedule_start: str, status: str, kind: ExportKind = "monthly") -> dict:
+    daily = kind == "daily"
     schedule_end = (
         datetime.fromisoformat(schedule_start.replace("Z", "+00:00")) + timedelta(days=3650)
     ).isoformat().replace("+00:00", "Z")
@@ -79,7 +94,7 @@ def _new_properties(subscription_id: str, schedule_start: str, status: str) -> d
         "dataOverwriteBehavior": "OverwritePreviousReport",
         "definition": {
             "type": "FocusCost",
-            "timeframe": "TheLastMonth",
+            "timeframe": "MonthToDate" if daily else "TheLastMonth",
             "dataSet": {
                 "granularity": "Daily",
                 "configuration": {"dataVersion": DATA_VERSION},
@@ -90,15 +105,18 @@ def _new_properties(subscription_id: str, schedule_start: str, status: str) -> d
                 "type": "AzureBlob",
                 "resourceId": _storage_resource_id(),
                 "container": _container_name(),
-                "rootFolderPath": f"focus/{normalize_subscription_id(subscription_id)}",
+                "rootFolderPath": root_folder(subscription_id, kind),
             }
         },
-        "exportDescription": f"Closed-period FOCUS cost export for {BRAND_NAME} reporting.",
+        "exportDescription": (
+            f"Daily month-to-date FOCUS cost export for {BRAND_NAME} reporting."
+            if daily else f"Closed-period FOCUS cost export for {BRAND_NAME} reporting."
+        ),
         "format": "Csv",
         "partitionData": True,
         "schedule": {
             "status": status,
-            "recurrence": "Monthly",
+            "recurrence": "Daily" if daily else "Monthly",
             "recurrencePeriod": {"from": schedule_start, "to": schedule_end},
         },
     }

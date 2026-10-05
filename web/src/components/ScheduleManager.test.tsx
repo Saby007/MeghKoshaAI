@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiRequestError, configureCostExport, createCostSchedule, getCostExportConfiguration, listCostSchedules, listScheduleRuns, runAllCostSchedules, setCostScheduleState, type CostSchedule, type FocusExportConfiguration, type ScheduleRun } from '../api';
+import { ApiRequestError, configureCostExport, createCostSchedule, getCostExportConfiguration, listCostSchedules, listScheduleRuns, runAllCostSchedules, runCostSchedule, setCostScheduleState, type CostSchedule, type FocusExportConfiguration, type ScheduleRun } from '../api';
 import { ScheduleManager } from './ScheduleManager';
 
 vi.mock('../api', async (importOriginal) => ({
@@ -364,7 +364,7 @@ describe('Open Schedules', () => {
     const save = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Save schedule'))!;
     expect(save.disabled).toBe(false);
     await act(async () => save.click());
-    expect(createCostSchedule).toHaveBeenCalledWith(schedule.subscriptionId, expect.stringMatching(/Z$/));
+    expect(createCostSchedule).toHaveBeenCalledWith(schedule.subscriptionId, expect.stringMatching(/Z$/), 6, { enabled: true, timeUtc: '06:00' });
     expect(container.textContent).toContain('monthly UTC schedule updated');
   });
 
@@ -377,5 +377,110 @@ describe('Open Schedules', () => {
     expect(container.textContent).not.toContain('Subscription One');
     expect(container.querySelector('input')).toBeNull();
     expect(createCostSchedule).not.toHaveBeenCalled();
+  });
+
+  it('saves the chosen history window for new and existing schedules', async () => {
+    const second = { ...schedule, subscriptionId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', displayName: 'Subscription Two', windowMonths: 4 as const };
+    vi.mocked(listCostSchedules).mockResolvedValue([{ ...schedule, state: 'not_scheduled', scheduleStartAt: null, nextRunAt: null }, second]);
+    vi.mocked(createCostSchedule).mockResolvedValue(schedule);
+    vi.mocked(setCostScheduleState).mockResolvedValue(second);
+    const choose = async (value: string) => {
+      const select = container.querySelector<HTMLSelectElement>('select')!;
+      await act(async () => { select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    };
+    const save = async () => act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Save schedule'))!.click());
+    await act(async () => root.render(<ScheduleManager />));
+    await click('Schedule Subscription One');
+    const select = container.querySelector<HTMLSelectElement>('select')!;
+    expect([...select.options].map(option => option.value)).toEqual(['3', '4', '5', '6']);
+    expect(select.value).toBe('6');
+    await choose('3');
+    await save();
+    expect(createCostSchedule).toHaveBeenCalledWith(schedule.subscriptionId, expect.stringMatching(/Z$/), 3, { enabled: true, timeUtc: '06:00' });
+    expect(container.textContent).toContain('with 3 months of history');
+    await click('Reschedule Subscription Two');
+    expect(container.querySelector<HTMLSelectElement>('select')!.value).toBe('4');
+    await choose('5');
+    await save();
+    expect(setCostScheduleState).toHaveBeenCalledWith(second.subscriptionId, 'active', expect.stringMatching(/Z$/), 5, { enabled: true, timeUtc: '06:00' });
+  });
+
+  it('shows each daily pull status and saves daily settings', async () => {
+    const daily = { enabled: true, timeUtc: '06:00', status: 'succeeded' as const, dataThrough: '2030-10-09', lastRunAt: '2030-10-10T06:00:00Z', error: null };
+    const off = { ...schedule, subscriptionId: 'cccccccc-cccc-cccc-cccc-cccccccccccc', displayName: 'Subscription Three',
+      daily: { ...daily, enabled: false, timeUtc: '05:00', status: 'idle' as const, dataThrough: null, lastRunAt: null } };
+    vi.mocked(listCostSchedules).mockResolvedValue([
+      { ...schedule, daily },
+      { ...schedule, subscriptionId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', displayName: 'Subscription Two',
+        daily: { ...daily, status: 'unavailable', dataThrough: null, error: "The daily export isn't configured." } },
+      off,
+    ]);
+    vi.mocked(setCostScheduleState).mockResolvedValue(off);
+    await act(async () => root.render(<ScheduleManager />));
+    const labels = [...container.querySelectorAll('.daily-status')].map(item => item.textContent ?? '');
+    expect(labels[0]).toMatch(/^Daily data through .*2030$/);
+    expect(labels.slice(1)).toEqual(['Daily export not configured', 'Daily pull off']);
+    await click('Reschedule Subscription Three');
+    const toggle = container.querySelector<HTMLInputElement>('.schedule-daily-toggle input')!;
+    const time = container.querySelector<HTMLInputElement>('input[type="time"]')!;
+    expect(toggle.checked).toBe(false);
+    expect(time.value).toBe('05:00');
+    expect(time.disabled).toBe(true);
+    await act(async () => toggle.click());
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(time, '07:15');
+      time.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Save schedule'))!.click());
+    expect(setCostScheduleState).toHaveBeenCalledWith(off.subscriptionId, 'active', expect.stringMatching(/Z$/), 6, { enabled: true, timeUtc: '07:15' });
+    expect(container.textContent).toContain('daily pull at 07:15 UTC');
+  });
+
+  it('shows each period of the daily pull and when the next one starts', async () => {
+    const base = { enabled: true, timeUtc: '06:00', lastRunAt: '2030-10-05T06:00:00Z', error: null, day: '2030-10-05' };
+    const running = { ...base, status: 'running' as const, dataThrough: '2030-10-03', completedAt: null, nextRunAt: null,
+      runs: [{ start: '2030-09-01', end: '2030-09-30', status: 'succeeded' as const }, { start: '2030-10-01', end: '2030-10-04', status: 'queued' as const }] };
+    const done = { ...base, status: 'succeeded' as const, dataThrough: '2030-10-04', completedAt: '2030-10-05T06:40:00Z',
+      nextRunAt: '2030-10-06T06:00:00Z', runs: [{ start: '2030-10-01', end: '2030-10-01', status: 'succeeded' as const }] };
+    vi.mocked(listCostSchedules).mockResolvedValue([
+      { ...schedule, daily: running },
+      { ...schedule, subscriptionId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', displayName: 'Subscription Two', daily: done },
+    ]);
+    await act(async () => root.render(<ScheduleManager />));
+    const strips = [...container.querySelectorAll('.daily-progress.desktop-month-progress')];
+    expect(strips).toHaveLength(2);
+    expect([...strips[0].querySelectorAll('li')].map(item => item.getAttribute('aria-label')))
+      .toEqual(['Daily Sep late charges Done', 'Daily 1\u20134 Oct Queued']);
+    expect(strips[1].querySelector('li')?.getAttribute('aria-label')).toBe('Daily 1 Oct Done');
+    expect(container.querySelectorAll('.daily-progress.mobile-month-progress')).toHaveLength(2);
+    const labels = [...container.querySelectorAll('.daily-status')].map(item => item.textContent ?? '');
+    expect(labels[0]).toMatch(/^Daily pull in progress · data through .*2030$/);
+    expect(labels[1]).toMatch(/^Daily data through .*2030 · next pull .*2030/);
+  });
+
+  it('offers Configure export when only the daily export is missing', async () => {
+    vi.mocked(listCostSchedules).mockResolvedValue([schedule]);
+    vi.mocked(getCostExportConfiguration).mockResolvedValue({
+      ...exportConfiguration, state: 'configured', canConfigure: false,
+      daily: { exportName: 'app-focus-daily', rootFolderPath: `focus-daily/${schedule.subscriptionId}`, state: 'missing', canConfigure: true },
+    });
+    await act(async () => root.render(<ScheduleManager />));
+    await click('Configure export for Subscription One');
+    expect(container.textContent).toContain('app-focus-daily');
+    expect(container.textContent).toContain(`cost-exports/focus-daily/${schedule.subscriptionId}`);
+    const configure = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Configure export'));
+    expect(configure).toBeDefined();
+    expect(container.querySelector('.export-role-confirmation')).not.toBeNull();
+  });
+
+  it("describes Export with each schedule's own history window", async () => {
+    vi.mocked(listCostSchedules).mockResolvedValue([{ ...schedule, windowMonths: 4 }]);
+    vi.mocked(runCostSchedule).mockResolvedValue({ subscriptionId: schedule.subscriptionId, status: 'queued' });
+    await act(async () => root.render(<ScheduleManager />));
+    const exportButton = container.querySelector<HTMLButtonElement>('button[aria-label="Export Subscription One now"]')!;
+    expect(exportButton.title).toContain('last 4 months');
+    await act(async () => exportButton.click());
+    expect(runCostSchedule).toHaveBeenCalledWith(schedule.subscriptionId);
+    expect(container.textContent).toContain('pulling and overwriting the last 4 months');
   });
 });

@@ -23,10 +23,16 @@ import {
   runAllCostSchedules,
   runCostSchedule,
   setCostScheduleState,
+  SCHEDULE_WINDOW_MONTHS,
+  DAILY_TIME_PATTERN,
+  DEFAULT_DAILY_TIME,
   type CostSchedule,
   type FocusExportConfiguration,
+  type ScheduleDailyPull,
+  type ScheduleDailyRun,
   type ScheduleMonthStatus,
   type ScheduleRun,
+  type ScheduleWindowMonths,
 } from '../api';
 import { redirectApiIdentity } from '../apiIdentity';
 
@@ -63,6 +69,9 @@ function defaultScheduleValue(): string {
 }
 
 const utcSchedule = (value: string) => `${value}:00Z`;
+const windowOf = (schedule: CostSchedule): ScheduleWindowMonths => schedule.windowMonths ?? 6;
+// Configure creates whichever of the closed-month and daily exports is missing.
+const canConfigureAny = (configuration: FocusExportConfiguration): boolean => configuration.canConfigure || configuration.daily?.canConfigure === true;
 
 function runLabel(run: ScheduleRun | null): string {
   if (!run) return 'Awaiting first export';
@@ -81,6 +90,57 @@ const monthStatusLabel: Record<ScheduleMonthStatus, string> = {
   succeeded: 'Done',
   failed: 'Failed',
 };
+
+function formatDay(value: string): string {
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+    .format(new Date(`${value}T00:00:00Z`));
+}
+
+function nextPull(daily: ScheduleDailyPull): string {
+  if (!daily.nextRunAt || !Number.isFinite(Date.parse(daily.nextRunAt))) return '';
+  // A pull already due starts on the worker's next 5-minute run.
+  return Date.parse(daily.nextRunAt) <= Date.now() ? ' \u00b7 next pull starting shortly' : ` \u00b7 next pull ${formatDate(daily.nextRunAt)}`;
+}
+
+function dailyLabel(daily: ScheduleDailyPull): string {
+  if (!daily.enabled) return 'Daily pull off';
+  if (daily.status === 'unavailable') return 'Daily export not configured';
+  const through = daily.dataThrough ? ` \u00b7 data through ${formatDay(daily.dataThrough)}` : '';
+  if (daily.status === 'failed') return `Daily pull failed${through}${nextPull(daily)}`;
+  if (daily.status === 'running') return `Daily pull in progress${through}`;
+  if (daily.dataThrough) return `Daily data through ${formatDay(daily.dataThrough)}${nextPull(daily)}`;
+  return `Daily pull at ${daily.timeUtc} UTC${nextPull(daily)}`;
+}
+
+function DailyStatus({ daily }: { daily?: ScheduleDailyPull | null }) {
+  if (!daily) return null;
+  return <small className={`daily-status ${daily.enabled ? daily.status : 'off'}`} title={daily.error ?? undefined}>{dailyLabel(daily)}</small>;
+}
+
+function dailyPeriodLabel(run: ScheduleDailyRun): string {
+  const start = new Date(`${run.start}T00:00:00Z`);
+  const end = new Date(`${run.end}T00:00:00Z`);
+  const month = new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' }).format(start);
+  // A whole month is last month's re-pull on days 1-5, which picks up charges Azure posts after month end.
+  if (new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() + 1)).getUTCDate() === 1) return `${month} late charges`;
+  return end.getUTCDate() === 1 ? `1 ${month}` : `1\u2013${end.getUTCDate()} ${month}`;
+}
+
+function DailyProgress({ daily, mobile = false }: { daily?: ScheduleDailyPull | null; mobile?: boolean }) {
+  if (!daily?.enabled || !daily.runs?.length) return null;
+  return (
+    <ol className={`month-progress daily-progress ${mobile ? 'mobile-month-progress' : 'desktop-month-progress'}`} aria-label="Daily pull status">
+      {daily.runs.map((run) => {
+        const label = dailyPeriodLabel(run);
+        return (
+          <li className={run.status} key={run.start} aria-label={`Daily ${label} ${monthStatusLabel[run.status]}`}>
+            <span>{label}</span><strong>{monthStatusLabel[run.status]}</strong>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 function MonthProgress({ run, mobile = false }: { run: ScheduleRun | null; mobile?: boolean }) {
   if (!run?.months?.length) return null;
@@ -103,6 +163,9 @@ export function ScheduleManager() {
   const [schedules, setSchedules] = useState<CostSchedule[]>([]);
   const [scheduleEditingId, setScheduleEditingId] = useState<string | null>(null);
   const [scheduleValue, setScheduleValue] = useState(defaultScheduleValue);
+  const [windowValue, setWindowValue] = useState<ScheduleWindowMonths>(6);
+  const [dailyEnabled, setDailyEnabled] = useState(true);
+  const [dailyTime, setDailyTime] = useState(DEFAULT_DAILY_TIME);
   const [exportEditingId, setExportEditingId] = useState<string | null>(null);
   const [exportConfiguration, setExportConfiguration] = useState<FocusExportConfiguration | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
@@ -277,7 +340,7 @@ export function ScheduleManager() {
     setError(null);
     try {
       await runCostSchedule(schedule.subscriptionId);
-      setNotice(`${schedule.displayName}: export requested \u2014 pulling and overwriting the last six months.`);
+      setNotice(`${schedule.displayName}: export requested \u2014 pulling and overwriting the last ${windowOf(schedule)} months.`);
       await refresh();
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : 'Export could not be started.');
@@ -300,7 +363,7 @@ export function ScheduleManager() {
       const queued = results.filter((result) => result.status !== 'failed').length;
       const failures = results.filter((result) => result.status === 'failed');
       await refresh();
-      setNotice(`${queued} six-month refresh${queued === 1 ? '' : 'es'} requested${failures.length ? `; ${failures.length} failed` : ''}.`);
+      setNotice(`${queued} refresh${queued === 1 ? '' : 'es'} requested${failures.length ? `; ${failures.length} failed` : ''}.`);
       if (failures.length) setError(failures.map((result) => result.error).filter(Boolean).join(' · '));
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : 'Exports could not be started.');
@@ -313,21 +376,29 @@ export function ScheduleManager() {
     closeExportConfiguration();
     setScheduleEditingId(schedule.subscriptionId);
     setScheduleValue(schedule.scheduleStartAt?.slice(0, 16) ?? defaultScheduleValue());
+    setWindowValue(windowOf(schedule));
+    setDailyEnabled(schedule.daily?.enabled ?? true);
+    setDailyTime(schedule.daily?.timeUtc ?? DEFAULT_DAILY_TIME);
   }
 
   async function saveSchedule(schedule: CostSchedule) {
     if (loading || loadError || schedule.state === 'unknown'
       || schedule.readAccess !== true || schedule.costAccess !== true
       || (schedule.availability && schedule.availability !== 'available')) return;
+    if (!DAILY_TIME_PATTERN.test(dailyTime)) {
+      setError('Enter the daily pull time as HH:MM in UTC.');
+      return;
+    }
+    const daily = { enabled: dailyEnabled, timeUtc: dailyTime };
     setBusyId(schedule.subscriptionId);
     setError(null);
     try {
       if (schedule.state === 'not_scheduled') {
-        await createCostSchedule(schedule.subscriptionId, utcSchedule(scheduleValue));
+        await createCostSchedule(schedule.subscriptionId, utcSchedule(scheduleValue), windowValue, daily);
       } else {
-        await setCostScheduleState(schedule.subscriptionId, schedule.state, utcSchedule(scheduleValue));
+        await setCostScheduleState(schedule.subscriptionId, schedule.state, utcSchedule(scheduleValue), windowValue, daily);
       }
-      setNotice(`${schedule.displayName} monthly UTC schedule updated.`);
+      setNotice(`${schedule.displayName} monthly UTC schedule updated with ${windowValue} months of history${dailyEnabled ? ` and a daily pull at ${dailyTime} UTC` : ' and no daily pull'}.`);
       setScheduleEditingId(null);
       await refresh();
     } catch (scheduleError) {
@@ -398,7 +469,7 @@ export function ScheduleManager() {
   return (
     <section className="operations-view" aria-label="Export schedules">
       <section className="operations-heading">
-        <span className="operations-kicker"><CalendarClock size={14} /> Six completed calendar months</span>
+        <span className="operations-kicker"><CalendarClock size={14} /> 3-6 closed months plus a daily pull through yesterday</span>
         <h1>FOCUS export schedules</h1>
         <div className="operations-metrics" aria-label="Schedule summary">
           <span><strong data-unavailable={countsUnavailable}>{loading ? '...' : countsUnavailable ? 'Unavailable' : scheduledCount}</strong> scheduled</span>
@@ -414,7 +485,7 @@ export function ScheduleManager() {
 
       <section className="schedule-section" aria-labelledby="schedule-list-title">
         <header className="schedule-section-header">
-          <div><span>Six-month monthly refresh</span><h2 id="schedule-list-title">FOCUS schedules</h2></div>
+          <div><span>Completed-month refresh</span><h2 id="schedule-list-title">FOCUS schedules</h2></div>
           <div className="schedule-header-actions">
             <span role="status">{loading ? 'Refreshing...' : loadError ? 'Refresh failed' : loadedAt ? `Checked ${formatDate(loadedAt)}` : ''}</span>
             <button className="outline-command" type="button" onClick={() => void runAll()} disabled={runningAll || loading || !!loadError || !canRunAll}>{runningAll ? <RefreshCw className="spin" size={15} /> : <Play size={15} />} Run all</button>
@@ -440,14 +511,14 @@ export function ScheduleManager() {
                 const isExpanded = expandedId === schedule.subscriptionId;
                 return [
                   <tr key={schedule.subscriptionId}>
-                    <td><strong>{schedule.displayName}</strong><code>{schedule.subscriptionId}</code><MonthProgress run={schedule.latestRun} mobile /></td>
+                    <td><strong>{schedule.displayName}</strong><code>{schedule.subscriptionId}</code><MonthProgress run={schedule.latestRun} mobile /><DailyProgress daily={schedule.daily} mobile /></td>
                     <td><span className={`schedule-state ${schedule.state}`}><i />{schedule.state === 'unknown' ? 'Unknown' : schedule.state.replace('_', ' ')}</span></td>
                     <td>{schedule.state === 'unknown' ? 'Unavailable' : schedule.nextRunAt ? formatDate(schedule.nextRunAt) : schedule.state === 'paused' ? 'Paused' : schedule.state === 'active' ? 'Unavailable' : 'Not scheduled'}</td>
-                    <td>{schedule.availability && schedule.availability !== 'available' ? <><span>{schedule.availability === 'access_unavailable' ? 'Access unavailable' : schedule.availability === 'configuration_unavailable' ? 'Scheduler setup incomplete' : schedule.availability === 'history_unavailable' ? 'Execution history unavailable' : 'Export status unavailable'}</span><small>{schedule.statusMessage}</small></> : <><span className={`run-state ${schedule.latestRun?.status ?? 'pending'}`}>{schedule.state === 'not_scheduled' ? 'Export configured' : runLabel(schedule.latestRun)}</span><small>{schedule.latestRun ? `${formatDate(schedule.latestRun.completedAt || schedule.latestRun.startedAt)} · ${formatDuration(schedule.latestRun.durationSeconds)}` : schedule.state === 'not_scheduled' ? '' : 'No native execution record'}</small><MonthProgress run={schedule.latestRun} /></>}</td>
+                    <td>{schedule.availability && schedule.availability !== 'available' ? <><span>{schedule.availability === 'access_unavailable' ? 'Access unavailable' : schedule.availability === 'configuration_unavailable' ? 'Scheduler setup incomplete' : schedule.availability === 'history_unavailable' ? 'Execution history unavailable' : 'Export status unavailable'}</span><small>{schedule.statusMessage}</small></> : <><span className={`run-state ${schedule.latestRun?.status ?? 'pending'}`}>{schedule.state === 'not_scheduled' ? 'Export configured' : runLabel(schedule.latestRun)}</span><small>{schedule.latestRun ? `${formatDate(schedule.latestRun.completedAt || schedule.latestRun.startedAt)} · ${formatDuration(schedule.latestRun.durationSeconds)}` : schedule.state === 'not_scheduled' ? '' : 'No native execution record'}</small><MonthProgress run={schedule.latestRun} /><DailyProgress daily={schedule.daily} /><DailyStatus daily={schedule.daily} /></>}</td>
                     <td><div className="schedule-actions">
                       <button type="button" onClick={() => void openExportConfiguration(schedule)} disabled={loading || !!loadError || busyId !== null || exportRetryAfter > 0 || schedule.readAccess !== true || schedule.costAccess !== true} title="Configure FOCUS export" aria-label={`Configure export for ${schedule.displayName}`} aria-expanded={exportEditingId === schedule.subscriptionId}><Settings2 size={16} /></button>
                       <button type="button" onClick={() => void toggleHistory(schedule)} disabled={loading || !!loadError || schedule.readAccess !== true || schedule.costAccess !== true || schedule.state === 'not_scheduled' || schedule.state === 'unknown'} title="Execution history" aria-expanded={isExpanded} aria-label={`Execution history for ${schedule.displayName}`}><History size={16} />{isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>
-                      <button type="button" onClick={() => void runNow(schedule)} disabled={!canExport} title="Export: create if needed, pull and overwrite the last six months" aria-label={`Export ${schedule.displayName} now`}><Play size={16} /></button>
+                      <button type="button" onClick={() => void runNow(schedule)} disabled={!canExport} title={`Export: create if needed, pull and overwrite the last ${windowOf(schedule)} months`} aria-label={`Export ${schedule.displayName} now`}><Play size={16} /></button>
                       <button type="button" onClick={() => editSchedule(schedule)} disabled={isBusy} title={schedule.state === 'not_scheduled' ? 'Schedule export' : 'Reschedule export'} aria-label={`${schedule.state === 'not_scheduled' ? 'Schedule' : 'Reschedule'} ${schedule.displayName}`}><CalendarClock size={16} /></button>
                       <button type="button" onClick={() => void changeState(schedule)} disabled={isBusy || schedule.state === 'not_scheduled'} title={schedule.state === 'active' ? 'Pause schedule' : 'Resume schedule'} aria-label={`${schedule.state === 'active' ? 'Pause' : 'Resume'} ${schedule.displayName}`}>{schedule.state === 'active' ? <Pause size={16} /> : <Play size={16} />}</button>
                       {deletingId === schedule.subscriptionId ? <><button className="cancel-delete" type="button" onClick={() => setDeletingId(null)} title="Cancel delete" aria-label="Cancel delete"><X size={16} /></button><button className="confirm-delete" type="button" onClick={() => void remove(schedule)} disabled={isBusy} title="Confirm delete" aria-label={`Confirm delete ${schedule.displayName}`}><Check size={16} /></button></> : <button type="button" onClick={() => setDeletingId(schedule.subscriptionId)} disabled={isBusy || schedule.state === 'not_scheduled'} title="Delete export" aria-label={`Delete ${schedule.displayName}`}><Trash2 size={16} /></button>}
@@ -463,19 +534,21 @@ export function ScheduleManager() {
                         <div><dt>Configuration</dt><dd>{exportConfiguration.state === 'configured' ? 'Configured' : 'Not created'}</dd></div>
                         <div><dt>Storage account</dt><dd><code>{exportConfiguration.storageResourceId}</code></dd></div>
                         <div><dt>Container and prefix</dt><dd><code>{exportConfiguration.container}/{exportConfiguration.rootFolderPath}</code></dd></div>
-                        <div><dt>Dataset</dt><dd>FOCUS {exportConfiguration.dataVersion} / {exportConfiguration.format} / six completed months</dd></div>
+                        {exportConfiguration.daily && <div><dt>Daily export</dt><dd>{exportConfiguration.daily.exportName}{' · '}{exportConfiguration.daily.state === 'configured' ? 'Configured' : 'Not created'}</dd></div>}
+                        {exportConfiguration.daily && <div><dt>Daily prefix</dt><dd><code>{exportConfiguration.container}/{exportConfiguration.daily.rootFolderPath}</code></dd></div>}
+                        <div><dt>Dataset</dt><dd>FOCUS {exportConfiguration.dataVersion} / {exportConfiguration.format} / {windowOf(schedule)} completed months</dd></div>
                         <div><dt>Native Azure schedule</dt><dd>{exportConfiguration.nativeSchedule}</dd></div>
                       </dl>
-                      {exportConfiguration.canConfigure && <label className="export-role-confirmation"><input type="checkbox" checked={allowDestinationRole} onChange={event => setAllowDestinationRole(event.target.checked)} disabled={busyId !== null} /><span>Allow Storage Blob Data Contributor for the export identity on this container</span></label>}
+                      {canConfigureAny(exportConfiguration) && <label className="export-role-confirmation"><input type="checkbox" checked={allowDestinationRole} onChange={event => setAllowDestinationRole(event.target.checked)} disabled={busyId !== null} /><span>Allow Storage Blob Data Contributor for the export identity on this container</span></label>}
                     </>}
                     <div className="export-config-actions">
-                      {exportConfiguration?.canConfigure && <button className="primary-command" type="button" onClick={() => void configureExport(schedule)} disabled={busyId !== null || !allowDestinationRole || loading || !!loadError || exportRetryAfter > 0}>{busyId === schedule.subscriptionId ? <RefreshCw className="spin" size={15} /> : <Settings2 size={15} />} Configure export</button>}
+                      {exportConfiguration && canConfigureAny(exportConfiguration) && <button className="primary-command" type="button" onClick={() => void configureExport(schedule)} disabled={busyId !== null || !allowDestinationRole || loading || !!loadError || exportRetryAfter > 0}>{busyId === schedule.subscriptionId ? <RefreshCw className="spin" size={15} /> : <Settings2 size={15} />} Configure export</button>}
                       {exportConfiguration?.state === 'configured' && <button className="primary-command" type="button" onClick={() => editSchedule(schedule)} disabled={isBusy}><CalendarClock size={15} /> {schedule.state === 'not_scheduled' ? 'Schedule export' : 'Edit schedule'}</button>}
                       <button className="outline-command" type="button" onClick={() => void openExportConfiguration(schedule)} disabled={busyId !== null || exportLoading || loading || exportRetryAfter > 0}>{exportRetryAfter > 0 ? `Retry in ${exportRetryAfter}s` : <><RefreshCw size={15} /> Refresh status</>}</button>
                       <button className="outline-command" type="button" onClick={closeExportConfiguration} disabled={busyId !== null}><X size={15} /> Close</button>
                     </div>
                   </div></td></tr> : null,
-                  scheduleEditingId === schedule.subscriptionId ? <tr className="history-row schedule-editor-row" key={`${schedule.subscriptionId}-editor`}><td colSpan={5}><div className="schedule-editor"><label><span>First monthly run (UTC)</span><input type="datetime-local" value={scheduleValue} onChange={(event) => setScheduleValue(event.target.value)} /></label><button className="primary-command" type="button" onClick={() => void saveSchedule(schedule)} disabled={isBusy}><Check size={15} /> Save schedule</button><button className="outline-command" type="button" onClick={() => setScheduleEditingId(null)}><X size={15} /> Cancel</button></div></td></tr> : null,
+                  scheduleEditingId === schedule.subscriptionId ? <tr className="history-row schedule-editor-row" key={`${schedule.subscriptionId}-editor`}><td colSpan={5}><div className="schedule-editor"><label><span>First monthly run (UTC)</span><input type="datetime-local" value={scheduleValue} onChange={(event) => setScheduleValue(event.target.value)} /></label><label className="schedule-window-field"><span>Months of history</span><select value={windowValue} onChange={(event) => setWindowValue(Number(event.target.value) as ScheduleWindowMonths)}>{SCHEDULE_WINDOW_MONTHS.map((months) => <option key={months} value={months}>{months} months</option>)}</select></label><label className="schedule-daily-toggle"><input type="checkbox" checked={dailyEnabled} onChange={(event) => setDailyEnabled(event.target.checked)} /><span>Daily pull through yesterday</span></label><label className="schedule-window-field"><span>Daily pull (UTC)</span><input type="time" value={dailyTime} onChange={(event) => setDailyTime(event.target.value)} disabled={!dailyEnabled} /></label><button className="primary-command" type="button" onClick={() => void saveSchedule(schedule)} disabled={isBusy}><Check size={15} /> Save schedule</button><button className="outline-command" type="button" onClick={() => setScheduleEditingId(null)}><X size={15} /> Cancel</button></div></td></tr> : null,
                   isExpanded ? <tr className="history-row" key={`${schedule.subscriptionId}-history`}><td colSpan={5}><div className="run-history">{historyLoading === schedule.subscriptionId ? <span role="status">Loading execution history...</span> : historyError ? <span role="alert">{historyError}</span> : <>{(runs[schedule.subscriptionId] ?? []).length === 0 && <span>No native execution history</span>}{(runs[schedule.subscriptionId] ?? []).map((run) => <div key={run.runId}><span className={`run-status-dot ${run.status}`} /><strong>{run.period || 'Custom'}</strong><span>{run.status}</span><time>{formatDate(run.completedAt || run.startedAt)}</time><time>{formatDuration(run.durationSeconds)}</time>{run.error && <small>{run.error}</small>}</div>)}</>}</div></td></tr> : null,
                 ];
               })}

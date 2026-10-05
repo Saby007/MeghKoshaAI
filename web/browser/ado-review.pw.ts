@@ -647,6 +647,10 @@ test('subscription and schedule loading states stay distinct from empty and popu
         { period: '2026-05', status: 'queued' }, { period: '2026-06', status: 'pending' },
         { period: '2026-07', status: 'pending' }, { period: '2026-08', status: 'pending' },
       ] },
+      daily: { enabled: true, timeUtc: '06:00', status: 'running', dataThrough: '2026-10-03', lastRunAt: '2026-10-05T06:00:00Z', error: null,
+        day: '2026-10-05', completedAt: null, nextRunAt: null, runs: [
+          { start: '2026-09-01', end: '2026-09-30', status: 'succeeded' }, { start: '2026-10-01', end: '2026-10-04', status: 'queued' },
+        ] },
     }] });
   });
   await page.getByRole('button', { name: 'Schedules', exact: true }).click();
@@ -659,6 +663,11 @@ test('subscription and schedule loading states stay distinct from empty and popu
   for (const label of ['Mar Done', 'Apr Done', 'May Queued', 'Jun Pending', 'Jul Pending', 'Aug Pending']) {
     await expect(monthProgress.getByRole('listitem', { name: label })).toBeVisible();
   }
+  const dailyProgress = page.getByRole('list', { name: 'Daily pull status' });
+  for (const label of ['Daily Sep late charges Done', 'Daily 1\u20134 Oct Queued']) {
+    await expect(dailyProgress.getByRole('listitem', { name: label })).toBeVisible();
+  }
+  await expect(page.getByText(/^Daily pull in progress · data through/)).toBeVisible();
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
@@ -695,7 +704,7 @@ test('Schedules manages manually configured subscriptions without onboarding', a
     if (route.request().method() === 'POST') {
       const body = route.request().postDataJSON();
       requests.push(body);
-      expect(Object.keys(body).sort()).toEqual(['scheduleStartAt', 'subscriptionId']);
+      expect(Object.keys(body).sort()).toEqual(['dailyEnabled', 'dailyTimeUtc', 'scheduleStartAt', 'subscriptionId', 'windowMonths']);
       expect(body.subscriptionId).toBe(subscriptionId);
       saved = true;
       return route.fulfill({ status: 201, json: { ...candidate, state: 'active', scheduleStartAt: body.scheduleStartAt } });
@@ -724,7 +733,7 @@ test('Schedules manages manually configured subscriptions without onboarding', a
       await expect(page.getByRole('button', { name: 'Save schedule', exact: true })).toBeEnabled();
       expect(await page.locator('.schedule-editor').evaluate(editor => {
         const visible = editor.closest('.schedule-table-wrap')!.getBoundingClientRect();
-        return [...editor.querySelectorAll('input, button')].every(control => {
+        return [...editor.querySelectorAll('input, select, button')].every(control => {
           const bounds = control.getBoundingClientRect();
           return bounds.left >= visible.left && bounds.right <= visible.right && control.scrollWidth <= control.clientWidth;
         });
@@ -735,7 +744,7 @@ test('Schedules manages manually configured subscriptions without onboarding', a
   }
   await page.getByRole('button', { name: 'Save schedule', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'monthly UTC schedule updated' })).toBeVisible();
-  expect(requests).toEqual([{ subscriptionId, scheduleStartAt: '2030-10-05T03:00:00Z' }]);
+  expect(requests).toEqual([{ subscriptionId, scheduleStartAt: '2030-10-05T03:00:00Z', windowMonths: 6, dailyEnabled: true, dailyTimeUtc: '06:00' }]);
   expect(onboardingRequests).toEqual([]);
   await expect(page.getByRole('button', { name: 'Reschedule Verified Cost Reporting Subscription', exact: true })).toBeVisible();
 });
@@ -769,7 +778,7 @@ test('Schedules configures a FOCUS export and saves its schedule as separate por
     if (route.request().method() === 'POST') {
       expect(configured).toBe(true);
       const body = route.request().postDataJSON();
-      expect(body).toEqual({ subscriptionId, scheduleStartAt: '2030-10-05T03:00:00Z' });
+      expect(body).toEqual({ subscriptionId, scheduleStartAt: '2030-10-05T03:00:00Z', windowMonths: 6, dailyEnabled: true, dailyTimeUtc: '06:00' });
       mutations.push({ path: 'schedule', body });
       saved = true;
       return route.fulfill({ status: 201, json: { ...candidate, state: 'active', availability: 'available', scheduleStartAt: body.scheduleStartAt } });
@@ -816,7 +825,7 @@ test('Schedules configures a FOCUS export and saves its schedule as separate por
   await expect(page.getByRole('status').filter({ hasText: 'monthly UTC schedule updated' })).toBeVisible();
   expect(mutations).toEqual([
     { path: 'export', body: { allowDestinationRoleAssignment: true } },
-    { path: 'schedule', body: { subscriptionId, scheduleStartAt: '2030-10-05T03:00:00Z' } },
+    { path: 'schedule', body: { subscriptionId, scheduleStartAt: '2030-10-05T03:00:00Z', windowMonths: 6, dailyEnabled: true, dailyTimeUtc: '06:00' } },
   ]);
   expect(browserAzureRequests).toEqual([]);
   await expect(page.getByRole('heading', { name: 'Onboard subscription', exact: true })).toHaveCount(0);
