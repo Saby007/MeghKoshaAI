@@ -115,6 +115,10 @@ The landing page follows a single layout rhythm: overview, comparison, distribut
 
 Comparison-chart dots show the subscription, selected and previous dates/costs, and absolute change on hover or keyboard focus. Escape dismisses the tooltip; clicking or pressing Enter/Space still opens the selected day's detail where available. Missing previous evidence stays explicitly unavailable.
 
+Budget details show Azure's configured expiry date in the budget context table, tag/application budget cards and the Budgets page. Open-ended budgets are labelled explicitly; this is separate from the recurring budget cycle.
+On the Budgets page, expiry dates within 30 calendar days (inclusive, using UTC dates) are highlighted in red with days remaining. Dates already passed show "Expired"; open-ended budgets are not flagged.
+The budget form includes an optional End date beside Start date. It must be after Start date; leaving it blank uses Azure's default end date. Editing loads the existing expiry. Clients that omit `endDate` on an update preserve the existing expiry. Deploy the API before the web when introducing this field.
+
 Two other top-level views round out the app:
 
 - **Chat** — ask follow-up questions about the current report in natural language (enabled by the `ai` profile and `APP_ENABLE_CHAT_RUNTIME=true`).

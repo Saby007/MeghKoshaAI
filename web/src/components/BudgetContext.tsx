@@ -7,6 +7,24 @@ import { DailyBarChart } from './TrendChart';
 
 export type BudgetState = { budgets: Budget[]; loading: boolean; error: string | null; refresh: () => void };
 
+export function BudgetExpiry({ periodEnd, highlightNearExpiry = false }: Pick<Budget, 'periodEnd'> & { highlightNearExpiry?: boolean }) {
+  if (!periodEnd) return <span className="budget-expiry">Open-ended</span>;
+  const date = periodEnd.slice(0, 10);
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+    return <span className="budget-expiry">Unavailable</span>;
+  }
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const daysLeft = Math.round((parsed.getTime() - today) / 86400000);
+  const warning = highlightNearExpiry && daysLeft <= 30;
+  const label = daysLeft < 0 ? 'Expired' : daysLeft === 0 ? 'Expires today' : `${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left`;
+  return <span className={`budget-expiry${warning ? ' budget-expiry-warning' : ''}`}>
+    <time dateTime={date}>{parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}</time>
+    {warning && <> · {label}</>}
+  </span>;
+}
+
 export function budgetThreshold(budget: Budget) {
   if (budget.category !== 'Cost' || budget.currentSpend === null || !Number.isFinite(budget.currentSpend) || !Number.isFinite(budget.amount) || budget.amount < 0) return { tone: 'unknown', label: 'Unavailable' };
   if (budget.currentSpend <= budget.amount) return { tone: 'within', label: 'Within budget' };
@@ -310,7 +328,7 @@ export function BudgetContext({ state, details, filters = {}, showHeading = true
       return <Fragment key={`${budget.subscriptionId}:${budget.name}`}><tr><th>{drillable
         ? <button type="button" className="finding-link" aria-expanded={openBudget === key} aria-label={`Daily spend for ${budget.name}`} onClick={() => setOpenBudget((value) => value === key ? null : key)}>{budget.name}</button>
         : budget.name}<small>{relation}</small><details><summary>Scope</summary><span>{budget.scope || budget.subscriptionId}</span><pre>{JSON.stringify(budget.filter ?? 'Filter metadata not returned', null, 2)}</pre><small>Active: {budget.periodStart} - {budget.periodEnd || 'Open-ended'} / {budget.timeGrain}</small><small>Checked: {budget.observedAt || 'Not reported'}</small></details></th>
-        <td>{native(budget.amount)}<small>{budget.timeGrain}</small></td>
+        <td>{native(budget.amount)}<small>{budget.timeGrain}</small><small>Expiry: <BudgetExpiry periodEnd={budget.periodEnd} /></small></td>
         <td>{native(budget.currentSpend)}{cycle && <small>{cycleLabel(cycle)} to date</small>}</td>
         <td className={remaining !== null && remaining < 0 ? 'cost-increase' : ''}>{remaining === null ? 'Unavailable' : remaining < 0 ? `${money(-remaining)} over` : `${money(remaining)} left`}</td>
         <td>{native(budget.forecastSpend)}{budget.forecastSpend !== null && <small>{budget.forecastSpend > budget.amount ? `Overrun ${money(budget.forecastSpend - budget.amount)}` : 'Within budget'}</small>}</td>
