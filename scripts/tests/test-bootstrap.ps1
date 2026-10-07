@@ -79,6 +79,17 @@ function Invoke-RestMethod {
         }
         throw "Unexpected Graph GET path: $path"
     }
+    if ($Method -eq 'POST' -and $path -eq 'applications' -and $global:bootstrapTestState.scenario -eq 'require-service-tree' -and
+        -not $payload['serviceManagementReference']) {
+        # Graph's own refusal: HTTP 400 whose body names the missing field.
+        $response = [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]::BadRequest)
+        $record = [System.Management.Automation.ErrorRecord]::new(
+            [Microsoft.PowerShell.Commands.HttpResponseException]::new('Response status code does not indicate success: 400 (Bad Request).', $response),
+            'WebCmdletWebResponseException', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
+        $record.ErrorDetails = [System.Management.Automation.ErrorDetails]::new(
+            '{"error":{"code":"Request_BadRequest","message":"ServiceManagementReference field is required for Create, but is missing in the request."}}')
+        throw $record
+    }
     $global:bootstrapTestState.writes.Add(@{ path = $path; method = $Method; payload = $payload })
     if ($Method -eq 'POST' -and $path -eq 'applications') {
         $application = @{
@@ -175,9 +186,34 @@ try {
         $writes.Count -ne $count) {
         throw 'Graph authentication failure must provide tenant-specific remediation and stop before writes.'
     }
+    # A tenant that requires a Service Tree ID refuses new registrations without one. The refusal must
+    # say how to supply it and create nothing; a supplied ID must be stamped on both new registrations.
+    $applications.Clear(); $federations.Clear(); $grants.Clear(); $principals.Clear(); $principals.Add($armPrincipal)
+    $global:bootstrapTestState.scenario = 'require-service-tree'
+    $parameters.GrantAdminConsent = $false
+    $count = $writes.Count
+    $treeRefusal = $null
+    try { & $bootstrap @parameters | Out-Null } catch { $treeRefusal = $_.Exception.Message }
+    if (-not $treeRefusal -or -not $treeRefusal.Contains('-ServiceManagementReference') -or
+        $applications.Count -ne 0 -or $writes.Count -ne $count) {
+        throw "A Service Tree ID refusal must name the parameter that fixes it and create nothing. Got: $treeRefusal"
+    }
+    $serviceTreeId = '88888888-8888-8888-8888-888888888888'
+    $previewParameters = $parameters.Clone()
+    $previewParameters.Apply = $false
+    $previewParameters.ServiceManagementReference = $serviceTreeId
+    $preview = & $bootstrap @previewParameters | ConvertFrom-Json -AsHashtable
+    if ($preview.serviceManagementReference -ne $serviceTreeId -or $writes.Count -ne $count) { throw 'The preview must show the Service Tree ID it will apply, without writing.' }
+    $applyParameters = $parameters.Clone()
+    $applyParameters.ServiceManagementReference = $serviceTreeId
+    & $bootstrap @applyParameters | Out-Null
+    $registered = @($writes | Select-Object -Skip $count | Where-Object { $_.method -eq 'POST' -and $_.path -eq 'applications' })
+    if ($registered.Count -ne 2 -or @($registered | Where-Object { $_.payload['serviceManagementReference'] -ne $serviceTreeId }).Count) {
+        throw 'Both new registrations must carry the supplied Service Tree ID.'
+    }
     [ordered]@{ result = 'passed'; networkCalls = 0; registrations = 2; federations = 1; consentGrants = 2;
                 idempotentCreates = $true; rejectedConflictsBeforeWrites = 4; consentFailureRecoverable = $true;
-                graphAuthenticationFailureActionable = $true } | ConvertTo-Json -Compress
+                graphAuthenticationFailureActionable = $true; serviceTreeIdRequirementHandled = $true } | ConvertTo-Json -Compress
 } finally {
     Remove-Variable -Name bootstrapTestState -Scope Global -ErrorAction SilentlyContinue
     if ($hadApproval) { $env:APP_ALLOW_AZURE_CHANGES = $oldApproval }

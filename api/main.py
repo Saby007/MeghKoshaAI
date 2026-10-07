@@ -334,6 +334,9 @@ class ScheduleCreateRequest(BaseModel):
     model_config = {"extra": "forbid"}
     subscription_id: str = Field(alias="subscriptionId")
     schedule_start_at: str = Field(alias="scheduleStartAt")
+    window_months: Literal[3, 4, 5, 6] = Field(default=6, alias="windowMonths")
+    daily_enabled: bool = Field(default=True, alias="dailyEnabled")
+    daily_time_utc: str = Field(default="06:00", alias="dailyTimeUtc", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
 
     @field_validator("subscription_id")
     @classmethod
@@ -345,6 +348,9 @@ class ScheduleStateRequest(BaseModel):
     model_config = {"extra": "forbid"}
     state: Literal["active", "paused"]
     schedule_start_at: str | None = Field(default=None, alias="scheduleStartAt")
+    window_months: Literal[3, 4, 5, 6] | None = Field(default=None, alias="windowMonths")
+    daily_enabled: bool | None = Field(default=None, alias="dailyEnabled")
+    daily_time_utc: str | None = Field(default=None, alias="dailyTimeUtc", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 class RunAllExportsRequest(BaseModel):
@@ -753,7 +759,8 @@ async def create_schedule(request: Request, body: ScheduleCreateRequest):
     principal = _control_principal(request)
     subscription = await _verified_schedule_subscription(principal, body.subscription_id)
     try:
-        return await focus_schedules.create(subscription, principal.entra_object_id, body.schedule_start_at)
+        return await focus_schedules.create(subscription, principal.entra_object_id, body.schedule_start_at, body.window_months,
+                                            daily_enabled=body.daily_enabled, daily_time=body.daily_time_utc)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
 
@@ -765,7 +772,8 @@ async def update_schedule(request: Request, subscription_id: str, body: Schedule
     if body.state not in {"active", "paused"}:
         raise HTTPException(status_code=422, detail="Schedule state must be active or paused")
     try:
-        return await focus_schedules.update(subscription, principal.entra_object_id, body.state, body.schedule_start_at)
+        return await focus_schedules.update(subscription, principal.entra_object_id, body.state, body.schedule_start_at, body.window_months,
+                                            daily_enabled=body.daily_enabled, daily_time=body.daily_time_utc)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
 

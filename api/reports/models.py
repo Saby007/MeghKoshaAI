@@ -134,6 +134,8 @@ class CostDetailSummary(BaseModel):
     granularity: Literal["daily"] = "daily"
     dates: list[str] = Field(default_factory=list)
     rows: list[CostDetailRow] = Field(default_factory=list)
+    # The open month the daily pull covers through yesterday (YYYY-MM); its days are estimates until it closes.
+    partial_period: str | None = Field(default=None, alias="partialPeriod")
 
 
 class RegionSpendSummary(BaseModel):

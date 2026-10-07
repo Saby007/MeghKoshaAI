@@ -107,6 +107,8 @@ export type CostDetailSummary = {
   granularity: 'daily';
   dates: string[];
   rows: CostDetailRow[];
+  // The open month (YYYY-MM) the daily pull covers through yesterday; absent in older snapshots.
+  partialPeriod?: string | null;
 };
 
 export type AdvisorScoreSummary = {

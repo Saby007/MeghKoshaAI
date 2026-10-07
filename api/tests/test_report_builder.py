@@ -3,6 +3,7 @@ subscription breakdown, Advisor reconciliation, governance) against synthetic
 Resource Graph / Cost Management / Advisor data.
 """
 
+import dataclasses
 import json
 
 import pytest
@@ -38,6 +39,9 @@ def test_cost_details_preserve_credits_tags_subcent_cost_and_verified_zero_days(
     assert build_cost_details(history, max_rows=1).rows == []
     assert build_cost_details(None).status == "unavailable"
     assert details.model_dump(by_alias=True)["costBasis"] == "EffectiveCost"
+    assert details.partial_period is None
+    open_month = dataclasses.replace(history, partial_period="2026-08")
+    assert build_cost_details(open_month).model_dump(by_alias=True)["partialPeriod"] == "2026-08"
 
 
 def _sample_rows():
@@ -1442,3 +1446,20 @@ def test_commitment_insights_is_unavailable_without_focus_history():
 
     assert report.commitment_insights.available is False
     assert report.commitment_insights.months == []
+
+
+def test_open_month_stays_in_daily_views_but_not_in_month_totals():
+    from reports.builder import _commitment_insights, _spend_history
+
+    def record(day, cost):
+        return DailyCostRecord(day, "sub-1", "One", "Virtual Machines", "group", "/vm", "vm", cost,
+                               service_category="Compute", resource_type="Microsoft.Compute/virtualMachines", charge_category="Usage")
+
+    records = [record("2026-07-30", 10), record("2026-07-31", 10), record("2026-08-01", 4), record("2026-08-02", 4)]
+    history = FocusHistoryData("USD", "2026-07-30", "2026-08-02", 4, ["2026-07", "2026-08"], ["sub-1"], {"sub-1": "One"},
+                               records, partial_period="2026-08")
+    assert [point.month for point in _spend_history(history, None).months] == ["2026-07"]
+    assert [point.month for point in _commitment_insights(history).months] == ["2026-07"]
+    trend = _daily_cost_trend(history)
+    assert [point.date for point in trend.days] == ["2026-07-30", "2026-07-31", "2026-08-01", "2026-08-02"]
+    assert "Data runs through 2026-08-02" in trend.status_message and "2026-08 are estimates" in trend.status_message

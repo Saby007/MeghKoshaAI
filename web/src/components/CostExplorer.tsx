@@ -3,7 +3,7 @@ import { Activity, ArrowRight, Download, TriangleAlert, X } from 'lucide-react';
 import { downloadCostDetailReport, getResourceAvailability, type ResourceAvailability } from '../api';
 import { countTone } from './AnomalyOverview';
 import type { CostDetailSummary, FullReport } from '../report/models';
-import { compareCostGroups, costCoverage, costWindowDates, dailySubscriptionCosts, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { compareCostGroups, costCoverage, costWindowDates, dailySubscriptionCosts, isMonthToDate, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import './cost-explorer.css';
 import { BudgetContext, type BudgetState } from './BudgetContext';
 import { DayAxis, dayAxis } from './TrendChart';
@@ -346,7 +346,7 @@ export function PeriodCostAnomalies({ report, window, onChange, formatMoney, fil
     <CostFilters details={report.costDetails} value={filters} onChange={onFiltersChange} />
     <div className="cost-section-heading"><label className="billing-filter"><span>Analyze by</span><select aria-label="Period anomaly dimension" value={dimension} onChange={(event) => setDimension(event.target.value as CostDimension)}><option value="resource">Resource</option><option value="resourceGroup">Resource group</option><option value="tag" disabled={!filters.tagKey}>Tag value</option><option value="service">Service</option></select></label><CostExportButton report={report} snapshotId={snapshotId} window={window} filters={filters} /></div>
     <h2>Period cost spikes <span className={`cost-count ${countTone(available ? spikes.length : null, true)}`.trim()}>{available ? spikes.length : 'Unavailable'}</span></h2>
-    <p className="billing-provenance">More than 30% above the preceding {coverage.dates.length}-day window. New spend with a zero baseline is not a percentage spike. Separate from the same-weekday statistical detector below.</p>
+    <p className="billing-provenance">More than 30% above {isMonthToDate(window) ? `the same ${coverage.dates.length} days of the previous month` : `the preceding ${coverage.dates.length}-day window`}. New spend with a zero baseline is not a percentage spike. Separate from the same-weekday statistical detector below.</p>
     {!available ? <p role="status">Complete resource cost evidence is required for both {window.startDate} - {window.endDate} and {previous.startDate} - {previous.endDate}.</p> : <>
       <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Period cost spikes"><table className="data-table billing-table"><thead><tr><th>Dimension</th><th>Subscription</th><th>Owner tag</th><th>Selected cost</th><th>Previous cost</th><th>Increase</th></tr></thead><tbody>{spikes.slice(0, limit).map((row) => <tr key={row.id}><th><button type="button" className="finding-link" onClick={() => setSelectedGroupId(row.id)}>{row.name}</button></th><td>{row.subscriptionName}</td><td>{row.owners.join('; ') || 'Not recorded'}</td><td>{money(row.current, formatMoney)}</td><td>{money(row.previous, formatMoney)}</td><td className="cost-increase">{changeLabel(row.percentage)}</td></tr>)}</tbody></table></div>
       {!spikes.length && <p role="status">No resource cost spikes exceeded 30% in this period.</p>}

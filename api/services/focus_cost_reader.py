@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 import csv
 import gzip
 import io
@@ -22,6 +23,7 @@ from services.focus_export_control import normalize_subscription_id
 FOCUS_DATA_VERSION = "1.2-preview"
 _PERIOD_PATTERN = re.compile(r"/(\d{8})-(\d{8})/")
 _FOCUS_EXPORT_NAME = os.environ.get("COST_EXPORT_NAME", "focus-closed-month-meghkoshaai")
+_FOCUS_DAILY_EXPORT_NAME = os.environ.get("COST_EXPORT_DAILY_NAME", "focus-daily-meghkoshaai")
 _cache: dict[tuple[str, ...], tuple[float, "FocusCostData"]] = {}
 _CACHE_TTL_SECONDS = 600.0
 _REQUIRED_COLUMNS = {
@@ -66,6 +68,10 @@ _REQUIRED_COLUMNS = {
 
 class FocusCostDataError(RuntimeError):
     pass
+
+
+class FocusCostFilesMissingError(FocusCostDataError):
+    """A completed run's files are gone, normally removed by the storage retention rules."""
 
 
 @dataclass(frozen=True)
@@ -609,6 +615,30 @@ def _select_common_runs(
     return period, selected, period_path
 
 
+_RUN_FOLDER = re.compile(r"\d{8}-\d{8}")
+
+
+def _run_prefix(subscription_id: str, run: dict, period_path: str) -> str:
+    """Date-range folder that holds the run's own folder: <root>/<export>/<YYYYMMDD-YYYYMMDD>/."""
+    properties = run.get("properties") or {}
+    daily = run.get("_export") == "daily"
+    root = (f"focus-daily/{subscription_id}/{_FOCUS_DAILY_EXPORT_NAME}/" if daily
+            else f"focus/{subscription_id}/{_FOCUS_EXPORT_NAME}/")
+    # Azure reports where it wrote each run; only a date folder inside this export's root is trusted.
+    run_id = str(run.get("name") or "")
+    manifest = str(properties.get("manifestFile") or "").strip("/").removesuffix("/manifest.json")
+    if run_id and manifest.startswith(root) and manifest.endswith(f"/{run_id}"):
+        folder = manifest[len(root):-len(run_id) - 1]
+        if _RUN_FOLDER.fullmatch(folder):
+            return f"{root}{folder}/"
+    if daily:
+        # A month-to-date run is written to the whole month's folder (20261001-20261031), not its own dates.
+        start = date.fromisoformat(str(properties["startDate"])[:10])
+        end = start.replace(day=calendar.monthrange(start.year, start.month)[1])
+        return f"{root}{start:%Y%m%d}-{end:%Y%m%d}/"
+    return f"{root}{period_path}/"
+
+
 def _download_run_files(
     subscription_ids: list[str],
     selected_runs: dict[str, dict],
@@ -617,17 +647,18 @@ def _download_run_files(
     container = focus_export_download.get_container_client()
     files: dict[str, bytes] = {}
     for subscription_id in subscription_ids:
-        run_id = str(selected_runs[subscription_id].get("name") or "")
+        run = selected_runs[subscription_id]
+        run_id = str(run.get("name") or "")
         if not run_id:
             raise FocusCostDataError(f"Completed FocusCost run has no ID for {subscription_id}")
-        prefix = f"focus/{subscription_id}/{_FOCUS_EXPORT_NAME}/{period_path}/{run_id}/"
+        prefix = f"{_run_prefix(subscription_id, run, period_path)}{run_id}/"
         blobs = [
             blob
             for blob in container.list_blobs(name_starts_with=prefix)
             if blob.name.lower().endswith((".csv", ".csv.gz"))
         ]
         if not blobs:
-            raise FocusCostDataError(f"Completed FocusCost run has no CSV files for {subscription_id}")
+            raise FocusCostFilesMissingError(f"Completed FocusCost run has no CSV files for {subscription_id}")
         for blob in blobs:
             content = container.download_blob(blob.name).readall()
             if len(content) != int(blob.size or 0):

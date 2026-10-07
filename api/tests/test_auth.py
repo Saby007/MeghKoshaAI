@@ -480,8 +480,8 @@ def test_http_schedule_selection_is_bound_to_verified_user_and_rechecked_before_
     async def load(item):
         return main.focus_schedules.schedule_view(item, None)
 
-    async def create(item, actor, start):
-        writes.append((item, actor, start))
+    async def create(item, actor, start, window_months, **daily):
+        writes.append((item, actor, start, window_months, daily))
         return main.focus_schedules.schedule_view(item, None)
 
     monkeypatch.setattr(main.user_arm_client, "discover_schedule_subscriptions", eligible)
@@ -504,7 +504,7 @@ def test_http_schedule_selection_is_bound_to_verified_user_and_rechecked_before_
         response = client.post("/api/schedules", headers=headers, json=body)
         assert response.status_code == 201 and response.headers["cache-control"] == "no-store"
         assert token not in response.text
-    assert writes == [(subscription, OBJECT_ID, "2030-09-05T03:00:00Z")]
+    assert writes == [(subscription, OBJECT_ID, "2030-09-05T03:00:00Z", 6, {"daily_enabled": True, "daily_time": "06:00"})]
     assert lookups == [None, ["bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"], [subscription["subscriptionId"]]]
 
 

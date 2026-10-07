@@ -54,8 +54,8 @@ import { AICostAlerts, useAnomalySummary, type AnomalyState } from './AnomalyOve
 import { billingDates, billingWindow } from '../report/billingHistory';
 import { CostExportButton, CostFilters, CostWindowMetrics, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, ResourceCostTable, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
-import { costWindowDates, matchesCostFilter, monthCostWindow, presetCostWindow, previousCostWindow, sameTagKey, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
-import { BudgetContext, BudgetDailyChart, BudgetExpiry, budgetDailySummary, budgetSummaryText, budgetTargetsTag, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
+import { costWindowDates, defaultCostWindow as initialCostWindow, matchesCostFilter, previousCostWindow, sameTagKey, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { BudgetContext, BudgetDailyChart, budgetDailySummary, budgetSummaryText, budgetTargetsTag, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
 import { buildTakeaways, ExecutiveTakeaways } from './ExecutiveTakeaways';
 import { ServiceRetirements } from './ServiceRetirements';
 import { DailyBarChart, DayAxis, dayAxis, useChartWidth } from './TrendChart';
@@ -585,8 +585,8 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
      how it is mounted in tests and how a caller that does not want to own a
      window can still use it. Same contract as a React input with value vs
      defaultValue. */
-  const defaultCostWindow = (value: FullReport) => monthCostWindow(value.reportMetadata.periodStart, value.reportMetadata.periodEnd)
-    ?? presetCostWindow(value.costDetails?.dates ?? value.dailyCostTrend.days.map((day) => day.date), 30);
+  const defaultCostWindow = (value: FullReport) => initialCostWindow(value.costDetails, value.reportMetadata.periodStart, value.reportMetadata.periodEnd,
+    value.costDetails?.dates ?? value.dailyCostTrend.days.map((day) => day.date));
   const [uncontrolledCostWindow, setUncontrolledCostWindow] = useState<CostWindow>(() => defaultCostWindow(report));
   const costWindow = controlledCostWindow ?? uncontrolledCostWindow;
   const setCostWindow = onCostWindowChange ?? setUncontrolledCostWindow;

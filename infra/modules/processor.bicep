@@ -10,7 +10,11 @@ param processorImage string
 param storageUrl string
 param storageResourceId string
 param exportName string
-param schedule string = '*/15 * * * *'
+param dailyExportName string
+@minValue(1)
+@maxValue(6)
+param exportParallelMonths int = 1
+param schedule string = '*/5 * * * *'
 
 resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: registryName
@@ -62,6 +66,8 @@ resource processor 'Microsoft.App/jobs@2024-03-01' = {
             { name: 'COST_EXPORT_STORAGE_URL', value: storageUrl }
             { name: 'COST_EXPORT_STORAGE_RESOURCE_ID', value: storageResourceId }
             { name: 'COST_EXPORT_NAME', value: exportName }
+            { name: 'COST_EXPORT_DAILY_NAME', value: dailyExportName }
+            { name: 'FOCUS_EXPORT_PARALLEL_MONTHS', value: string(exportParallelMonths) }
             { name: 'COST_EXPORT_CONTAINER', value: 'cost-exports' }
             { name: 'CONTROL_STATE_CONTAINER', value: 'control-state' }
             { name: 'MEGHKOSHA_AI_ENABLED', value: 'false' }

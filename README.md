@@ -1,8 +1,8 @@
 # MeghKoshaAI
 
-**MeghKoshaAI** is a self-hosted Azure cost-assessment and FinOps dashboard. It turns native Azure Cost Management FOCUS exports into an executive-ready cost report, a rolling six-month cost history, resource-level optimization recommendations, and an optional AI narrative — all running on your own infrastructure, in your own Azure subscription, under your own identity.
+**MeghKoshaAI** is a self-hosted Azure cost-assessment and FinOps dashboard. It turns native Azure Cost Management FOCUS exports into an executive-ready cost report, a rolling cost history (3–6 closed months plus the current month through yesterday), resource-level optimization recommendations, and an optional AI narrative — all running on your own infrastructure, in your own Azure subscription, under your own identity.
 
-You deploy it once into a subscription of your choice, grant it three read/cost-management role assignments on the subscriptions you want it to analyze, and it takes care of the rest: creating the native cost export, scheduling the rolling six-month pull, and rendering the dashboards below.
+You deploy it once into a subscription of your choice, grant it three read/cost-management role assignments on the subscriptions you want it to analyze, and it takes care of the rest: creating the native cost exports, scheduling the rolling monthly and daily pulls, and rendering the dashboards below.
 
 > This is a reference deployment intended for a single organization/tenant to run for itself. It is not a multi-tenant SaaS product — every deployment is isolated to the Azure subscription it's installed into.
 
@@ -21,7 +21,7 @@ You deploy it once into a subscription of your choice, grant it three read/cost-
 ## What it does
 
 - **Reads, never writes billing data.** All cost figures come from Azure's own native FOCUS 1.2-preview cost export — the same export format used by FinOps toolkit customers — so the numbers reconcile with your Azure invoice.
-- **Sets itself up.** Once the required roles are visible to its managed identity, the app automatically creates the native export and a six-month rolling schedule; you do not hand-configure Cost Management exports yourself.
+- **Sets itself up.** Once the required roles are visible to its managed identity, the app creates the native exports (closed months plus a daily month-to-date export) and a rolling schedule of 3–6 months; you do not hand-configure Cost Management exports yourself.
 - **Assesses resources, not just spend.** It cross-references billed cost with resource inventory, Azure Advisor, Azure Monitor metrics, and SQL/compute/storage/network signals to flag idle and overprovisioned resources.
 - **Explains itself.** An optional Microsoft Foundry-backed agent turns the reconciled findings into a written executive summary and answers follow-up questions in a chat panel — this stays off until you explicitly enable it.
 - **Stays inside your tenant.** Authentication is delegated Microsoft Entra ID sign-in; the API validates a bearer token issued for itself. The browser never receives an Azure Resource Manager token, and the app never requests Entra admin consent.
@@ -75,7 +75,7 @@ flowchart TB
 | Profile | Adds | Use it when |
 | --- | --- | --- |
 | `core` | Network, Container Apps environment, registry, logging, API/web managed identities | You just want the foundation up, or you're not ready to run exports yet |
-| `data` | HNS-enabled ADLS Gen2 storage, private Blob/DFS endpoints, container-scoped data roles, the processor identity | You want the app to create exports and run the six-month rolling schedule |
+| `data` | HNS-enabled ADLS Gen2 storage, private Blob/DFS endpoints, container-scoped data roles, the processor identity | You want the app to create exports and run the rolling monthly and daily pulls |
 | `ai` | A private Foundry account/project and model deployments | You want the executive-summary narrative and the Chat tab |
 
 Each profile is a superset of the previous one. Application containers only deploy once you supply built image references (see [Deploying to Azure](#deploying-to-azure)); the AI runtime and processor stay disabled until you explicitly enable them, even after the underlying infrastructure exists.
@@ -84,7 +84,9 @@ Each profile is a superset of the previous one. Application containers only depl
 
 **Identity and authorization.** The single-page app requests only its own API's `access_as_user` delegated scope from Entra ID — never an Azure Resource Manager scope. The API independently validates that bearer token's issuer, audience, tenant, and client before trusting it. Azure-side calls (discovering subscriptions, reading resources, creating exports) are made with the API's own **user-assigned managed identity** via `ManagedIdentityCredential`, then filtered against the signed-in user's own Azure RBAC role on each subscription — so a user only ever sees subscriptions they themselves have access to, not everything the identity can reach.
 
-**Export creation and scheduling.** Once a target subscription's Reader and Cost Management Contributor grants are visible to the API identity, opening **Schedules** automatically creates a native FOCUS export (CSV/gzip, partitioned, overwrite-enabled) pointing at the deployment's own ADLS account, and saves an active six-month schedule — no manual export configuration step is required. A separate **processor** identity (kept intentionally distinct from the API identity) runs the actual monthly export executions on a cron schedule, checkpointing progress per subscription so a restart or a missed tick doesn't re-run months that already succeeded.
+**Export creation and scheduling.** Once a target subscription's Reader and Cost Management Contributor grants are visible to the API identity, opening **Schedules** automatically creates two native FOCUS exports (CSV/gzip, partitioned, overwrite-enabled) in the deployment's own storage account — closed months under `cost-exports/focus/` and daily month-to-date snapshots under `cost-exports/focus-daily/` — and saves an active schedule — no manual export configuration step is required. Each schedule keeps 3–6 closed months of history (default 6; anomaly detection needs at least 60 days). **Export** re-pulls that whole window. On the schedule's monthly day the worker pulls only closed months that have no copy taken after Azure finalized them (Azure adds late charges for up to 72 hours after a month ends), which is normally just the month that closed. Every day after the schedule's UTC daily-pull time it also pulls the current month through yesterday, plus last month during the first five days. A separate **processor** identity (kept intentionally distinct from the API identity) runs these export executions every 5 minutes (`APP_PROCESSOR_CRON`), checkpointing progress per subscription so a restart or a missed tick doesn't re-run months that already succeeded. A month that finishes is followed by the next one in the same tick; throttled requests wait as long as Azure asks (1–15 minutes) without counting as failures, and `APP_EXPORT_PARALLEL_MONTHS` (default 1) sets how many months run at once.
+
+**Retention.** Storage lifecycle rules delete daily snapshots after 60 days (`APP_DAILY_EXPORT_RETENTION_DAYS`) and closed-month files after 214 days (`APP_CLOSED_MONTH_RETENTION_DAYS`, at least 190 so the longest 6-month window is always covered). Reports read history from the files that remain: the month to date appears in daily views as an estimate and is left out of monthly totals until the month closes.
 
 **Report generation.** The API streams each month's compressed FOCUS CSV directly from ADLS, validates its schema and row shape against the delivery manifest, and reconciles it with a live resource inventory, Azure Advisor recommendations, and (where enabled) Azure Monitor metrics before rendering the dashboards below.
 
@@ -167,6 +169,8 @@ pwsh ./scripts/deploy-end-to-end.ps1 `
 
 Every phase is idempotent, so a run that stops partway can simply be rerun — it redeploys the current code once and then skips whatever is already settled, without deleting the environment. Because the run is long, prefer a terminal that won't be closed or recycled underneath it.
 
+**The run never waits on a question you can't see.** Every `azd` command runs with `--no-prompt`, so a new environment is created and becomes the folder's default azd environment without asking. If `azd` still needs an answer, the script reruns that command in the terminal so you can answer it. If your tenant requires a Service Tree ID on the sign-in app registrations, the script asks for it there too.
+
 | Switch | Use it when |
 | --- | --- |
 | `-PlanOnly` | Print exactly what would happen without touching Azure. |
@@ -176,8 +180,9 @@ Every phase is idempotent, so a run that stops partway can simply be rerun — i
 | `-SkipModelAvailabilityCheck` | Deploy anyway when you are certain the regional catalogue is wrong. |
 | `-MaxAttempts` | Allow more `azd up` retries (default 3). |
 | `-SkipIdentityBootstrap` | A separate Entra administrator creates the app registrations. |
+| `-ServiceManagementReference` | Your tenant requires a Service Tree ID on app registrations. If you leave it out, the script asks when the tenant refuses, suggests the ID your existing registrations use, and remembers your answer. |
 | `-SkipRoleAssignments` | A subscription Owner grants the three roles separately. |
-| `-SkipProcessor` | Scheduled six-month exports are intentionally out of scope. |
+| `-SkipProcessor` | Scheduled exports are intentionally out of scope. |
 | `-SkipPreview` | Skip `azd provision --preview` on a rerun you have already reviewed. |
 
 #### Choosing regions
@@ -224,7 +229,7 @@ azd auth login
 pwsh ./scripts/deploy-ai.ps1 -EnvironmentName my-environment -Location centralindia
 ```
 
-The helper previews before deploying, configures the recommended `ai` profile, deploys the app-local Model Router, builds remotely in ACR, retries only the known Foundry-readiness and first-image-handoff conditions, enables the six-month processor after the API image exists, and verifies `/api/health`. Use `-SkipProcessor` only when schedules are intentionally out of scope.
+The helper previews before deploying, configures the recommended `ai` profile, deploys the app-local Model Router, builds remotely in ACR, retries only the known Foundry-readiness and first-image-handoff conditions, enables the scheduled processor after the API image exists, and verifies `/api/health`. Use `-SkipProcessor` only when schedules are intentionally out of scope.
 
 Unlike Option 1, this helper stops once the app is running — you still do [step 4 (sign-in)](#4-configure-sign-in) and [step 5 (role assignments)](#5-grant-access-to-the-subscriptions-you-want-to-assess) yourself.
 
@@ -282,7 +287,7 @@ For both `data` and `ai`, keep `APP_EXPORT_TRUSTED_SERVICES=true` — [modules/d
 
 > The export storage account is plain Blob storage (`isHnsEnabled: false`), not ADLS Gen2 — this matches every prior environment (Dev, Phase1) that has reliably created FOCUS exports. An earlier revision of this repo briefly enabled the hierarchical namespace and fully disabled `publicNetworkAccess`; that combination is untested with Cost Management's export-creation call and is not required by Microsoft's own documented firewall setup (`networkAcls.defaultAction: Deny` + `bypass: AzureServices` is sufficient). Note that in tenants with central governance policies (for example `StorageAccount_PublicNetwork_Modify`), `publicNetworkAccess` may still end up `Disabled` regardless of `APP_EXPORT_TRUSTED_SERVICES` — that's expected and fine; the `AzureServices` bypass is what actually matters, not the `publicNetworkAccess` value itself.
 
-The helper enables the scheduled six-month FOCUS worker automatically once `SERVICE_API_IMAGE_NAME` exists. When using raw `azd up`, point the processor at the **same image `azd` built for the API service** after the first image publication:
+The helper enables the scheduled FOCUS worker automatically once `SERVICE_API_IMAGE_NAME` exists. When using raw `azd up`, point the processor at the **same image `azd` built for the API service** after the first image publication:
 
 ```powershell
 azd env set APP_ENABLE_PROCESSOR true
@@ -411,6 +416,8 @@ $env:APP_ALLOW_AZURE_CHANGES = 'true'
 ./scripts/bootstrap-identity.ps1 -TenantId $AZURE_TENANT_ID -SubscriptionId $AZURE_SUBSCRIPTION_ID -EnvironmentName $AZURE_ENV_NAME -WebOrigin $APP_WEB_ORIGIN -OboManagedIdentityResourceId $MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID -Apply
 ```
 
+If the script stops because the tenant requires a Service Tree ID (`serviceManagementReference`) on new app registrations, add `-ServiceManagementReference <service-tree-id>` and rerun.
+
 If Azure CLI reports `AADSTS530004` for an external/guest administrator, the resource tenant is requiring a compliant device without accepting the user's home-tenant compliance claim. A resource-tenant Entra administrator must enable the appropriate inbound cross-tenant **Trust compliant devices** setting (External Identities > Cross-tenant access settings) or adjust the applicable Conditional Access policy. Alternatively, run the bootstrap as an authorized member of the resource tenant from a compliant device. After the policy/account issue is resolved, refresh the Graph login and rerun:
 
 ```powershell
@@ -434,7 +441,7 @@ See [the three manual role assignments](#the-three-manual-role-assignments) belo
 
 #### 6. Open the app
 
-Sign in, open **Schedules**, and use **Refresh schedules**. Once the roles above are visible, the app finishes export and schedule setup on its own. After the first six-month cycle completes, open **Report** and select **Run report**.
+Sign in, open **Schedules**, and use **Refresh schedules**. Once the roles above are visible, the app finishes export and schedule setup on its own. After the first export cycle completes, open **Report** and select **Run report**.
 
 If **Schedules** keeps reporting **Export status unavailable** or *"FOCUS export configuration could not be confirmed"* even though all three role assignments are in place, re-check the [`Microsoft.CostManagementExports` registration](#prerequisites) on the subscription you deployed into — that is the most common cause, and it is not something role assignments or a redeploy can fix.
 
@@ -446,7 +453,7 @@ Subscription access is deliberately kept **outside** the application — there i
 | --- | --- | --- |
 | API identity | **Reader** | Lets the app discover the subscription and read its resources, tags, policy, and Advisor data for the dashboards. |
 | API identity | **Cost Management Contributor** | Lets the app create the native FOCUS export and save the schedule — a write action that Cost Management **Reader** cannot perform. |
-| Processor identity | **Cost Management Contributor** | Lets the separate scheduled worker actually execute each monthly export run. Without this, the schedule can look "active" while the six-month cycle silently fails to advance. |
+| Processor identity | **Cost Management Contributor** | Lets the separate scheduled worker actually execute each export run. Without this, the schedule can look "active" while monthly and daily pulls silently fail to advance. |
 
 **Portal:** find both identities in **Azure portal → your resource group → id-api-\* / id-processor-\*** (their names start with those prefixes), then **Subscriptions → target subscription → Access control (IAM) → Add role assignment** for each role/identity pair above.
 

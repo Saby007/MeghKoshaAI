@@ -267,6 +267,9 @@ def _spend_history(
     if history:
         for record in history.records:
             month = record.date[:7]
+            if month == history.partial_period:
+                # The open month would read as a sharp drop next to whole months.
+                continue
             category = _spend_category(record.resource_type, record.service_category or record.service_name)
             add_cost(month, record.subscription_id, category, record.effective_cost)
     if focus_data:
@@ -344,6 +347,8 @@ def _daily_cost_trend(history: FocusHistoryData | None, days: int = 180) -> Dail
         statusMessage=(
             f"Last {len(points)} complete FOCUS export day{'s' if len(points) != 1 else ''}; "
             "average hourly cost is each day's total divided by 24, not a real hourly billing figure."
+            + (f" Data runs through {history.history_end}; days in {history.partial_period} are estimates until Azure closes the month."
+               if history.partial_period else "")
         ),
         days=points,
     )
@@ -1345,7 +1350,9 @@ def _commitment_insights(history: FocusHistoryData | None) -> CommitmentInsights
         }
 
     buckets: dict[str, dict] = {}
-    for record in history.records:
+    # The open month is incomplete, so it isn't reported as a month alongside closed ones.
+    closed_records = [record for record in history.records if record.date[:7] != history.partial_period]
+    for record in closed_records:
         bucket = buckets.setdefault(record.date[:7], _empty_bucket())
         is_usage = record.charge_category.lower() == "usage"
         status = record.commitment_discount_status.lower()
@@ -1387,7 +1394,7 @@ def _commitment_insights(history: FocusHistoryData | None) -> CommitmentInsights
     # Second pass: PAYG-eligible usage cost for resource types that had at least one
     # reservation-covered row in the same month - the denominator for org-level coverage.
     payg_eligible: dict[str, float] = {month: 0.0 for month in buckets}
-    for record in history.records:
+    for record in closed_records:
         month = record.date[:7]
         bucket = buckets[month]
         if not bucket["reservation_eligible_types"]:

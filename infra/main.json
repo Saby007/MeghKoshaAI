@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "4778437230972818008"
+      "templateHash": "6485073714621672345"
     }
   },
   "definitions": {
@@ -149,6 +149,33 @@
       "minValue": 1,
       "maxValue": 365
     },
+    "dailyExportRetentionDays": {
+      "type": "int",
+      "defaultValue": 60,
+      "minValue": 7,
+      "maxValue": 365,
+      "metadata": {
+        "description": "Days to keep daily month-to-date FOCUS snapshots under cost-exports/focus-daily/."
+      }
+    },
+    "closedMonthRetentionDays": {
+      "type": "int",
+      "defaultValue": 214,
+      "minValue": 190,
+      "maxValue": 3650,
+      "metadata": {
+        "description": "Days to keep closed-month FOCUS exports under cost-exports/focus/. Must cover the longest 6-month history window."
+      }
+    },
+    "exportParallelMonths": {
+      "type": "int",
+      "defaultValue": 1,
+      "minValue": 1,
+      "maxValue": 6,
+      "metadata": {
+        "description": "Months each subscription may export at once. Keep 1 until Azure is confirmed to run one export's months in parallel."
+      }
+    },
     "enableProcessor": {
       "type": "bool",
       "defaultValue": false,
@@ -176,7 +203,10 @@
     },
     "processorSchedule": {
       "type": "string",
-      "defaultValue": "*/15 * * * *"
+      "defaultValue": "*/5 * * * *",
+      "metadata": {
+        "description": "Worker cadence. Each tick advances monthly pulls and starts daily pulls once their UTC time has passed."
+      }
     },
     "foundryProjectName": {
       "type": "string",
@@ -224,7 +254,8 @@
     "deployApplications": "[and(not(empty(parameters('apiImage'))), not(empty(parameters('webImage'))))]",
     "deployProcessor": "[and(and(variables('dataEnabled'), parameters('enableProcessor')), not(empty(parameters('processorImage'))))]",
     "resourceToken": "[toLower(uniqueString(subscription().id, parameters('environmentName'), if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))))]",
-    "exportName": "[format('focus-closed-month-{0}', variables('resourceToken'))]"
+    "exportName": "[format('focus-closed-month-{0}', variables('resourceToken'))]",
+    "dailyExportName": "[format('focus-daily-{0}', variables('resourceToken'))]"
   },
   "resources": {
     "group": {
@@ -712,6 +743,12 @@
           },
           "blobRetentionDays": {
             "value": "[parameters('blobRetentionDays')]"
+          },
+          "dailyExportRetentionDays": {
+            "value": "[parameters('dailyExportRetentionDays')]"
+          },
+          "closedMonthRetentionDays": {
+            "value": "[parameters('closedMonthRetentionDays')]"
           }
         },
         "template": {
@@ -721,7 +758,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "15794514357208644712"
+              "templateHash": "9212119494432200011"
             }
           },
           "parameters": {
@@ -772,9 +809,28 @@
               "defaultValue": 7,
               "minValue": 1,
               "maxValue": 365
+            },
+            "dailyExportRetentionDays": {
+              "type": "int",
+              "defaultValue": 60,
+              "minValue": 7,
+              "maxValue": 365,
+              "metadata": {
+                "description": "Days to keep daily month-to-date FOCUS snapshots (cost-exports/focus-daily/)."
+              }
+            },
+            "closedMonthRetentionDays": {
+              "type": "int",
+              "defaultValue": 214,
+              "minValue": 190,
+              "maxValue": 3650,
+              "metadata": {
+                "description": "Days to keep closed-month FOCUS exports (cost-exports/focus/); covers the longest 6-month window."
+              }
             }
           },
           "variables": {
+            "expireVersions": "[if(parameters('blobDataProtection'), createObject('version', createObject('delete', createObject('daysAfterCreationGreaterThan', parameters('blobRetentionDays')))), createObject())]",
             "storageServices": [
               "blob"
             ]
@@ -846,6 +902,53 @@
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Storage/storageAccounts/blobServices', format('st{0}', parameters('resourceToken')), 'default')]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/managementPolicies",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', format('st{0}', parameters('resourceToken')), 'default')]",
+              "properties": {
+                "policy": {
+                  "rules": [
+                    {
+                      "name": "focus-daily-snapshots",
+                      "enabled": true,
+                      "type": "Lifecycle",
+                      "definition": {
+                        "filters": {
+                          "blobTypes": [
+                            "blockBlob"
+                          ],
+                          "prefixMatch": [
+                            "cost-exports/focus-daily/"
+                          ]
+                        },
+                        "actions": "[union(createObject('baseBlob', createObject('delete', createObject('daysAfterModificationGreaterThan', parameters('dailyExportRetentionDays')))), variables('expireVersions'))]"
+                      }
+                    },
+                    {
+                      "name": "focus-closed-months",
+                      "enabled": true,
+                      "type": "Lifecycle",
+                      "definition": {
+                        "filters": {
+                          "blobTypes": [
+                            "blockBlob"
+                          ],
+                          "prefixMatch": [
+                            "cost-exports/focus/"
+                          ]
+                        },
+                        "actions": "[union(createObject('baseBlob', createObject('delete', createObject('daysAfterModificationGreaterThan', parameters('closedMonthRetentionDays')))), variables('expireVersions'))]"
+                      }
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "containers",
+                "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]"
               ]
             },
             {
@@ -1869,6 +1972,14 @@
                 "value": "[variables('exportName')]"
               },
               {
+                "name": "COST_EXPORT_DAILY_NAME",
+                "value": "[variables('dailyExportName')]"
+              },
+              {
+                "name": "FOCUS_EXPORT_PARALLEL_MONTHS",
+                "value": "[string(parameters('exportParallelMonths'))]"
+              },
+              {
                 "name": "COST_EXPORT_LOCATION",
                 "value": "[parameters('location')]"
               },
@@ -2190,6 +2301,12 @@
           "exportName": {
             "value": "[variables('exportName')]"
           },
+          "dailyExportName": {
+            "value": "[variables('dailyExportName')]"
+          },
+          "exportParallelMonths": {
+            "value": "[parameters('exportParallelMonths')]"
+          },
           "schedule": {
             "value": "[parameters('processorSchedule')]"
           }
@@ -2201,7 +2318,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "3257746197993309152"
+              "templateHash": "2356258718951169693"
             }
           },
           "parameters": {
@@ -2237,9 +2354,18 @@
             "exportName": {
               "type": "string"
             },
+            "dailyExportName": {
+              "type": "string"
+            },
+            "exportParallelMonths": {
+              "type": "int",
+              "defaultValue": 1,
+              "minValue": 1,
+              "maxValue": 6
+            },
             "schedule": {
               "type": "string",
-              "defaultValue": "*/15 * * * *"
+              "defaultValue": "*/5 * * * *"
             }
           },
           "resources": [
@@ -2323,6 +2449,14 @@
                         {
                           "name": "COST_EXPORT_NAME",
                           "value": "[parameters('exportName')]"
+                        },
+                        {
+                          "name": "COST_EXPORT_DAILY_NAME",
+                          "value": "[parameters('dailyExportName')]"
+                        },
+                        {
+                          "name": "FOCUS_EXPORT_PARALLEL_MONTHS",
+                          "value": "[string(parameters('exportParallelMonths'))]"
                         },
                         {
                           "name": "COST_EXPORT_CONTAINER",
@@ -2445,6 +2579,10 @@
     "COST_EXPORT_NAME": {
       "type": "string",
       "value": "[variables('exportName')]"
+    },
+    "COST_EXPORT_DAILY_NAME": {
+      "type": "string",
+      "value": "[variables('dailyExportName')]"
     },
     "COST_EXPORT_STORAGE_RESOURCE_ID": {
       "type": "string",

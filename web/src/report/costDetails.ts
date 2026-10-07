@@ -1,6 +1,11 @@
 import type { CostDetailRow, CostDetailSummary } from './models';
 
-export type CostWindow = { startDate: string; endDate: string };
+export type CostWindow = {
+  startDate: string;
+  endDate: string;
+  // Set only on the open month to date, which compares with the same days of the previous month.
+  monthToDate?: boolean;
+};
 export type CostDimension = 'resource' | 'subscription' | 'service' | 'resourceType' | 'region' | 'resourceGroup' | 'tag';
 export type CostFilter = { subscriptionId?: string; resourceId?: string; serviceName?: string; resourceGroup?: string; region?: string; tagKey?: string; tagValue?: string; requiredTagKeys?: string };
 const DAY_MS = 86400000;
@@ -35,6 +40,21 @@ export function monthCostWindow(periodStart: string, periodEnd: string): CostWin
     : null;
 }
 
+/* The daily pull adds the open month through yesterday. When a report has it,
+   the page opens on that month to date so the newest days are what you see
+   first; the assessed (closed) month stays one click away. */
+export function monthToDateWindow(details: CostDetailSummary | undefined): CostWindow | null {
+  const period = details?.partialPeriod;
+  const latest = (details?.dates ?? []).filter(validCostDate).sort().at(-1);
+  if (!period || !/^\d{4}-\d{2}$/.test(period) || !latest || latest.slice(0, 7) !== period) return null;
+  return { startDate: `${period}-01`, endDate: latest, monthToDate: true };
+}
+
+/* The initial window for a report: the open month to date, else the assessed month, else the last 30 days. */
+export function defaultCostWindow(details: CostDetailSummary | undefined, periodStart: string, periodEnd: string, dates: string[]): CostWindow {
+  return monthToDateWindow(details) ?? monthCostWindow(periodStart, periodEnd) ?? presetCostWindow(dates, 30);
+}
+
 function lastDayOfMonth(year: number, monthIndex: number): number {
   return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
 }
@@ -47,17 +67,27 @@ export function isCalendarMonth(window: CostWindow): boolean {
     && window.endDate === `${window.startDate.slice(0, 8)}${String(lastDayOfMonth(year, month - 1)).padStart(2, '0')}`;
 }
 
+/* The open month to date (1-4 Oct). Other windows that happen to start on the
+   1st, such as a 7-day range ending on the 7th, keep rolling comparisons. */
+export function isMonthToDate(window: CostWindow): boolean {
+  return window.monthToDate === true && validCostDate(window.startDate) && validCostDate(window.endDate) && window.startDate.endsWith('-01')
+    && window.startDate.slice(0, 7) === window.endDate.slice(0, 7) && window.startDate <= window.endDate && !isCalendarMonth(window);
+}
+
 export function previousCostWindow(window: CostWindow): CostWindow {
   /* A calendar month compares with the previous calendar month, so days pair
      by day of month (Aug 2 with Jul 2). Shifting by day count instead paired
      Aug 2 with Jul 3, and for a 30-day month would have borrowed a day from
      the month before that. */
-  if (isCalendarMonth(window)) {
+  if (isCalendarMonth(window) || isMonthToDate(window)) {
     const [year, month] = window.startDate.split('-').map(Number);
     const previousYear = month === 1 ? year - 1 : year;
     const previousMonth = month === 1 ? 12 : month - 1;
     const prefix = `${previousYear}-${String(previousMonth).padStart(2, '0')}`;
-    return { startDate: `${prefix}-01`, endDate: `${prefix}-${String(lastDayOfMonth(previousYear, previousMonth - 1)).padStart(2, '0')}` };
+    const lastDay = lastDayOfMonth(previousYear, previousMonth - 1);
+    // A month to date compares with the same days of the previous month (1-4 Oct with 1-4 Sep).
+    const endDay = isCalendarMonth(window) ? lastDay : Math.min(Number(window.endDate.slice(8)), lastDay);
+    return { startDate: `${prefix}-01`, endDate: `${prefix}-${String(endDay).padStart(2, '0')}` };
   }
   const days = costWindowDates(window).length;
   return days ? { startDate: shiftCostDate(window.startDate, -days), endDate: shiftCostDate(window.startDate, -1) } : { startDate: '', endDate: '' };
@@ -69,7 +99,7 @@ export function previousCostWindow(window: CostWindow): CostWindow {
    paired with the 30th a second time and counted twice in period totals. */
 export function comparisonDate(window: CostWindow, index: number): string {
   const previous = previousCostWindow(window);
-  if (isCalendarMonth(window)) return costWindowDates(previous)[index] ?? '';
+  if (isCalendarMonth(window) || isMonthToDate(window)) return costWindowDates(previous)[index] ?? '';
   return shiftCostDate(previous.startDate, index);
 }
 

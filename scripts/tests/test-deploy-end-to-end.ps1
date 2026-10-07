@@ -26,6 +26,14 @@ $global:deployTestState = @{
     roleAssignments = [System.Collections.Generic.List[object]]::new()
     roleCreates = [System.Collections.Generic.List[object]]::new()
     bootstrapCalls = 0
+    # azd calls made without --no-prompt (sign-in excepted); only the deliberate rerun in the terminal may appear.
+    interactiveAzd = [System.Collections.Generic.List[string]]::new()
+    needsAnswer = $false
+    requireServiceTree = $false
+    serviceTreeId = '88888888-8888-8888-8888-888888888888'
+    serviceTreeIds = [System.Collections.Generic.List[string]]::new()
+    answers = [System.Collections.Generic.List[string]]::new()
+    questions = [System.Collections.Generic.List[string]]::new()
     acrBuilds = [System.Collections.Generic.List[object]]::new()
     buildStatus = 'Succeeded'
     providerChecks = 0
@@ -67,6 +75,16 @@ function Get-StubArgument {
 
 function Start-Sleep { param([int] $Seconds) }
 
+function Read-Host {
+    param([string] $Prompt)
+    $state = $global:deployTestState
+    $state.questions.Add($Prompt)
+    if (-not $state.answers.Count) { throw 'The helper asked a question the test did not expect.' }
+    $answer = $state.answers[0]
+    $state.answers.RemoveAt(0)
+    return $answer
+}
+
 function Invoke-WebRequest {
     param($Uri, [switch] $UseBasicParsing, [int] $TimeoutSec)
     if ("$Uri" -ne 'https://web.example.test/api/health') { throw "Unexpected health probe: $Uri" }
@@ -80,9 +98,13 @@ function git {
 }
 
 function azd {
-    $a = @($args)
+    $raw = @($args)
     $global:LASTEXITCODE = 0
     $state = $global:deployTestState
+    # The positional parsing below works on the arguments without the flag.
+    $noPrompt = $raw -contains '--no-prompt'
+    $a = @($raw | Where-Object { $_ -ne '--no-prompt' })
+    if (-not $noPrompt -and -not ($a[0] -eq 'auth' -and $a[1] -eq 'login')) { $state.interactiveAzd.Add($a -join ' ') }
     $environment = Get-StubArgument $a '--environment'
     if ($a[0] -eq 'auth' -and $a[1] -eq 'login') {
         if ($a -contains '--check-status') {
@@ -152,6 +174,17 @@ function azd {
     }
     if ($a[0] -eq 'up') {
         $values = $state.environments[$environment]
+        if ($state.needsAnswer) {
+            # With --no-prompt azd reports the question it could not ask; the terminal rerun answers it.
+            if ($noPrompt) {
+                $state.upCalls.Add('needs-answer')
+                Write-Output "ERROR: prompting for location: no default response for prompt 'Select an Azure location to use'"
+                $global:LASTEXITCODE = 1
+                return
+            }
+            $state.needsAnswer = $false
+            $state.upCalls.Add('answered')
+        }
         if ($state.failNextUp) {
             $message = $state.failNextUp
             if (-not $state.failPermanently) { $state.failNextUp = '' }
@@ -264,6 +297,10 @@ function az {
         $state.roleCreates.Add($assignment)
         return
     }
+    if ($a[0] -eq 'ad' -and $a[1] -eq 'app' -and $a[2] -eq 'list') {
+        if ($a -notcontains '--show-mine') { throw "Only the operator's own registrations may suggest a Service Tree ID." }
+        return "$($state.serviceTreeId)`n$($state.serviceTreeId)`n99999999-9999-9999-9999-999999999999"
+    }
     throw "Unexpected az call: $($a -join ' ')"
 }
 
@@ -279,6 +316,7 @@ param(
     [Parameter(Mandatory)][string] `$EnvironmentName,
     [Parameter(Mandatory)][uri] `$WebOrigin,
     [Parameter(Mandatory)][string] `$OboManagedIdentityResourceId,
+    [string] `$ServiceManagementReference = '',
     [switch] `$IncludeLocalhostRedirects,
     [switch] `$GrantAdminConsent,
     [switch] `$Apply
@@ -286,6 +324,10 @@ param(
 if (-not `$Apply) { throw 'The helper must apply the identity configuration.' }
 if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the explicit approval flag.' }
 `$global:deployTestState.bootstrapCalls++
+if (`$global:deployTestState.requireServiceTree -and -not `$ServiceManagementReference) {
+    throw 'Microsoft Graph POST /v1.0/applications was refused because this tenant requires a Service Tree ID (serviceManagementReference) on new app registrations. Rerun with -ServiceManagementReference <id>.'
+}
+`$global:deployTestState.serviceTreeIds.Add(`$ServiceManagementReference)
 [ordered]@{
     action = 'Configured'
     AZURE_TENANT_ID = `$TenantId.ToString()
@@ -374,6 +416,40 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
     if ($state.roleCreates.Count -ne 0) { throw 'A rerun duplicated role assignments instead of detecting the existing ones.' }
     if ($state.previewCalls -ne 0) { throw '-SkipPreview still ran the infrastructure preview.' }
     if ($state.bootstrapCalls -ne 2) { throw 'The sign-in bootstrap must be re-verified on every run.' }
+
+    # azd must never wait on a question nobody can see: every call except sign-in runs with --no-prompt,
+    # and when azd reports that it needed an answer, that same command reruns attached to the terminal.
+    if ($state.interactiveAzd.Count) { throw "azd ran without --no-prompt, so a question it asked would be invisible: $($state.interactiveAzd -join '; ')" }
+    $state.upCalls.Clear()
+    $state.needsAnswer = $true
+    & $script @parameters -SkipPreview | Out-Null
+    if (($state.upCalls -join ',') -ne 'needs-answer,answered,succeeded') {
+        throw "A question azd needed answered was not handed to the terminal: $($state.upCalls -join ',')"
+    }
+    if (($state.interactiveAzd -join '; ') -ne "up --environment $environmentName") {
+        throw "Only the azd command that needed an answer may run interactively; got: $($state.interactiveAzd -join '; ')"
+    }
+    $state.interactiveAzd.Clear()
+
+    # A tenant that requires a Service Tree ID: the helper asks in the terminal, offers the ID the
+    # operator's own registrations use (Enter accepts it), asks again after an invalid answer, and
+    # remembers the answer so a rerun does not ask again.
+    $state.requireServiceTree = $true
+    $state.answers.AddRange([string[]]@('not-a-guid', ''))
+    & $script @parameters -SkipPreview | Out-Null
+    if ($state.questions.Count -ne 2 -or $state.questions[0] -notmatch [regex]::Escape($state.serviceTreeId)) {
+        throw "The Service Tree ID question must offer the ID in use and ask again after an invalid answer. Asked: $($state.questions -join ' | ')"
+    }
+    if (@($state.serviceTreeIds)[-1] -ne $state.serviceTreeId -or $values['APP_SERVICE_MANAGEMENT_REFERENCE'] -ne $state.serviceTreeId) {
+        throw 'The accepted Service Tree ID was not passed to the sign-in bootstrap and remembered.'
+    }
+    $state.questions.Clear()
+    & $script @parameters -SkipPreview | Out-Null
+    if ($state.questions.Count -or @($state.serviceTreeIds)[-1] -ne $state.serviceTreeId) {
+        throw 'A remembered Service Tree ID must be reused without asking again.'
+    }
+    $state.requireServiceTree = $false
+    if ($state.interactiveAzd.Count) { throw "azd ran without --no-prompt: $($state.interactiveAzd -join '; ')" }
 
     # A policy-restricted run provisions only, builds on the agent pool, then provisions again so
     # Bicep creates the Container Apps from those images. azd up must never run, because it would
@@ -485,12 +561,14 @@ if (`$env:APP_ALLOW_AZURE_CHANGES -ne 'true') { throw 'The helper must set the e
     catch { throw "-SkipModelAvailabilityCheck did not bypass the gate: $($_.Exception.Message)" }
     if ($state.modelChecks -ne $checksBefore) { throw '-SkipModelAvailabilityCheck still queried the catalogue.' }
     if ($state.upCalls.Count -eq 0) { throw '-SkipModelAvailabilityCheck did not allow the deployment to proceed.' }
+    if ($state.interactiveAzd.Count) { throw "azd ran without --no-prompt: $($state.interactiveAzd -join '; ')" }
 
     [ordered]@{ result = 'passed'; deployments = 5; roleAssignments = 6; rerunRedeploysOnce = $true
                 modelGateStopsBeforeProvisioning = 3; catalogueFailureIsNonFatal = $true; gateOverridable = $true
                 privateRegistryProvisionsOnly = $true; agentPoolImageBuilds = $agentPoolBuilds
                 agentPoolRegionGateStops = $true; permanentFailuresNotRetried = $true
-                defaultsUnchanged = $true } | ConvertTo-Json -Compress
+                defaultsUnchanged = $true; noHiddenPrompts = $true; azdQuestionsAskedInTerminal = $true
+                serviceTreeIdAskedAndRemembered = $true } | ConvertTo-Json -Compress
 } finally {
     Remove-Variable -Name deployTestState -Scope Global -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $repoRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -471,3 +471,58 @@ def test_loads_latest_complete_focus_costs_from_run_history_and_blobs(monkeypatc
 
     assert data.period == "2026-07"
     assert data.effective_cost_by_subscription[SUBSCRIPTION_ID] == 8.0
+
+
+class _PrefixContainer:
+    def __init__(self, files=True):
+        self.prefixes, self.files = [], files
+
+    def list_blobs(self, name_starts_with):
+        self.prefixes.append(name_starts_with)
+        return [SimpleNamespace(name=f"{name_starts_with}part_0.csv.gz", size=3)] if self.files else []
+
+    def download_blob(self, name):
+        return SimpleNamespace(readall=lambda: b"abc")
+
+
+def test_daily_runs_are_read_from_the_whole_months_folder(monkeypatch):
+    container = _PrefixContainer()
+    monkeypatch.setattr(focus_cost_reader.focus_export_download, "get_container_client", lambda: container)
+    # Azure writes a month-to-date run (1-10 Aug) into the folder for the whole of August.
+    run = {"name": "run-1", "_export": "daily", "properties": {"startDate": "2026-08-01T00:00:00Z", "endDate": "2026-08-10T23:59:59Z"}}
+    focus_cost_reader._download_run_files([SUBSCRIPTION_ID], {SUBSCRIPTION_ID: run}, "20260801-20260808")
+    assert container.prefixes == [f"focus-daily/{SUBSCRIPTION_ID}/focus-daily-meghkoshaai/20260801-20260831/run-1/"]
+
+
+@pytest.mark.parametrize("manifest, folder", [
+    (f"focus-daily/{SUBSCRIPTION_ID}/focus-daily-meghkoshaai/20261001-20261031/run-2", "20261001-20261031"),
+    (f"/focus-daily/{SUBSCRIPTION_ID}/focus-daily-meghkoshaai/20261001-20261004/run-2/manifest.json", "20261001-20261004"),
+    # Anything outside this export's own date folders falls back to the whole month's folder.
+    (f"focus/{SUBSCRIPTION_ID}/focus-daily-meghkoshaai/20261001-20261004/run-2", "20261001-20261031"),
+    (f"focus-daily/{SUBSCRIPTION_ID}/focus-daily-meghkoshaai/20261001-20261004/other-run", "20261001-20261031"),
+    (f"focus-daily/{SUBSCRIPTION_ID}/focus-daily-meghkoshaai/../secrets/run-2", "20261001-20261031"),
+    ("", "20261001-20261031"),
+])
+def test_runs_are_read_from_the_folder_azure_reports(monkeypatch, manifest, folder):
+    container = _PrefixContainer()
+    monkeypatch.setattr(focus_cost_reader.focus_export_download, "get_container_client", lambda: container)
+    run = {"name": "run-2", "_export": "daily", "properties": {
+        "startDate": "2026-10-01T00:00:00Z", "endDate": "2026-10-04T23:59:59Z", "manifestFile": manifest}}
+    focus_cost_reader._download_run_files([SUBSCRIPTION_ID], {SUBSCRIPTION_ID: run}, "20261001-20261004")
+    assert container.prefixes == [f"focus-daily/{SUBSCRIPTION_ID}/focus-daily-meghkoshaai/{folder}/run-2/"]
+
+
+def test_closed_month_runs_keep_their_period_folder(monkeypatch):
+    container = _PrefixContainer()
+    monkeypatch.setattr(focus_cost_reader.focus_export_download, "get_container_client", lambda: container)
+    manifest = f"focus/{SUBSCRIPTION_ID}/focus-closed-month-meghkoshaai/20260901-20260930/run-3"
+    for properties in ({}, {"manifestFile": manifest}):
+        focus_cost_reader._download_run_files([SUBSCRIPTION_ID], {SUBSCRIPTION_ID: {"name": "run-3", "properties": properties}}, "20260901-20260930")
+    assert container.prefixes == [f"{manifest}/"] * 2
+
+
+def test_a_run_without_files_raises_a_distinct_retention_error(monkeypatch):
+    monkeypatch.setattr(focus_cost_reader.focus_export_download, "get_container_client", lambda: _PrefixContainer(files=False))
+    with pytest.raises(focus_cost_reader.FocusCostFilesMissingError) as error:
+        focus_cost_reader._download_run_files([SUBSCRIPTION_ID], {SUBSCRIPTION_ID: {"name": "run-1"}}, "20260701-20260731")
+    assert isinstance(error.value, focus_cost_reader.FocusCostDataError)

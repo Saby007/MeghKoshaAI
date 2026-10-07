@@ -2022,6 +2022,7 @@ body {
 
 .schedule-editor {
     display: flex;
+    flex-wrap: wrap;
     align-items: end;
     gap: 10px;
     padding: 4px 0;
@@ -2037,7 +2038,8 @@ body {
     text-transform: uppercase;
 }
 
-.schedule-editor input {
+.schedule-editor input,
+.schedule-editor select {
     min-height: 34px;
     padding: 0 9px;
     border: 1px solid var(--color-ash-stroke);
@@ -2045,6 +2047,23 @@ body {
     background: var(--color-carbon-lift);
     color: var(--color-bone);
     color-scheme: dark;
+}
+
+.schedule-editor .schedule-window-field {
+    min-width: 150px;
+}
+
+.schedule-editor .schedule-daily-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    min-height: 34px;
+}
+
+.schedule-editor .schedule-daily-toggle input {
+    min-height: 0;
+    padding: 0;
 }
 
 .icon-command,
@@ -8446,7 +8465,7 @@ body {
    pinned to --touch-height (44px) upstream, which is a touch-target
    accessibility decision, not an oversight. */
 
-:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local']) {
+:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local'], input[type='time']) {
     padding-block: var(--space-1);
     border: 1px solid var(--color-ash-stroke);
     background-color: var(--color-surface);
@@ -9057,7 +9076,7 @@ body {
    an appearance at all.
    ---------------------------------------------------------------- */
 
-:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local'], textarea) {
+:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local'], input[type='time'], textarea) {
     border-color: var(--color-control-stroke);
 }
 
@@ -9234,7 +9253,7 @@ body {
 
 /* --- Inputs ----------------------------------------------------- */
 
-:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local']) {
+:root .app-shell.app-shell :is(select, input[type='text'], input[type='email'], input[type='search'], input[type='number'], input[type='date'], input[type='datetime-local'], input[type='time']) {
     min-height: var(--control-md);
     padding: 0 var(--space-3);
     border-radius: var(--control-radius);
