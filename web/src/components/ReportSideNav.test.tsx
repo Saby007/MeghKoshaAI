@@ -119,3 +119,64 @@ it('finds pages, selects the first with Enter and resets the search', async () =
   expect(search.value).toBe('');
   expect(container.querySelectorAll('.report-sidenav-pages button').length).toBeGreaterThan(1);
 });
+
+it('keeps collapsed groups labelled and shows current-page context on keyboard focus', async () => {
+  await act(async () => root.render(<ReportSideNav activeTab="History" onSelect={vi.fn()} />));
+  await act(async () => container.querySelector<HTMLButtonElement>('.report-sidenav-collapse')!.click());
+  const button = groupToggle('Cost Management');
+  expect(button.getAttribute('aria-label')).toBe('Cost Management');
+  await act(async () => button.focus());
+  const tooltip = container.querySelector('[role="tooltip"]')!;
+  expect(tooltip.textContent).toContain('8 pages');
+  expect(tooltip.textContent).toContain('Current: History');
+  expect(button.getAttribute('aria-describedby')).toBe(tooltip.id);
+  await act(async () => button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(container.querySelector('[role="tooltip"]')).toBeNull();
+  await act(async () => button.blur());
+  await act(async () => button.focus());
+  expect(container.querySelector('[role="tooltip"]')).not.toBeNull();
+  await act(async () => window.dispatchEvent(new Event('resize')));
+  expect(container.querySelector('[role="tooltip"]')).toBeNull();
+});
+
+it('opens mobile search with category context and uses Escape to clear then close', async () => {
+  await act(async () => root.render(<ReportSideNav activeTab="History" onSelect={vi.fn()} />));
+  const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Report pages"]')!;
+  expect(toggle.querySelector('small')?.textContent).toBe('Cost Management');
+  await act(async () => toggle.click());
+  const search = container.querySelector<HTMLInputElement>('[aria-label="Find a report page"]')!;
+  expect(document.activeElement).toBe(search);
+  await setSearch('sql');
+  expect(container.querySelector('#report-page-count')?.textContent).toBe('1 matching page');
+  await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(search.value).toBe('');
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector('#report-page-count')?.textContent).toBe('19 pages');
+  await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(toggle);
+});
+
+it('sizes the mobile list to remaining viewport space and closes outside without stealing focus', async () => {
+  await act(async () => root.render(<ReportSideNav activeTab="History" onSelect={vi.fn()} />));
+  const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Report pages"]')!;
+  toggle.getBoundingClientRect = () => new DOMRect(0, 156, 320, 44);
+  await act(async () => toggle.click());
+  const nav = container.querySelector<HTMLElement>('.report-sidenav')!;
+  expect(nav.style.getPropertyValue('--sidenav-menu-height')).toBe(`${window.innerHeight - 224}px`);
+  toggle.getBoundingClientRect = () => new DOMRect(0, 256, 320, 44);
+  await act(async () => window.dispatchEvent(new Event('resize')));
+  expect(nav.style.getPropertyValue('--sidenav-menu-height')).toBe(`${window.innerHeight - 324}px`);
+  const outside = document.createElement('button');
+  document.body.append(outside);
+  try {
+    await act(async () => {
+      outside.focus();
+      outside.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(outside);
+  } finally {
+    outside.remove();
+  }
+});

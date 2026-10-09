@@ -9,6 +9,7 @@ import {
   Play,
   RefreshCw,
   Settings2,
+  Search,
   Trash2,
   X,
 } from 'lucide-react';
@@ -113,8 +114,24 @@ function dailyLabel(daily: ScheduleDailyPull): string {
 }
 
 function DailyStatus({ daily }: { daily?: ScheduleDailyPull | null }) {
-  if (!daily) return null;
-  return <small className={`daily-status ${daily.enabled ? daily.status : 'off'}`} title={daily.error ?? undefined}>{dailyLabel(daily)}</small>;
+  if (!daily) return <small className="daily-status unavailable">Daily status unavailable</small>;
+  return <div className="schedule-daily-evidence">
+    <small className={`daily-status ${daily.enabled ? daily.status : 'off'}`}>{dailyLabel(daily)}</small>
+    {daily.enabled && <dl className="schedule-pull-times">
+      <div><dt>Pull time</dt><dd>{daily.timeUtc} UTC</dd></div>
+      <div><dt>{daily.completedAt ? 'Last completed' : 'Last started'}</dt><dd>{daily.completedAt || daily.lastRunAt ? formatDate(daily.completedAt || daily.lastRunAt) : 'No execution recorded'}</dd></div>
+    </dl>}
+    {daily.enabled && daily.error && <small className="schedule-execution-error">{daily.error}</small>}
+  </div>;
+}
+
+type ScheduleFilter = 'all' | 'attention' | 'active' | 'paused' | 'not_scheduled';
+
+function needsAttention(schedule: CostSchedule): boolean {
+  return schedule.state === 'unknown' || schedule.state === 'not_scheduled'
+    || (!!schedule.availability && schedule.availability !== 'available')
+    || schedule.latestRun?.status === 'failed' || schedule.latestRun?.status === 'unknown'
+    || !schedule.daily || (schedule.daily.enabled && (schedule.daily.status === 'failed' || schedule.daily.status === 'unavailable'));
 }
 
 function dailyPeriodLabel(run: ScheduleDailyRun): string {
@@ -161,6 +178,8 @@ function MonthProgress({ run, mobile = false }: { run: ScheduleRun | null; mobil
 
 export function ScheduleManager() {
   const [schedules, setSchedules] = useState<CostSchedule[]>([]);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<ScheduleFilter>('all');
   const [scheduleEditingId, setScheduleEditingId] = useState<string | null>(null);
   const [scheduleValue, setScheduleValue] = useState(defaultScheduleValue);
   const [windowValue, setWindowValue] = useState<ScheduleWindowMonths>(6);
@@ -465,6 +484,20 @@ export function ScheduleManager() {
   const loadStatus = loadError instanceof ApiRequestError && loadError.status === 401 ? 'Sign-in required'
     : loadError instanceof ApiRequestError && loadError.status === 403 ? 'Access not verified'
     : 'Subscription status unavailable';
+  const attentionCount = schedules.filter(needsAttention).length;
+  const filterOptions: { value: ScheduleFilter; label: string; count: number }[] = [
+    { value: 'all', label: 'All subscriptions', count: schedules.length },
+    { value: 'attention', label: 'Needs attention', count: attentionCount },
+    ...(['active', 'paused', 'not_scheduled'] as const).map(value => ({
+      value, label: value === 'not_scheduled' ? 'Not scheduled' : value === 'active' ? 'Active' : 'Paused',
+      count: schedules.filter(schedule => schedule.state === value).length,
+    })),
+  ];
+  const search = query.trim().toLowerCase();
+  const visibleSchedules = schedules.filter(schedule =>
+    (filter === 'all' || (filter === 'attention' ? needsAttention(schedule) : schedule.state === filter))
+    && `${schedule.displayName} ${schedule.subscriptionId}`.toLowerCase().includes(search));
+  const clearFilters = () => { setQuery(''); setFilter('all'); };
 
   return (
     <section className="operations-view" aria-label="Export schedules">
@@ -475,6 +508,7 @@ export function ScheduleManager() {
           <span><strong data-unavailable={countsUnavailable}>{loading ? '...' : countsUnavailable ? 'Unavailable' : scheduledCount}</strong> scheduled</span>
           <span><strong data-unavailable={countsUnavailable}>{loading ? '...' : countsUnavailable ? 'Unavailable' : schedules.filter((schedule) => schedule.state === 'active').length}</strong> active</span>
           {unavailableCount > 0 && <span><strong>{unavailableCount}</strong> status unavailable</span>}
+          <span><strong>{loading ? '...' : loadError ? 'Unavailable' : attentionCount}</strong> needs attention</span>
           <span><strong>UTC</strong> schedule time</span>
         </div>
       </section>
@@ -488,18 +522,30 @@ export function ScheduleManager() {
           <div><span>Completed-month refresh</span><h2 id="schedule-list-title">FOCUS schedules</h2></div>
           <div className="schedule-header-actions">
             <span role="status">{loading ? 'Refreshing...' : loadError ? 'Refresh failed' : loadedAt ? `Checked ${formatDate(loadedAt)}` : ''}</span>
-            <button className="outline-command" type="button" onClick={() => void runAll()} disabled={runningAll || loading || !!loadError || !canRunAll}>{runningAll ? <RefreshCw className="spin" size={15} /> : <Play size={15} />} Run all</button>
+            <button className="outline-command" type="button" onClick={() => void runAll()} disabled={runningAll || loading || !!loadError || !canRunAll} title="Runs every listed subscription, regardless of search or filters">{runningAll ? <RefreshCw className="spin" size={15} /> : <Play size={15} />} Run all</button>
             <button className="icon-command" type="button" onClick={() => void refresh()} disabled={loading} title="Refresh schedules" aria-label="Refresh schedules"><RefreshCw className={loading ? 'spin' : ''} size={17} /></button>
           </div>
         </header>
 
-        <div className="schedule-table-wrap" aria-busy={loading} tabIndex={0} role="region" aria-label="FOCUS export schedules">
-          <table className="schedule-table">
-            <thead><tr><th>Subscription</th><th>State</th><th>Next run</th><th>Latest execution</th><th aria-label="Actions" /></tr></thead>
-            <tbody>
-              {loading && schedules.length === 0 && <tr><td colSpan={5} className="schedule-empty">Loading FOCUS exports...</td></tr>}
-              {!loading && schedules.length === 0 && <tr><td colSpan={5} className="schedule-empty">{loadError ? loadStatus : 'No accessible subscriptions returned'}</td></tr>}
-              {schedules.map((schedule) => {
+        <p className="schedule-evidence-note">Monthly and daily pulls are separate. “Data through” is the latest reported UTC coverage, not live spend freshness. Run timestamps use your local timezone; schedule settings use UTC.</p>
+        {schedules.length > 0 && <div className="schedule-list-toolbar">
+          <label className="schedule-search"><Search size={16} aria-hidden="true" /><input type="search" aria-label="Search schedules" placeholder="Search subscription name or ID" value={query} onChange={event => setQuery(event.target.value)} /></label>
+          <select aria-label="Filter schedules" value={filter} onChange={event => setFilter(event.target.value as ScheduleFilter)}>
+            {filterOptions.map(option => <option key={option.value} value={option.value}>{option.label} ({option.count})</option>)}
+          </select>
+          {(query || filter !== 'all') && <button type="button" className="outline-command" onClick={clearFilters}>Clear filters</button>}
+          <span role="status">{visibleSchedules.length} of {schedules.length} subscriptions</span>
+          {(query || filter !== 'all') && <small>Run all still includes every subscription.</small>}
+        </div>}
+        {filter === 'attention' && <p className="schedule-evidence-note">Includes failed or unknown executions, unavailable status, missing daily evidence and subscriptions without a monthly schedule. Paused schedules and daily pulls switched off are not failures.</p>}
+        <div className="schedule-table-wrap mobile-card-scroll" aria-busy={loading} tabIndex={0} role="region" aria-label="FOCUS export schedules">
+          <table className="schedule-table mobile-card-table" role="table">
+            <thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">Subscription</th><th role="columnheader" scope="col">State</th><th role="columnheader" scope="col">Next monthly run</th><th role="columnheader" scope="col">Monthly / daily evidence</th><th role="columnheader" scope="col" aria-label="Actions" /></tr></thead>
+            <tbody role="rowgroup">
+              {loading && schedules.length === 0 && <tr role="row"><td role="cell" colSpan={5} className="schedule-empty">Loading FOCUS exports...</td></tr>}
+              {!loading && schedules.length === 0 && <tr role="row"><td role="cell" colSpan={5} className="schedule-empty">{loadError ? loadStatus : 'No accessible subscriptions returned'}</td></tr>}
+              {!loading && schedules.length > 0 && visibleSchedules.length === 0 && <tr role="row"><td role="cell" colSpan={5} className="schedule-empty">No subscriptions match these filters. <button type="button" className="outline-command" onClick={clearFilters}>Show all subscriptions</button></td></tr>}
+              {visibleSchedules.map((schedule) => {
                 const isBusy = loading || !!loadError || busyId === schedule.subscriptionId || schedule.state === 'unknown'
                   || schedule.readAccess !== true || schedule.costAccess !== true
                   || (!!schedule.availability && schedule.availability !== 'available');
@@ -510,21 +556,21 @@ export function ScheduleManager() {
                   && (!schedule.availability || schedule.availability === 'available' || schedule.availability === 'export_unavailable');
                 const isExpanded = expandedId === schedule.subscriptionId;
                 return [
-                  <tr key={schedule.subscriptionId}>
-                    <td><strong>{schedule.displayName}</strong><code>{schedule.subscriptionId}</code><MonthProgress run={schedule.latestRun} mobile /><DailyProgress daily={schedule.daily} mobile /></td>
-                    <td><span className={`schedule-state ${schedule.state}`}><i />{schedule.state === 'unknown' ? 'Unknown' : schedule.state.replace('_', ' ')}</span></td>
-                    <td>{schedule.state === 'unknown' ? 'Unavailable' : schedule.nextRunAt ? formatDate(schedule.nextRunAt) : schedule.state === 'paused' ? 'Paused' : schedule.state === 'active' ? 'Unavailable' : 'Not scheduled'}</td>
-                    <td>{schedule.availability && schedule.availability !== 'available' ? <><span>{schedule.availability === 'access_unavailable' ? 'Access unavailable' : schedule.availability === 'configuration_unavailable' ? 'Scheduler setup incomplete' : schedule.availability === 'history_unavailable' ? 'Execution history unavailable' : 'Export status unavailable'}</span><small>{schedule.statusMessage}</small></> : <><span className={`run-state ${schedule.latestRun?.status ?? 'pending'}`}>{schedule.state === 'not_scheduled' ? 'Export configured' : runLabel(schedule.latestRun)}</span><small>{schedule.latestRun ? `${formatDate(schedule.latestRun.completedAt || schedule.latestRun.startedAt)} · ${formatDuration(schedule.latestRun.durationSeconds)}` : schedule.state === 'not_scheduled' ? '' : 'No native execution record'}</small><MonthProgress run={schedule.latestRun} /><DailyProgress daily={schedule.daily} /><DailyStatus daily={schedule.daily} /></>}</td>
-                    <td><div className="schedule-actions">
-                      <button type="button" onClick={() => void openExportConfiguration(schedule)} disabled={loading || !!loadError || busyId !== null || exportRetryAfter > 0 || schedule.readAccess !== true || schedule.costAccess !== true} title="Configure FOCUS export" aria-label={`Configure export for ${schedule.displayName}`} aria-expanded={exportEditingId === schedule.subscriptionId}><Settings2 size={16} /></button>
-                      <button type="button" onClick={() => void toggleHistory(schedule)} disabled={loading || !!loadError || schedule.readAccess !== true || schedule.costAccess !== true || schedule.state === 'not_scheduled' || schedule.state === 'unknown'} title="Execution history" aria-expanded={isExpanded} aria-label={`Execution history for ${schedule.displayName}`}><History size={16} />{isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>
-                      <button type="button" onClick={() => void runNow(schedule)} disabled={!canExport} title={`Export: create if needed, pull and overwrite the last ${windowOf(schedule)} months`} aria-label={`Export ${schedule.displayName} now`}><Play size={16} /></button>
-                      <button type="button" onClick={() => editSchedule(schedule)} disabled={isBusy} title={schedule.state === 'not_scheduled' ? 'Schedule export' : 'Reschedule export'} aria-label={`${schedule.state === 'not_scheduled' ? 'Schedule' : 'Reschedule'} ${schedule.displayName}`}><CalendarClock size={16} /></button>
-                      <button type="button" onClick={() => void changeState(schedule)} disabled={isBusy || schedule.state === 'not_scheduled'} title={schedule.state === 'active' ? 'Pause schedule' : 'Resume schedule'} aria-label={`${schedule.state === 'active' ? 'Pause' : 'Resume'} ${schedule.displayName}`}>{schedule.state === 'active' ? <Pause size={16} /> : <Play size={16} />}</button>
-                      {deletingId === schedule.subscriptionId ? <><button className="cancel-delete" type="button" onClick={() => setDeletingId(null)} title="Cancel delete" aria-label="Cancel delete"><X size={16} /></button><button className="confirm-delete" type="button" onClick={() => void remove(schedule)} disabled={isBusy} title="Confirm delete" aria-label={`Confirm delete ${schedule.displayName}`}><Check size={16} /></button></> : <button type="button" onClick={() => setDeletingId(schedule.subscriptionId)} disabled={isBusy || schedule.state === 'not_scheduled'} title="Delete export" aria-label={`Delete ${schedule.displayName}`}><Trash2 size={16} /></button>}
+                  <tr key={schedule.subscriptionId} role="row">
+                    <td role="cell" data-label="Subscription"><strong>{schedule.displayName}</strong><code>{schedule.subscriptionId}</code><MonthProgress run={schedule.latestRun} mobile /><DailyProgress daily={schedule.daily} mobile /></td>
+                    <td role="cell" data-label="State"><span className={`schedule-state ${schedule.state}`}><i />{schedule.state === 'unknown' ? 'Unknown' : schedule.state.replace('_', ' ')}</span></td>
+                    <td role="cell" data-label="Next monthly run">{schedule.state === 'unknown' ? 'Unavailable' : schedule.nextRunAt ? formatDate(schedule.nextRunAt) : schedule.state === 'paused' ? 'Paused' : schedule.state === 'active' ? 'Unavailable' : 'Not scheduled'}</td>
+                    <td role="cell" data-label="Monthly / daily evidence">{schedule.availability && schedule.availability !== 'available' ? <><span>{schedule.availability === 'access_unavailable' ? 'Access unavailable' : schedule.availability === 'configuration_unavailable' ? 'Scheduler setup incomplete' : schedule.availability === 'history_unavailable' ? 'Execution history unavailable' : 'Export status unavailable'}</span><small>{schedule.statusMessage}</small></> : <><span className={`run-state ${schedule.latestRun?.status ?? 'pending'}`}>{schedule.state === 'not_scheduled' ? 'Export configured' : runLabel(schedule.latestRun)}</span><small>{schedule.latestRun ? `${formatDate(schedule.latestRun.completedAt || schedule.latestRun.startedAt)} · ${formatDuration(schedule.latestRun.durationSeconds)}` : schedule.state === 'not_scheduled' ? '' : 'No native execution record'}</small>{schedule.latestRun?.error && <small className="schedule-execution-error">{schedule.latestRun.error}</small>}<MonthProgress run={schedule.latestRun} /><DailyProgress daily={schedule.daily} /><DailyStatus daily={schedule.daily} /></>}</td>
+                    <td role="cell" data-label="Actions"><div className="schedule-actions">
+                      <button type="button" data-action="Setup" onClick={() => void openExportConfiguration(schedule)} disabled={loading || !!loadError || busyId !== null || exportRetryAfter > 0 || schedule.readAccess !== true || schedule.costAccess !== true} title="Configure FOCUS export" aria-label={`Configure export for ${schedule.displayName}`} aria-expanded={exportEditingId === schedule.subscriptionId}><Settings2 size={16} /></button>
+                      <button type="button" data-action="History" onClick={() => void toggleHistory(schedule)} disabled={loading || !!loadError || schedule.readAccess !== true || schedule.costAccess !== true || schedule.state === 'not_scheduled' || schedule.state === 'unknown'} title="Execution history" aria-expanded={isExpanded} aria-label={`Execution history for ${schedule.displayName}`}><History size={16} />{isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>
+                      <button type="button" data-action="Run now" onClick={() => void runNow(schedule)} disabled={!canExport} title={`Export: create if needed, pull and overwrite the last ${windowOf(schedule)} months`} aria-label={`Export ${schedule.displayName} now`}><Play size={16} /></button>
+                      <button type="button" data-action="Schedule" onClick={() => editSchedule(schedule)} disabled={isBusy} title={schedule.state === 'not_scheduled' ? 'Schedule export' : 'Reschedule export'} aria-label={`${schedule.state === 'not_scheduled' ? 'Schedule' : 'Reschedule'} ${schedule.displayName}`}><CalendarClock size={16} /></button>
+                      <button type="button" data-action={schedule.state === 'active' ? 'Pause' : 'Resume'} onClick={() => void changeState(schedule)} disabled={isBusy || schedule.state === 'not_scheduled'} title={schedule.state === 'active' ? 'Pause schedule' : 'Resume schedule'} aria-label={`${schedule.state === 'active' ? 'Pause' : 'Resume'} ${schedule.displayName}`}>{schedule.state === 'active' ? <Pause size={16} /> : <Play size={16} />}</button>
+                      {deletingId === schedule.subscriptionId ? <><button className="cancel-delete" type="button" data-action="Keep" onClick={() => setDeletingId(null)} title="Cancel delete" aria-label="Cancel delete"><X size={16} /></button><button className="confirm-delete" type="button" data-action="Confirm" onClick={() => void remove(schedule)} disabled={isBusy} title="Confirm delete" aria-label={`Confirm delete ${schedule.displayName}`}><Check size={16} /></button></> : <button type="button" data-action="Delete" onClick={() => setDeletingId(schedule.subscriptionId)} disabled={isBusy || schedule.state === 'not_scheduled'} title="Delete export" aria-label={`Delete ${schedule.displayName}`}><Trash2 size={16} /></button>}
                     </div></td>
                   </tr>,
-                  exportEditingId === schedule.subscriptionId ? <tr className="history-row schedule-editor-row" key={`${schedule.subscriptionId}-export`}><td colSpan={5}><div className="schedule-editor export-config-editor" role="region" aria-label={`Export configuration for ${schedule.displayName}`}>
+                  exportEditingId === schedule.subscriptionId ? <tr role="row" className="history-row schedule-editor-row" key={`${schedule.subscriptionId}-export`}><td role="cell" colSpan={5}><div className="schedule-editor export-config-editor" role="region" aria-label={`Export configuration for ${schedule.displayName}`}>
                     <strong>FOCUS export configuration</strong>
                     {exportLoading && <span role="status">Checking export configuration...</span>}
                     {exportError && <div className="operations-error" role="alert">{exportError}{exportRetryAfter > 0 && ` (retry available in ${exportRetryAfter}s)`}</div>}
@@ -548,8 +594,8 @@ export function ScheduleManager() {
                       <button className="outline-command" type="button" onClick={closeExportConfiguration} disabled={busyId !== null}><X size={15} /> Close</button>
                     </div>
                   </div></td></tr> : null,
-                  scheduleEditingId === schedule.subscriptionId ? <tr className="history-row schedule-editor-row" key={`${schedule.subscriptionId}-editor`}><td colSpan={5}><div className="schedule-editor"><label><span>First monthly run (UTC)</span><input type="datetime-local" value={scheduleValue} onChange={(event) => setScheduleValue(event.target.value)} /></label><label className="schedule-window-field"><span>Months of history</span><select value={windowValue} onChange={(event) => setWindowValue(Number(event.target.value) as ScheduleWindowMonths)}>{SCHEDULE_WINDOW_MONTHS.map((months) => <option key={months} value={months}>{months} months</option>)}</select></label><label className="schedule-daily-toggle"><input type="checkbox" checked={dailyEnabled} onChange={(event) => setDailyEnabled(event.target.checked)} /><span>Daily pull through yesterday</span></label><label className="schedule-window-field"><span>Daily pull (UTC)</span><input type="time" value={dailyTime} onChange={(event) => setDailyTime(event.target.value)} disabled={!dailyEnabled} /></label><button className="primary-command" type="button" onClick={() => void saveSchedule(schedule)} disabled={isBusy}><Check size={15} /> Save schedule</button><button className="outline-command" type="button" onClick={() => setScheduleEditingId(null)}><X size={15} /> Cancel</button></div></td></tr> : null,
-                  isExpanded ? <tr className="history-row" key={`${schedule.subscriptionId}-history`}><td colSpan={5}><div className="run-history">{historyLoading === schedule.subscriptionId ? <span role="status">Loading execution history...</span> : historyError ? <span role="alert">{historyError}</span> : <>{(runs[schedule.subscriptionId] ?? []).length === 0 && <span>No native execution history</span>}{(runs[schedule.subscriptionId] ?? []).map((run) => <div key={run.runId}><span className={`run-status-dot ${run.status}`} /><strong>{run.period || 'Custom'}</strong><span>{run.status}</span><time>{formatDate(run.completedAt || run.startedAt)}</time><time>{formatDuration(run.durationSeconds)}</time>{run.error && <small>{run.error}</small>}</div>)}</>}</div></td></tr> : null,
+                  scheduleEditingId === schedule.subscriptionId ? <tr role="row" className="history-row schedule-editor-row" key={`${schedule.subscriptionId}-editor`}><td role="cell" colSpan={5}><div className="schedule-editor"><label><span>First monthly run (UTC)</span><input type="datetime-local" value={scheduleValue} onChange={(event) => setScheduleValue(event.target.value)} /></label><label className="schedule-window-field"><span>Months of history</span><select value={windowValue} onChange={(event) => setWindowValue(Number(event.target.value) as ScheduleWindowMonths)}>{SCHEDULE_WINDOW_MONTHS.map((months) => <option key={months} value={months}>{months} months</option>)}</select></label><label className="schedule-daily-toggle"><input type="checkbox" checked={dailyEnabled} onChange={(event) => setDailyEnabled(event.target.checked)} /><span>Daily pull through yesterday</span></label><label className="schedule-window-field"><span>Daily pull (UTC)</span><input type="time" value={dailyTime} onChange={(event) => setDailyTime(event.target.value)} disabled={!dailyEnabled} /></label><button className="primary-command" type="button" onClick={() => void saveSchedule(schedule)} disabled={isBusy}><Check size={15} /> Save schedule</button><button className="outline-command" type="button" onClick={() => setScheduleEditingId(null)}><X size={15} /> Cancel</button></div></td></tr> : null,
+                  isExpanded ? <tr role="row" className="history-row" key={`${schedule.subscriptionId}-history`}><td role="cell" colSpan={5}><div className="run-history">{historyLoading === schedule.subscriptionId ? <span role="status">Loading execution history...</span> : historyError ? <span role="alert">{historyError}</span> : <>{(runs[schedule.subscriptionId] ?? []).length === 0 && <span>No native execution history</span>}{(runs[schedule.subscriptionId] ?? []).map((run) => <div key={run.runId}><span className={`run-status-dot ${run.status}`} /><strong>{run.period || 'Custom'}</strong><span>{run.status}</span><time>{formatDate(run.completedAt || run.startedAt)}</time><time>{formatDuration(run.durationSeconds)}</time>{run.error && <small>{run.error}</small>}</div>)}</>}</div></td></tr> : null,
                 ];
               })}
             </tbody>

@@ -72,6 +72,79 @@ afterEach(async () => {
 });
 
 describe('Open Schedules', () => {
+  it('labels each mobile card field and action without duplicating subscription controls', async () => {
+    vi.mocked(listCostSchedules).mockResolvedValue([schedule]);
+    await act(async () => root.render(<ScheduleManager />));
+    const table = container.querySelector('.mobile-card-table')!;
+    expect(table.getAttribute('role')).toBe('table');
+    const headers = [...table.querySelectorAll('thead th')].map(header => header.getAttribute('aria-label') || header.textContent);
+    const cells = [...table.querySelectorAll('tbody td[data-label]')];
+    expect(cells.map(cell => cell.getAttribute('data-label'))).toEqual(headers);
+    expect(cells.every(cell => cell.getAttribute('role') === 'cell')).toBe(true);
+    expect([...table.querySelectorAll('.schedule-actions button')].map(button => button.getAttribute('data-action')))
+      .toEqual(['Setup', 'History', 'Run now', 'Schedule', 'Pause', 'Delete']);
+    expect(table.querySelectorAll('button[aria-label="Export Subscription One now"]')).toHaveLength(1);
+    await click('Delete Subscription One');
+    expect(table.querySelector('[data-action="Confirm"]')).not.toBeNull();
+    await click('Cancel delete');
+    expect(table.querySelector('[data-action="Delete"]')).not.toBeNull();
+    expect(runCostSchedule).not.toHaveBeenCalled();
+  });
+
+  it('filters by attention without treating paused schedules or disabled daily pulls as failures', async () => {
+    const daily = { enabled: false, timeUtc: '06:00', status: 'failed' as const, dataThrough: null, lastRunAt: null, error: 'Previous attempt failed' };
+    vi.mocked(listCostSchedules).mockResolvedValue([
+      { ...schedule, daily },
+      { ...schedule, subscriptionId: 'paused', displayName: 'Paused subscription', state: 'paused', daily },
+      { ...schedule, subscriptionId: 'failed', displayName: 'Failed daily', daily: { ...daily, enabled: true } },
+      { ...schedule, subscriptionId: 'missing', displayName: 'Missing evidence' },
+    ]);
+    await act(async () => root.render(<ScheduleManager />));
+    const filter = container.querySelector<HTMLSelectElement>('select[aria-label="Filter schedules"]')!;
+    expect([...filter.options].map(option => option.text)).toContain('Needs attention (2)');
+    await act(async () => {
+      filter.value = 'attention';
+      filter.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect([...container.querySelectorAll('.schedule-table tbody tr > td:first-child > strong')].map(item => item.textContent))
+      .toEqual(['Failed daily', 'Missing evidence']);
+    expect(container.textContent).toContain('Run all still includes every subscription.');
+    expect(runAllCostSchedules).not.toHaveBeenCalled();
+    expect(setCostScheduleState).not.toHaveBeenCalled();
+  });
+
+  it('searches full subscription IDs and offers a no-match reset without changing schedules', async () => {
+    vi.mocked(listCostSchedules).mockResolvedValue([schedule]);
+    await act(async () => root.render(<ScheduleManager />));
+    const search = container.querySelector<HTMLInputElement>('input[aria-label="Search schedules"]')!;
+    const enter = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await enter(`  ${schedule.subscriptionId.toUpperCase()}  `);
+    expect(container.textContent).toContain('1 of 1 subscriptions');
+    await enter('no such subscription');
+    expect(container.textContent).toContain('No subscriptions match these filters.');
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Show all subscriptions')!.click());
+    expect(search.value).toBe('');
+    expect(container.textContent).toContain(schedule.displayName);
+    expect(createCostSchedule).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes daily completion from start timestamps and displays errors inline', async () => {
+    const daily = { enabled: true, timeUtc: '06:00', status: 'failed' as const, dataThrough: null,
+      lastRunAt: '2030-10-10T06:00:00Z', completedAt: null, error: 'Daily export denied' };
+    vi.mocked(listCostSchedules).mockResolvedValue([{ ...schedule, daily }]);
+    await act(async () => root.render(<ScheduleManager />));
+    expect(container.querySelector('.schedule-pull-times')?.textContent).toContain('Last started');
+    expect(container.querySelector('.schedule-execution-error')?.textContent).toBe('Daily export denied');
+    expect(container.textContent).toContain('not live spend freshness');
+    vi.mocked(listCostSchedules).mockResolvedValue([{ ...schedule, daily: { ...daily, status: 'succeeded', completedAt: '2030-10-10T06:40:00Z', error: null } }]);
+    await click('Refresh schedules');
+    expect(container.querySelector('.schedule-pull-times')?.textContent).toContain('Last completed');
+    expect(container.querySelector('.schedule-execution-error')).toBeNull();
+  });
+
   it('has no subscription onboarding form or access deployment link', async () => {
     vi.mocked(listCostSchedules).mockResolvedValue([]);
     await act(async () => root.render(<ScheduleManager />));
@@ -357,7 +430,7 @@ describe('Open Schedules', () => {
     ]);
     vi.mocked(createCostSchedule).mockResolvedValue(schedule);
     await act(async () => root.render(<ScheduleManager />));
-    expect(container.querySelector('select')).toBeNull();
+    expect(container.querySelector('.schedule-editor select')).toBeNull();
     expect(container.querySelector<HTMLButtonElement>('button[aria-label="Reschedule No cost access"]')?.disabled).toBe(true);
     await click('Schedule Subscription One');
     expect(container.querySelector('input[type="datetime-local"]')).not.toBeNull();
@@ -385,13 +458,13 @@ describe('Open Schedules', () => {
     vi.mocked(createCostSchedule).mockResolvedValue(schedule);
     vi.mocked(setCostScheduleState).mockResolvedValue(second);
     const choose = async (value: string) => {
-      const select = container.querySelector<HTMLSelectElement>('select')!;
+      const select = container.querySelector<HTMLSelectElement>('.schedule-editor select')!;
       await act(async () => { select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); });
     };
     const save = async () => act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Save schedule'))!.click());
     await act(async () => root.render(<ScheduleManager />));
     await click('Schedule Subscription One');
-    const select = container.querySelector<HTMLSelectElement>('select')!;
+    const select = container.querySelector<HTMLSelectElement>('.schedule-editor select')!;
     expect([...select.options].map(option => option.value)).toEqual(['3', '4', '5', '6']);
     expect(select.value).toBe('6');
     await choose('3');
@@ -399,7 +472,7 @@ describe('Open Schedules', () => {
     expect(createCostSchedule).toHaveBeenCalledWith(schedule.subscriptionId, expect.stringMatching(/Z$/), 3, { enabled: true, timeUtc: '06:00' });
     expect(container.textContent).toContain('with 3 months of history');
     await click('Reschedule Subscription Two');
-    expect(container.querySelector<HTMLSelectElement>('select')!.value).toBe('4');
+    expect(container.querySelector<HTMLSelectElement>('.schedule-editor select')!.value).toBe('4');
     await choose('5');
     await save();
     expect(setCostScheduleState).toHaveBeenCalledWith(second.subscriptionId, 'active', expect.stringMatching(/Z$/), 5, { enabled: true, timeUtc: '06:00' });

@@ -82,7 +82,7 @@
        Interactive boundaries - inputs, selects, buttons - carry their own
        heavier stroke at 3:1, the floor WCAG sets for non-text UI components
        (1.4.11). Both were previously near 1.2:1 and effectively invisible. */
-    --color-control-stroke: #5F6975;
+    --color-control-stroke: #69737F;
     --color-graphite-mid: #98A3AF;
     --color-warm-granite: #A9B4C0;
     --color-pale-stone: #C6CFD8;
@@ -141,7 +141,7 @@
     --color-obsidian-canvas: #F3F6FA;
     --color-carbon-lift: #FFFFFF;
     --color-ash-stroke: #AEB9C7;
-    --color-control-stroke: #8A96A6;
+    --color-control-stroke: #7D8999;
     --color-graphite-mid: #5A6675;
     --color-warm-granite: #5A6675;
     --color-pale-stone: #47525F;

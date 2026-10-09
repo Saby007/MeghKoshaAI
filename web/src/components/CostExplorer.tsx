@@ -6,7 +6,7 @@ import type { CostDetailSummary, FullReport } from '../report/models';
 import { compareCostGroups, costCoverage, costWindowDates, dailySubscriptionCosts, isMonthToDate, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import './cost-explorer.css';
 import { BudgetContext, type BudgetState } from './BudgetContext';
-import { DayAxis, dayAxis } from './TrendChart';
+import { CHART_POINT_HINT, chartTooltipPlacement, DayAxis, dayAxis, moveChartFocus } from './TrendChart';
 
 type Formatter = (value: number) => string;
 export type SelectedDay = { date: string; previousDate: string; subscriptionId: string };
@@ -206,6 +206,7 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
   const chartRef = useRef<HTMLDivElement>(null);
   const tooltipId = useId();
   const [activePoint, setActivePoint] = useState<{ subscriptionId: string; date: string } | null>(null);
+  const [viewportLeft, setViewportLeft] = useState(0);
   useEffect(() => setActivePoint(null), [details, window.startDate, window.endDate, JSON.stringify(filters)]);
   const measured = useChartWidth(chartRef);
   const axis = dayAxis(dates, measured, 82, 24, Math.max(1, dates.length - 1));
@@ -219,10 +220,8 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
   const activeSeries = series.find((item) => item.subscriptionId === activePoint?.subscriptionId);
   const activeSlot = activeSeries?.days.findIndex((day) => day.date === activePoint?.date) ?? -1;
   const activeDay = activeSeries?.days[activeSlot];
-  const viewportLeft = chartRef.current?.scrollLeft ?? 0;
   const viewportWidth = chartRef.current?.clientWidth || width;
-  const tooltipWidth = Math.min(320, viewportWidth - 16);
-  const tooltipX = Math.max(viewportLeft + 8, Math.min(xFor(activeSlot) + 12, viewportLeft + viewportWidth - tooltipWidth - 8, width - tooltipWidth - 8));
+  const tooltip = chartTooltipPlacement(width, xFor(activeSlot), viewportLeft, viewportWidth);
   const tooltipY = activeDay?.current == null ? 8 : Math.max(8, Math.min(yFor(activeDay.current) - 140, height - 140));
   function pathFor(points: { current: number | null; previous: number | null }[], field: 'current' | 'previous') {
     let connected = false;
@@ -235,8 +234,8 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
   }
   if (!series.length || !dates.length) return <p role="status">{details?.statusMessage ?? 'Daily subscription cost detail is unavailable in this snapshot.'}</p>;
   return <>
-    <div className="cost-chart-legend">{series.map((item, index) => <span key={item.subscriptionId}><i style={{ background: COLORS[index % COLORS.length] }} />{item.subscriptionName}</span>)}<span>Solid: selected period</span><span>Dotted: preceding period</span></div>
-    <div className="cost-chart-scroll" ref={chartRef} tabIndex={0} role="region" aria-label="Subscription cost comparison chart">
+    <div className="cost-chart-legend">{series.map((item, index) => <span key={item.subscriptionId}><i style={{ background: COLORS[index % COLORS.length] }} />{item.subscriptionName}</span>)}<span>Solid: selected period</span><span>Dotted: preceding period</span><span>{CHART_POINT_HINT}{onSelectDay ? '; select to open resource costs.' : '.'}</span></div>
+    <div className="cost-chart-scroll" ref={chartRef} tabIndex={0} role="region" aria-label="Subscription cost comparison chart" onScroll={event => setViewportLeft(event.currentTarget.scrollLeft)}>
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: `${width}px`, minWidth: `${width}px` }} className="cost-comparison-chart" role="group" aria-label="Current and previous subscription cost">
         {[0, 1, 2, 3, 4].map((tick) => { const value = minimum + (maximum - minimum) * tick / 4; return <g key={tick}><line x1={82} x2={width - 24} y1={yFor(value)} y2={yFor(value)} className="cost-chart-grid" /><text x={72} y={yFor(value)} textAnchor="end" dominantBaseline="middle">{formatMoney(value)}</text></g>; })}
         {series.map((item, index) => <g key={item.subscriptionId} style={{ color: COLORS[index % COLORS.length] }}>
@@ -253,18 +252,22 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
             aria-label={`${item.subscriptionName}, ${day.date}, ${formatMoney(day.current)}`}
             aria-describedby={activePoint?.subscriptionId === item.subscriptionId && activePoint.date === day.date ? tooltipId : undefined}
             onPointerEnter={() => setActivePoint({ subscriptionId: item.subscriptionId, date: day.date })}
-            onPointerLeave={(event) => { if (document.activeElement !== event.currentTarget) setActivePoint(null); }}
+            onPointerLeave={(event) => {
+              if (document.activeElement !== event.currentTarget) setActivePoint(current =>
+                current?.subscriptionId === item.subscriptionId && current.date === day.date ? null : current);
+            }}
             onFocus={() => setActivePoint({ subscriptionId: item.subscriptionId, date: day.date })}
             onBlur={() => setActivePoint(null)}
             onClick={() => onSelectDay?.(day.date, day.previousDate, item.subscriptionId)}
             onKeyDown={(event) => {
               if (event.key === 'Escape') setActivePoint(null);
+              moveChartFocus(event);
               if (onSelectDay && ['Enter', ' '].includes(event.key)) { event.preventDefault(); onSelectDay(day.date, day.previousDate, item.subscriptionId); }
             }}
           />)}
         </g>)}
         <DayAxis dates={dates} xFor={xFor} y={axis.rotated ? chartHeight - 30 : chartHeight - 16} rotated={axis.rotated} />
-        {activeSeries && activeDay?.current != null && <foreignObject x={tooltipX} y={tooltipY} width={tooltipWidth} height={132} className="cost-point-tooltip-container">
+        {activeSeries && activeDay?.current != null && <foreignObject x={tooltip.left} y={tooltipY} width={tooltip.width} height={132} className="cost-point-tooltip-container">
           <div className="cost-point-tooltip" role="tooltip" id={tooltipId}>
             <strong title={activeSeries.subscriptionName}>{activeSeries.subscriptionName}</strong>
             <dl>

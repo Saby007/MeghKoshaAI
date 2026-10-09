@@ -2,6 +2,622 @@
    reverted by removing the one import in main.tsx. Uses the shared tokens only; nothing
    here changes what is shown, only how it looks and responds. */
 
+:root .app-shell.app-shell.app-shell :is(input, textarea)::placeholder {
+    color: var(--color-graphite-mid);
+    opacity: 1;
+}
+
+:root .app-shell.app-shell.app-shell .cost-delta i {
+    opacity: 1;
+}
+
+:root .app-shell.app-shell.app-shell :is(.primary-command, .scope-run-button):hover:not(:disabled) {
+    background: var(--color-signal-orange);
+    color: var(--color-on-action);
+    filter: none;
+}
+
+:root .app-shell.app-shell.app-shell .schedule-evidence-note {
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    color: var(--color-graphite-mid);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+:root .app-shell.app-shell.app-shell .schedule-list-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4) var(--space-3);
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .schedule-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 1 1 260px;
+    min-width: 0;
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell.app-shell .schedule-search input {
+    flex: 1;
+    min-width: 0;
+}
+
+:root .app-shell.app-shell.app-shell .schedule-list-toolbar :is(input, select) {
+    min-height: var(--control-height);
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .schedule-daily-evidence {
+    margin-top: var(--space-3);
+    padding-top: var(--space-2);
+    border-top: var(--border-width) solid var(--glass-border);
+}
+
+:root .app-shell.app-shell.app-shell .schedule-pull-times {
+    display: grid;
+    gap: var(--space-1);
+    margin: var(--space-2) 0 0;
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .schedule-pull-times > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .schedule-pull-times dt {
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell.app-shell .schedule-pull-times dd {
+    margin: 0;
+}
+
+:root .app-shell.app-shell.app-shell .schedule-execution-error {
+    color: var(--color-error);
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+@media (max-width: 600px) {
+    :root .app-shell.app-shell.app-shell .schedule-list-toolbar select {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+:root .app-shell.app-shell.app-shell .page-scope-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-3);
+    margin-top: var(--space-2);
+    color: var(--color-graphite-mid);
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0;
+}
+
+:root .app-shell.app-shell.app-shell .page-scope-summary > span {
+    text-transform: none;
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .page-scope-summary > span + span::before {
+    content: '\00b7';
+    margin-right: var(--space-3);
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell.app-shell .evidence-state-copy {
+    flex: 1;
+    min-width: 0;
+}
+
+:root .app-shell.app-shell.app-shell .evidence-state-actions {
+    align-self: center;
+    flex-shrink: 0;
+}
+
+:root .app-shell.app-shell.app-shell .evidence-state-error {
+    border-color: var(--color-error);
+}
+
+:root .app-shell.app-shell.app-shell .evidence-state-error .evidence-state-icon {
+    color: var(--color-error);
+}
+
+@media (max-width: 600px) {
+    :root .app-shell.app-shell.app-shell .evidence-state {
+        flex-wrap: wrap;
+    }
+    :root .app-shell.app-shell.app-shell .evidence-state-actions {
+        width: 100%;
+    }
+    :root .app-shell.app-shell.app-shell .evidence-state-actions > button {
+        width: 100%;
+        min-height: var(--touch-height);
+    }
+}
+
+:root .app-shell.app-shell.app-shell .evidence-skeleton {
+    display: grid;
+    gap: var(--space-2);
+    max-width: 48rem;
+    margin-top: var(--space-3);
+}
+
+:root .app-shell.app-shell.app-shell .evidence-skeleton > i {
+    height: var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--color-skeleton);
+}
+
+:root .app-shell.app-shell.app-shell .evidence-skeleton > i:last-child {
+    width: 65%;
+}
+
+:root .app-shell.app-shell.app-shell :is(.budget-period-help, .chart-context-note) {
+    margin: 0 0 var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-left: var(--focus-width) solid var(--color-accent-line);
+    color: var(--color-graphite-mid);
+    background: var(--premium-recess);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+:root .app-shell.app-shell.app-shell .budget-management-toolbar {
+    padding-block: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .budget-management-toolbar .billing-filter {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+:root .app-shell.app-shell.app-shell .budget-management-scroll .budget-table {
+    min-width: calc(1120px * var(--ui-zoom, 1));
+    width: 100%;
+}
+
+:root .app-shell.app-shell.app-shell .budget-management-scroll .budget-table .budget-end-date {
+    min-width: calc(160px * var(--ui-zoom, 1));
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .budget-management-scroll .budget-table .budget-end-date time {
+    display: block;
+}
+
+:root .app-shell.app-shell.app-shell .budget-management-scroll .budget-table .budget-actions > button {
+    min-height: calc(32px * var(--ui-zoom, 1));
+    font-size: 12px;
+}
+
+@media (max-width: 600px) {
+    :root .app-shell.app-shell.app-shell .budget-management-toolbar .billing-filter {
+        width: 100%;
+    }
+    :root .app-shell.app-shell.app-shell .budget-management-toolbar select {
+        flex: 1;
+        min-width: 0;
+    }
+}
+
+@media (pointer: coarse) {
+    :root .app-shell.app-shell.app-shell .budget-management-scroll .budget-table .budget-actions > button {
+        min-height: var(--touch-height);
+    }
+}
+
+@media (max-width: 600px) {
+    :root .app-shell.app-shell.app-shell .mobile-card-scroll {
+        overflow: visible;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-scroll .mobile-card-table {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        background: transparent;
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table tbody {
+        display: grid;
+        gap: var(--space-3);
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table tbody > tr {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-3);
+        min-width: 0;
+        padding: var(--space-3);
+        border: var(--border-width) solid var(--premium-edge);
+        border-radius: var(--radius-md);
+        background: var(--premium-raised);
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table tbody > tr > td {
+        display: block;
+        width: auto;
+        min-width: 0;
+        height: auto;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        font-size: 12px;
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table td[data-label]::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: var(--space-1);
+        color: var(--color-graphite-mid);
+        font-size: 12px;
+        font-weight: 400;
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table td:is(:first-child, :last-child, [colspan]),
+    :root .app-shell.app-shell.app-shell .budget-table.mobile-card-table td:nth-child(2),
+    :root .app-shell.app-shell.app-shell .schedule-table.mobile-card-table td:nth-child(4) {
+        grid-column: 1 / -1;
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table td:first-child {
+        font-weight: var(--weight-semi);
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table td:first-child > button {
+        min-height: var(--touch-height);
+        width: 100%;
+        text-align: left;
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table td > :is(strong, code, small) {
+        white-space: normal;
+        overflow: visible;
+        overflow-wrap: anywhere;
+    }
+    :root .app-shell.app-shell.app-shell .schedule-table.mobile-card-table .mobile-month-progress {
+        display: none;
+    }
+    :root .app-shell.app-shell.app-shell .schedule-table.mobile-card-table .desktop-month-progress {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        min-width: 0;
+        width: 100%;
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table .schedule-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-2);
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table .schedule-actions button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-1);
+        width: 100%;
+        min-height: var(--touch-height);
+        font-size: 12px;
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table .schedule-actions button::after {
+        content: attr(data-action);
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table td.budget-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table td.budget-actions::before {
+        width: 100%;
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-scroll .mobile-card-table .budget-actions > button {
+        flex: 1;
+        min-height: var(--touch-height);
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table :is(.schedule-editor, .export-configuration-details) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        min-width: 0;
+        width: 100%;
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table .schedule-editor :is(input:not([type='checkbox']), select, button) {
+        min-width: 0;
+        width: 100%;
+        min-height: var(--touch-height);
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table .run-history > div {
+        display: flex;
+        flex-wrap: wrap;
+        min-width: 0;
+        gap: var(--space-2);
+    }
+    :root .app-shell.app-shell.app-shell .mobile-card-table .run-history > div > *,
+    :root .app-shell.app-shell.app-shell .mobile-card-table .export-configuration-details code {
+        min-width: 0;
+        max-width: 100%;
+        font-size: 12px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+}
+
+@media (max-width: 900px) {
+    :root .app-shell.app-shell.app-shell .app-header {
+        flex-wrap: wrap;
+    }
+    :root .app-shell.app-shell.app-shell .account-chip {
+        min-width: 0;
+        max-width: 100%;
+        flex-wrap: wrap;
+    }
+}
+
+:root .app-shell.app-shell.app-shell .remediation-backdrop {
+    padding: var(--space-4);
+    background: color-mix(in srgb, var(--color-obsidian-canvas) 80%, transparent);
+}
+
+:root .app-shell.app-shell.app-shell .remediation-dialog {
+    max-width: 100%;
+    max-height: calc(100dvh - var(--space-8));
+    overscroll-behavior: contain;
+    background: var(--color-surface);
+}
+
+:root .app-shell.app-shell.app-shell .remediation-dialog-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: var(--space-4);
+    gap: var(--space-3);
+    background: var(--color-surface);
+    border-color: var(--premium-edge);
+}
+
+:root .app-shell.app-shell.app-shell .remediation-dialog-header > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+:root .app-shell.app-shell.app-shell .remediation-dialog-header h2 {
+    font-size: var(--font-size-lg);
+    line-height: 1.3;
+}
+
+:root .app-shell.app-shell.app-shell .remediation-dialog-header > button {
+    width: var(--touch-height);
+    height: var(--touch-height);
+    border-radius: var(--radius-md);
+}
+
+:root .app-shell.app-shell.app-shell .remediation-dialog :is(span, small, p, label, input, select, button, dt, dd, code) {
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .remediation-dialog :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: 2px;
+}
+
+:root .app-shell.app-shell.app-shell .focus-export-body {
+    max-height: none;
+    overflow-y: visible;
+}
+
+:root .app-shell.app-shell.app-shell :is(.report-export-body, .custom-report-body, .focus-export-body) {
+    min-width: 0;
+}
+
+@media (max-width: 600px) {
+    :root .app-shell.app-shell.app-shell .remediation-backdrop {
+        padding: 0;
+        align-items: end;
+    }
+    :root .app-shell.app-shell.app-shell .remediation-dialog {
+        width: 100%;
+        max-height: 92dvh;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    }
+    :root .app-shell.app-shell.app-shell .remediation-dialog :is(button, input:not([type='checkbox']), select) {
+        min-height: var(--touch-height);
+    }
+    :root .app-shell.app-shell.app-shell .custom-report-dialog :is(.custom-module-grid, .custom-period-list) label {
+        min-height: var(--touch-height);
+    }
+}
+
+:root .app-shell.app-shell.app-shell .chart-inspection-help {
+    margin: 0;
+    padding: var(--space-2) var(--space-4);
+    color: var(--color-graphite-mid);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+:root .app-shell.app-shell.app-shell .chart-inspection {
+    margin: var(--space-3) var(--space-4);
+    padding: var(--space-3);
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-md);
+    background: var(--premium-recess);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+:root .app-shell.app-shell.app-shell .chart-inspection > strong {
+    display: block;
+    margin-bottom: var(--space-2);
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .chart-inspection dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-4);
+    margin: 0;
+}
+
+:root .app-shell.app-shell.app-shell .chart-inspection dl > div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+:root .app-shell.app-shell.app-shell .chart-inspection :is(dt, small) {
+    color: var(--color-graphite-mid);
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .chart-inspection dd {
+    margin: 0;
+    min-width: 0;
+    font-size: 12px;
+    font-weight: var(--weight-semi);
+    text-align: right;
+    white-space: normal;
+}
+
+:root .app-shell.app-shell.app-shell .chart-inspection > small {
+    display: block;
+    margin-top: var(--space-2);
+}
+
+:root .app-shell.app-shell.app-shell .monthly-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3) var(--space-4) 0;
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .monthly-chart-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+:root .app-shell.app-shell.app-shell .monthly-chart-legend i {
+    width: var(--space-3);
+    height: var(--space-3);
+    border-radius: var(--radius-sm);
+}
+
+:root .app-shell.app-shell.app-shell .monthly-column {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-bone);
+    font: inherit;
+    cursor: pointer;
+}
+
+:root .app-shell.app-shell.app-shell .monthly-column > :is(strong, span) {
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .monthly-bar-frame {
+    position: relative;
+    display: block;
+    overflow: hidden;
+}
+
+:root .app-shell.app-shell.app-shell .monthly-stack {
+    position: absolute;
+}
+
+:root .app-shell.app-shell.app-shell :is(.monthly-credit, .monthly-credit-key) {
+    background: var(--color-metric-green);
+}
+
+:root .app-shell.app-shell.app-shell .monthly-zero {
+    position: absolute;
+    width: 100%;
+    border-top: var(--border-width) solid var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell.app-shell :is(.monthly-column, .treemap-cell, .region-ranking button, .region-heat):active {
+    scale: 1;
+}
+
+:root .app-shell.app-shell.app-shell .region-heat {
+    cursor: pointer;
+}
+
+:root .app-shell.app-shell.app-shell :is(.monthly-column, .treemap-cell, .region-ranking button):focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: -2px;
+}
+
+:root .app-shell.app-shell.app-shell .treemap-cell small {
+    font-size: 12px;
+}
+
+:root .app-shell.app-shell.app-shell .region-ranking {
+    max-height: 28rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+:root .app-shell.app-shell.app-shell .region-ranking > button {
+    display: grid;
+    grid-template-columns: minmax(74px, .7fr) minmax(40px, 1fr) auto;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    min-height: var(--touch-height);
+    padding: var(--space-1);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-bone);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+:root .app-shell.app-shell.app-shell .region-ranking > button[data-active='true'] {
+    background: var(--premium-recess);
+}
+
+:root .app-shell.app-shell.app-shell .region-heat[data-active='true'],
+:root .app-shell.app-shell.app-shell .region-heat:focus-visible {
+    stroke: var(--color-bone);
+    stroke-width: 3;
+}
+
+:root .app-shell.app-shell.app-shell .region-heat:focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+    :root .app-shell.app-shell.app-shell .chart-inspection dl {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    :root .app-shell.app-shell.app-shell .treemap-breadcrumb button {
+        min-height: var(--touch-height);
+    }
+}
+
 /* Headings break evenly and paragraphs never end on a lone word. */
 
 :root .app-shell.app-shell :is(h1, h2, h3, h4, .executive-kicker) {
@@ -956,6 +1572,22 @@
     pointer-events: none;
 }
 
+:root .app-shell.app-shell .cost-bar-tooltip {
+    position: absolute;
+    z-index: 2;
+    pointer-events: none;
+}
+
+:root .app-shell.app-shell .cost-bar-hit:active {
+    scale: 1;
+}
+
+:root .app-shell.app-shell .cost-chart-zero {
+    stroke: var(--color-graphite-mid);
+    stroke-width: 1;
+    pointer-events: none;
+}
+
 :root .app-shell.app-shell .cost-comparison-chart :is(.cost-chart-current, .cost-chart-previous, .cost-chart-grid) {
     pointer-events: none;
 }
@@ -1375,6 +2007,43 @@
     transition: border-color var(--motion-duration) var(--ease-mechanical), box-shadow var(--motion-duration) var(--ease-mechanical);
 }
 
+:root .app-shell.app-shell.app-shell .report-sidenav-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    font-size: 12px;
+    color: var(--color-graphite-mid);
+}
+
+:root .app-shell.app-shell.app-shell .report-sidenav-heading strong {
+    color: var(--color-bone);
+    font-weight: var(--weight-semi);
+}
+
+:root .app-shell.app-shell.app-shell .report-rail-tooltip {
+    position: fixed;
+    z-index: 50;
+    display: grid;
+    gap: var(--space-1);
+    max-width: 280px;
+    padding: var(--space-3);
+    border: var(--border-width) solid var(--premium-edge);
+    border-radius: var(--radius-md);
+    background: var(--premium-raised);
+    color: var(--color-bone);
+    box-shadow: var(--elevation-ambient);
+    font-size: 12px;
+    line-height: 1.5;
+    pointer-events: none;
+}
+
+:root .app-shell.app-shell.app-shell .report-rail-tooltip :is(span, small) {
+    color: var(--color-graphite-mid);
+    font-size: 12px;
+}
+
 :root .app-shell.app-shell.app-shell .report-sidenav-search:focus-within {
     border-color: var(--color-focus);
     box-shadow: 0 0 0 3px var(--color-accent-glow);
@@ -1590,7 +2259,7 @@
     :root .app-shell.app-shell.app-shell .report-sidenav.is-collapsed .report-sidenav-body {
         padding-right: var(--space-2);
     }
-    :root .app-shell.app-shell.app-shell .report-sidenav.is-collapsed :is(.report-sidenav-search, .report-sidenav-label, .report-sidenav-chevron, .report-sidenav-pages, .report-sidenav-collapse > span, .report-sidenav-empty) {
+    :root .app-shell.app-shell.app-shell .report-sidenav.is-collapsed :is(.report-sidenav-heading, .report-sidenav-search, .report-sidenav-label, .report-sidenav-chevron, .report-sidenav-pages, .report-sidenav-collapse > span, .report-sidenav-empty) {
         display: none;
     }
     :root .app-shell.app-shell.app-shell .report-sidenav.is-collapsed :is(.report-sidenav-group-toggle, .report-sidenav-collapse) {
@@ -1631,7 +2300,21 @@
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav-mobile-toggle :is(small, strong) {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav-mobile-toggle small {
+        color: var(--color-graphite-mid);
+        font-size: 12px;
+        font-weight: 400;
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav-mobile-toggle strong {
+        font-size: var(--font-size-sm);
+        font-weight: var(--weight-semi);
     }
     :root .app-shell.app-shell.app-shell .report-sidenav.is-open .report-sidenav-mobile-toggle > svg:last-child {
         transform: rotate(180deg);
@@ -1644,6 +2327,24 @@
         flex-direction: column;
         gap: var(--space-2);
         margin-top: var(--space-2);
+        max-height: min(65dvh, var(--sidenav-menu-height, 65dvh));
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: var(--space-3);
+        border: var(--border-width) solid var(--premium-edge);
+        border-radius: var(--radius-md);
+        background: var(--color-obsidian-canvas);
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav-search {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        flex-shrink: 0;
+        background: var(--color-obsidian-canvas);
+    }
+    :root .app-shell.app-shell.app-shell .report-sidenav-groups {
+        flex-shrink: 0;
+        overflow: visible;
     }
     :root .app-shell.app-shell.app-shell .report-sidenav-collapse {
         display: none;

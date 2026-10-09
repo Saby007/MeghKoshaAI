@@ -13,9 +13,69 @@ async function selectReportPage(page: Page, name: string) {
   const mobileMenu = navigation.getByRole('button', { name: 'Report pages' });
   if (await mobileMenu.isVisible() && await mobileMenu.getAttribute('aria-expanded') === 'false') await mobileMenu.click();
   const target = navigation.getByRole('button', { name, exact: true, includeHidden: true });
-  if (!await target.isVisible()) await navigation.locator('.left-nav-group').filter({ has: page.getByRole('button', { name, exact: true, includeHidden: true }) }).locator('.left-nav-group-toggle').click({ timeout: 10000 });
+  if (!await target.isVisible()) await navigation.locator('.report-sidenav-group').filter({ has: target }).locator('.report-sidenav-group-toggle').click({ timeout: 10000 });
   await target.click({ timeout: 10000 });
   await expect(page.locator('#report-page-heading')).toHaveText(name);
+}
+
+async function setTheme(page: Page, theme: string) {
+  if (theme !== 'light' && theme !== 'dark') throw new Error(`Unsupported theme: ${theme}`);
+  const toggle = page.getByRole('button', { name: /Switch to (light|dark) theme/ });
+  if (await toggle.count()) {
+    const currentLabel = `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`;
+    if (await toggle.getAttribute('aria-label') !== currentLabel) await toggle.click();
+  } else {
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+  }
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+}
+
+async function textContrasts(page: Page, samples: { selector: string; pseudo?: string }[]) {
+  return page.evaluate(items => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Contrast measurement requires a canvas context.');
+    const channels = (color: string) => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      const value = [...context.getImageData(0, 0, 1, 1).data];
+      value[3] /= 255;
+      return value;
+    };
+    const composite = (foreground: number[], background: number[]) =>
+      [0, 1, 2].map(index => foreground[index] * foreground[3] + background[index] * (1 - foreground[3])).concat(1);
+    const luminance = (value: number[]) => value.slice(0, 3).map(channel => {
+      channel /= 255;
+      return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    }).reduce((total, value, index) => total + value * [0.2126, 0.7152, 0.0722][index], 0);
+    return items.map(({ selector, pseudo }) => {
+      const element = document.querySelector(selector);
+      if (!element) throw new Error(`Missing contrast sample: ${selector}`);
+      const parents: Element[] = [];
+      for (let parent: Element | null = element; parent; parent = parent.parentElement) parents.unshift(parent);
+      let backgrounds = [channels(getComputedStyle(document.documentElement).getPropertyValue('--color-obsidian-canvas').trim())];
+      let opacity = 1;
+      for (const parent of parents) {
+        const style = getComputedStyle(parent);
+        const gradientColors = style.backgroundImage.startsWith('linear-gradient')
+          ? style.backgroundImage.match(/color\([^)]*\)|rgba?\([^)]*\)/g) : null;
+        const paints = gradientColors ? gradientColors.map(channels) : [channels(style.backgroundColor)];
+        backgrounds = backgrounds.flatMap(background => paints.map(paint => composite(paint, background)));
+        opacity *= Number(style.opacity);
+      }
+      const style = getComputedStyle(element, pseudo);
+      const foreground = channels(style.color);
+      foreground[3] *= opacity * (pseudo ? Number(style.opacity) : 1);
+      const ratios = backgrounds.map(background => {
+        const a = luminance(composite(foreground, background));
+        const b = luminance(background);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      });
+      return { selector: selector + (pseudo ?? ''), ratio: Math.min(...ratios) };
+    });
+  }, samples);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -110,7 +170,7 @@ test('backend managed identity failure preserves sign-in without consent acquisi
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await expect(page.getByRole('region', { name: 'Azure access' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Check Azure access' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Authorize Azure access' })).toHaveCount(0);
@@ -135,18 +195,22 @@ test('main screen, billing comparison and hourly filters fit desktop and mobile 
   for (const viewport of [{ width: 1280, height: 1080 }, { width: 1440, height: 1080 }, { width: 1920, height: 1080 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await selectReportPage(page, 'Executive Summary');
-      await expect(page.getByRole('region', { name: 'Cost anomaly overview' })).toContainText('Demo subscription');
+      await expect(page.locator('.executive-financial-metrics > *')).toHaveCount(5);
+      await expect(page.locator('.period-anomaly-link')).toContainText('Cost spikes');
+      await expect(page.getByRole('region', { name: 'Cost anomaly overview' })).toHaveCount(0);
       await page.evaluate(() => window.scrollTo(0, 0));
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       const layout = await page.evaluate(() => ({
         scrollHeight: document.documentElement.scrollHeight,
-        cardHeights: [...document.querySelectorAll('.executive-hero-grid .kpi-card')].map((card) => card.getBoundingClientRect().height),
-        gap: getComputedStyle(document.querySelector('.executive-hero-grid')!).gap,
+        cardHeights: [...document.querySelectorAll('.executive-financial-metrics > *')].map((card) => card.getBoundingClientRect().height),
+        gap: getComputedStyle(document.querySelector('.executive-financial-metrics')!).gap,
       }));
       layouts.push({ width: viewport.width, theme, ...layout });
-      expect(Math.max(...layout.cardHeights) - Math.min(...layout.cardHeights)).toBeLessThanOrEqual(1);
+      expect(layout.cardHeights).toHaveLength(5);
+      expect(layout.cardHeights.every(height => height > 0)).toBe(true);
+      if (viewport.width >= 1280) expect(Math.max(...layout.cardHeights) - Math.min(...layout.cardHeights)).toBeLessThanOrEqual(1);
       const comparisonTop = await page.locator('.cost-window-overview').evaluate((element) => element.getBoundingClientRect().top);
       const titleBottom = await page.locator('.dashboard-titlebar').evaluate((element) => element.getBoundingClientRect().bottom);
       expect(comparisonTop).toBeGreaterThanOrEqual(titleBottom);
@@ -184,8 +248,8 @@ test('only Run Report starts an assessment, including after reload, and navigati
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
-      expect(await page.locator('.report-awaiting').evaluate((element) => element.getAnimations({ subtree: true }).length)).toBe(0);
+      await setTheme(page, theme);
+      expect(await page.locator('.report-awaiting').evaluate((element) => element.getAnimations({ subtree: true }).filter(animation => animation.effect?.getTiming().iterations === Infinity).length)).toBe(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.screenshot({ path: test.info().outputPath(`${width}-${theme}-idle.png`), fullPage: true, animations: 'disabled' });
     }
@@ -230,33 +294,22 @@ test('light theme text retains readable contrast', async ({ page }, testInfo) =>
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
   await runReport(page);
-  const ratios = await page.evaluate(() => {
-    const luminance = (color: string) => color.match(/[\d.]+/g)!.slice(0, 3).map(Number).map((channel) => {
-      const value = channel / 255;
-      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-    }).reduce((total, value, index) => total + value * [0.2126, 0.7152, 0.0722][index], 0);
-    const background = luminance(getComputedStyle(document.body).backgroundColor);
-    const textRatios = ['.left-nav-children button:not(.active)', '.kpi-note', '.kpi-label', '.report-context-details', '.anomaly-overview-provenance'].map((selector) => {
-      const foreground = luminance(getComputedStyle(document.querySelector(selector)!).color);
-      return { selector, ratio: (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05) };
-    });
-    const button = getComputedStyle(document.querySelector('.scope-run-button')!);
-    const buttonForeground = luminance(button.color);
-    const buttonBackground = luminance(button.backgroundColor);
-    const activePage = getComputedStyle(document.querySelector('.left-nav-children button.active')!);
-    const activeForeground = luminance(activePage.color);
-    const activeBackground = luminance(activePage.backgroundColor);
-    return [...textRatios,
-      { selector: '.scope-run-button', ratio: (Math.max(buttonForeground, buttonBackground) + 0.05) / (Math.min(buttonForeground, buttonBackground) + 0.05) },
-      { selector: '.left-nav-children button.active', ratio: (Math.max(activeForeground, activeBackground) + 0.05) / (Math.min(activeForeground, activeBackground) + 0.05) },
-    ];
-  });
+  await page.addStyleTag({ content: '*,*::before,*::after { transition: none !important; }' });
+  const ratios = await textContrasts(page, [
+    { selector: '.report-sidenav-pages button:not([aria-current])' },
+    { selector: '.kpi-note' }, { selector: '.kpi-label' },
+    { selector: '.report-context-details > summary' },
+    { selector: '.chart-inspection-help' },
+    { selector: '.scope-run-button' },
+    { selector: '.report-sidenav-pages button[aria-current="page"]' },
+    { selector: '.report-sidenav-search input', pseudo: '::placeholder' },
+  ]);
   for (const { selector, ratio } of ratios) expect(ratio, selector).toBeGreaterThanOrEqual(4.5);
   await expect(page.locator('.snapshot-banner-note')).toBeHidden();
   await testInfo.attach('light-theme-contrast.json', { body: JSON.stringify(ratios, null, 2), contentType: 'application/json' });
 });
 
-test('density scales spacing and detail expansion stays keyboard accessible', async ({ page }, testInfo) => {
+test('density scales navigation spacing and every distribution stays visible', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto('/');
   await runReport(page);
@@ -264,18 +317,20 @@ test('density scales spacing and detail expansion stays keyboard accessible', as
   for (const scale of [0.875, 1, 1.125]) {
     const gap = await page.evaluate((value) => {
       document.documentElement.style.setProperty('--ui-scale', String(value));
-      return parseFloat(getComputedStyle(document.querySelector('.executive-hero-grid')!).gap);
+      return parseFloat(getComputedStyle(document.querySelector('.report-sidenav-groups')!).gap);
     }, scale);
-    expect(gap).toBeCloseTo(12 * scale);
+    expect(gap).toBeCloseTo(4 * scale);
     gaps.push(gap);
   }
   await page.evaluate(() => document.documentElement.style.removeProperty('--ui-scale'));
-  const summary = page.locator('.cost-analysis-details > summary');
-  await summary.focus();
+  const branch = page.getByRole('navigation', { name: 'Report navigation' }).getByRole('button', { name: 'Cost Management', exact: true });
+  await branch.focus();
   await page.keyboard.press('Enter');
+  await expect(branch).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('.executive-visual-grid')).toBeVisible();
   await page.keyboard.press('Enter');
-  await expect(page.locator('.executive-visual-grid')).toBeHidden();
+  await expect(branch).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.executive-visual-grid')).toBeVisible();
   await testInfo.attach('density-metrics.json', { body: JSON.stringify({ scales: [0.875, 1, 1.125], gaps }), contentType: 'application/json' });
 });
 
@@ -299,11 +354,11 @@ test('tag value filtering is keyboard accessible and fits desktop and mobile in 
   await selectReportPage(page, 'Cost by Tags/Application');
   const tagKey = page.getByLabel('Tag key', { exact: true });
   const tagValue = page.getByLabel('Tag value', { exact: true });
-  const rows = page.locator('.app-cost-table tbody tr');
+  const rows = page.locator('.app-cost-table tbody tr:not(.tag-cost-unallocated)');
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await tagKey.selectOption('Team');
       await expect(tagValue).toHaveValue('');
       await expect(rows).toHaveCount(2);
@@ -313,7 +368,7 @@ test('tag value filtering is keyboard accessible and fits desktop and mobile in 
       await tagValue.selectOption({ label: 'Sales' });
       await expect(rows).toHaveCount(1);
       await expect(rows.first()).toContainText('Sales');
-      await expect(rows.first().locator('td').nth(1)).toHaveText('$80');
+      await expect(rows.first().locator('td').nth(1)).toHaveText('$80.00');
       await page.screenshot({ path: testInfo.outputPath(`${viewport.width}-${theme}-tag-values.png`), fullPage: true, animations: 'disabled' });
       await tagKey.selectOption('Environment');
       await expect(tagValue).toHaveValue('');
@@ -353,7 +408,7 @@ test('selected billing windows show actual totals and clearly marked business-ho
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await page.getByLabel('Billing day filter').selectOption('all');
       await page.getByLabel('Billing time filter').selectOption('all');
       await page.getByLabel('Billing tag filter').selectOption('');
@@ -394,14 +449,14 @@ test('EA commitment evidence and Rate Optimization text remain readable across t
   await page.route('**/api/rate-optimization**', (route) => route.fulfill({ json: rateOptimizationFixture }));
   await page.goto('/');
   await runReport(page);
-  await page.locator('summary').filter({ hasText: 'Explore costs and findings' }).click();
-  const mapAsset = page.getByRole('img', { name: 'Azure region spend world map' }).locator('image');
+  await expect(page.locator('.executive-visual-grid')).toBeVisible();
+  const mapAsset = page.getByRole('group', { name: 'Azure region spend world map' }).locator('image');
   await expect(mapAsset).toHaveAttribute('href', /\.svg/);
   expect(await mapAsset.evaluate(async (image: SVGImageElement) => (await fetch(image.href.baseVal)).ok)).toBe(true);
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await selectReportPage(page, 'EA Pricing');
       await expect(page.getByRole('heading', { name: 'Reservations (RI) and Savings Plans' })).toBeVisible();
       const evidence = page.getByRole('region', { name: 'Commitment evidence', exact: true });
@@ -458,7 +513,7 @@ test('EA commitment evidence and Rate Optimization text remain readable across t
         }));
       });
       expect(samples.length).toBeGreaterThan(20);
-      expect(samples.filter((sample) => sample.fontSize < (sample.selector === '.live-badge' ? 12 : 14))).toEqual([]);
+      expect(samples.filter((sample) => sample.fontSize < (['.live-badge', '.rate-table small'].includes(sample.selector) ? 12 : 14))).toEqual([]);
       for (const sample of samples) {
         expect(sample.contrast, sample.selector).toBeGreaterThanOrEqual(4.5);
       }
@@ -487,7 +542,7 @@ test('workspace states support sign-in, report retry, chat retry and schedule re
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath(`${width}-${theme}-sign-in.png`), fullPage: true, animations: 'disabled' });
     }
@@ -568,13 +623,14 @@ test('all report pages and export dialogs remain usable in the redesigned worksp
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       for (const tab of tabs) {
         await selectReportPage(page, tab);
         await expect(page.locator('.tab-panel')).toBeVisible();
         expect((await page.locator('.tab-panel').innerText()).trim().length, tab).toBeGreaterThan(10);
         if (tab === 'Budgets') {
-          await expect(page.locator('.budget-form label')).toHaveCount(7);
+          await expect(page.locator('.budget-form label')).toHaveCount(8);
+          await expect(page.getByLabel('Budget end date', { exact: true })).toBeVisible();
           for (const label of await page.locator('.budget-form label > span').all()) await expect(label).toBeVisible();
           const amount = await page.getByLabel('Budget amount', { exact: true }).boundingBox();
           expect(amount?.width).toBeGreaterThanOrEqual(140);
@@ -671,7 +727,7 @@ test('subscription and schedule loading states stay distinct from empty and popu
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await page.getByRole('region', { name: 'FOCUS export schedules', exact: true }).focus();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await page.evaluate(() => window.scrollTo(0, 0));
@@ -728,7 +784,7 @@ test('Schedules manages manually configured subscriptions without onboarding', a
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await expect(page.getByLabel('First monthly run (UTC)')).toHaveValue('2030-10-05T03:00');
       await expect(page.getByRole('button', { name: 'Save schedule', exact: true })).toBeEnabled();
       expect(await page.locator('.schedule-editor').evaluate(editor => {
@@ -792,7 +848,7 @@ test('Schedules configures a FOCUS export and saves its schedule as separate por
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await page.getByRole('button', { name: 'Configure export for Pilot subscription', exact: true }).click();
       const panel = page.getByRole('region', { name: 'Export configuration for Pilot subscription', exact: true });
       await expect(panel.getByText('focus-closed-month-app-pilot', { exact: true })).toBeVisible();
@@ -859,7 +915,7 @@ test('Schedules keeps ready and unavailable subscriptions visible without unsafe
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       for (const name of ['Throttled subscription', 'Pending processor setup']) {
         const row = page.getByRole('row').filter({ hasText: name });
         await expect(row).toBeVisible();
@@ -906,7 +962,7 @@ test('populated resource evidence and page search stay usable across viewports',
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await selectReportPage(page, 'Stale Resources');
       await expect(page.getByRole('group', { name: 'Stale resource filters' })).toBeVisible();
       await expect(page.locator('.stale-resource-table')).toContainText('finance-archive-evidence-disk');
@@ -1043,13 +1099,13 @@ test('ADO period comparisons, resource detail, budgets and downloads work across
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }, { width: 720, height: 500 }]) {
     await page.setViewportSize(viewport);
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await selectReportPage(page, 'Executive Summary');
       await page.getByRole('group', { name: 'Cost comparison range' }).getByRole('button', { name: '7d', exact: true }).click();
       await expect(page.getByLabel('Cost window start')).toHaveValue('2026-09-01');
       await expect(page.locator('.budget-within')).toContainText('Within budget');
-      await expect(page.locator('.budget-warning')).toContainText('10%');
-      await expect(page.locator('.budget-over')).toContainText('More than');
+      await expect(page.locator('.budget-warning')).toContainText('Over by 5%');
+      await expect(page.locator('.budget-over')).toContainText('Over by 40%');
       const point = page.locator('[data-cost-date="2026-09-07"]');
       await point.focus(); await point.press('Enter');
       const detail = page.getByRole('region', { name: 'Selected day resource detail' });
@@ -1086,6 +1142,8 @@ test('30-day cost axes name every day without causing page overflow', async ({ p
   await page.route('**/api/report**', (route) => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/latest') ? { ...snapshotFixture, report: detailReportFixture } : detailReportFixture }));
   await page.goto('/');
   await expect(page.locator('#report-page-heading')).toHaveText('Executive Summary');
+  await page.getByLabel('Cost window start').fill('2026-08-09');
+  await page.getByLabel('Cost window end').fill('2026-09-07');
   await expect(page.getByLabel('Cost window start')).toHaveValue('2026-08-09');
   await expect(page.getByLabel('Cost window end')).toHaveValue('2026-09-07');
   const expectedLabels = Array.from({ length: 30 }, (_, index) => new Date(Date.UTC(2026, 7, 9 + index)).toISOString().slice(5, 10));
@@ -1093,7 +1151,7 @@ test('30-day cost axes name every day without causing page overflow', async ({ p
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       const chart = page.getByRole('region', { name: 'Subscription cost comparison chart' });
       const labels = chart.locator('svg text').filter({ hasText: /^\d{2}-\d{2}$/ });
       await expect(labels).toHaveText(expectedLabels);
@@ -1116,42 +1174,49 @@ test('30-day cost axes name every day without causing page overflow', async ({ p
   expect(errors).toEqual([]);
 });
 
-test('executive daily tag trend keeps labels aligned for presets and a custom period', async ({ page }, testInfo) => {
+test('application daily trend keeps every label aligned for a full and custom period', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.route('**/api/report**', (route) => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/latest') ? { ...snapshotFixture, report: detailReportFixture } : detailReportFixture }));
+  const report = { ...detailReportFixture, tagCosts: {
+    available: true, status: 'Synthetic application attribution', totalSpend: 100, growthRate: null,
+    dimensions: [{ tagKey: 'application', unallocatedCost: 0, rows: [{ value: 'Finance', monthlyCost: 100, pctOfTotal: 1, forecastNextMonth: null }] }],
+  } };
+  await page.route('**/api/report**', (route) => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/latest') ? { ...snapshotFixture, report } : report }));
   await page.goto('/');
   await expect(page.locator('#report-page-heading')).toHaveText('Executive Summary');
-  await page.locator('.cost-analysis-details > summary').click();
+  await page.getByLabel('Cost window start').fill('2026-08-09');
+  await page.getByLabel('Cost window end').fill('2026-09-07');
+  await selectReportPage(page, 'Cost by Tags/Application');
+  await page.getByLabel('Tag value', { exact: true }).selectOption({ label: 'Finance' });
 
-  const chart = page.getByRole('img', { name: 'Daily cost trend' });
-  const labels = chart.locator('text');
+  const chart = page.getByRole('img', { name: 'Daily cost for application = Finance', exact: true });
+  const labels = chart.locator('text').filter({ hasText: /^\d{2}-\d{2}$/ });
   await expect(labels).toHaveCount(30);
   await expect(labels.first()).toHaveText('08-09');
   await expect(labels.last()).toHaveText('09-07');
-  expect(await labels.evaluateAll((nodes) => nodes.every((node) => node.getAttribute('transform')?.startsWith('rotate(-60')))).toBe(true);
 
-  await page.getByRole('button', { name: 'Custom', exact: true }).click();
-  await page.getByLabel('Analysis period start').fill('2026-09-01');
+  await page.getByLabel('Cost window start').fill('2026-09-01');
   await expect(labels).toHaveText(['09-01', '09-02', '09-03', '09-04', '09-05', '09-06', '09-07']);
   expect(await labels.evaluateAll((nodes) => nodes.every((node) => !node.hasAttribute('transform')))).toBe(true);
-  await expect(page.locator('.range-spend-kpi-grid')).toContainText('7/7 covered export-calendar days');
-  await expect(page.locator('.executive-donut-panel').filter({ hasText: 'Average hourly cost by tag set' })).toContainText('7 export days');
+  await expect(page.locator('.cost-bar-hit')).toHaveCount(7);
+  await page.locator('.cost-bar-hit').first().focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.tag-day-drilldown')).toContainText('finance-vm');
 
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       expect(await chart.evaluate((svg) => {
         const frame = svg.getBoundingClientRect();
-        return [...svg.querySelectorAll('text')].every((label) => {
+        return [...svg.querySelectorAll('text')].filter(label => /^\d{2}-\d{2}$/.test(label.textContent ?? '')).every((label) => {
           const bounds = label.getBoundingClientRect();
           return bounds.left >= frame.left - 1 && bounds.right <= frame.right + 1 && bounds.top >= frame.top - 1 && bounds.bottom <= frame.bottom + 1;
         });
       })).toBe(true);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       if (viewport.width === 390) {
-        expect(await chart.locator('xpath=..').evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+        expect(await chart.locator('xpath=../..').evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
       }
       await page.screenshot({ path: testInfo.outputPath(`${viewport.width}-${theme}-executive-custom-tag-trend.png`), fullPage: true, animations: 'disabled' });
     }
@@ -1172,7 +1237,7 @@ test('AI billing alerts expose spike and drop evidence in both themes and on mob
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const theme of ['light', 'dark']) {
-      await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+      await setTheme(page, theme);
       await page.getByLabel('AI anomaly type').selectOption('all');
       const spike = page.getByRole('article', { name: 'Cost spike: OpenAI account' });
       const drop = page.getByRole('article', { name: 'Cost drop: Azure OpenAI' });

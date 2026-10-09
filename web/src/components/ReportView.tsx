@@ -1,7 +1,9 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronDown, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, Inbox, LayoutDashboard, LoaderCircle, Mail, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { BarChart3, Boxes, ChartNoAxesCombined, Check, ChevronDown, ChevronRight, ClipboardList, Copy, Download, ExternalLink, FileCode2, Gauge, LayoutDashboard, Mail, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Search, ShieldCheck, TrendingDown, TrendingUp, X } from 'lucide-react';
 import worldMapUrl from '@svg-maps/world/world.svg?url';
 import { CountUp } from './CountUp';
+import { EvidenceState } from './EvidenceState';
+import { useDialogFocus } from './useDialogFocus';
 import {
   downloadCustomReport,
   downloadReportArtifact,
@@ -55,10 +57,10 @@ import { billingDates, billingWindow } from '../report/billingHistory';
 import { CostExportButton, CostFilters, CostWindowMetrics, CostWindowOverview, DailySubscriptionValues, PeriodCostAnomalies, RequiredTagCosts, ResourceCostTable, SubscriptionCostBreakdown, type SelectedDay } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
 import { costWindowDates, defaultCostWindow as initialCostWindow, matchesCostFilter, previousCostWindow, sameTagKey, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
-import { BudgetContext, BudgetDailyChart, budgetDailySummary, budgetSummaryText, budgetTargetsTag, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
+import { BudgetContext, BudgetDailyChart, BudgetExpiry, budgetExpiryDays, budgetDailySummary, budgetSummaryText, budgetTargetsTag, budgetThreshold, relateBudgets, useBudgetSummary, type BudgetState } from './BudgetContext';
 import { buildTakeaways, ExecutiveTakeaways } from './ExecutiveTakeaways';
 import { ServiceRetirements } from './ServiceRetirements';
-import { DailyBarChart, DayAxis, dayAxis, useChartWidth } from './TrendChart';
+import { DailyBarChart, DayAxis, dayAxis, moveChartFocus, useChartWidth } from './TrendChart';
 import { BRAND_NAME } from '../brand';
 import './executive-analysis.css';
 import './region-map.css';
@@ -174,51 +176,13 @@ const TABS = [
 type Tab = (typeof TABS)[number];
 type MoneyFormatter = (value: number) => string;
 
-function EvidenceState({ title, detail, loading = false }: { title: string; detail: string; loading?: boolean }) {
-  const Icon = loading ? LoaderCircle : Inbox;
-  return (
-    <div className="evidence-state" role="status" aria-busy={loading}>
-      <span className="evidence-state-icon" aria-hidden="true"><Icon className={loading ? 'spin' : undefined} size={21} /></span>
-      <div><h3>{title}</h3><p>{detail}</p></div>
-    </div>
-  );
-}
-
-function useDialogFocus(onClose: () => void) {
-  const dialogRef = useRef<HTMLElement>(null);
-  const trigger = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const controls = () => [...dialog.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, summary, [tabindex]')]
-      .filter((element) => !element.matches(':disabled, [tabindex="-1"]') && element.getClientRects().length > 0);
-    (controls()[0] ?? dialog).focus();
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-      }
-      if (event.key !== 'Tab') return;
-      const items = controls();
-      if (!items.length) { event.preventDefault(); dialog.focus(); return; }
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
-        event.preventDefault(); last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault(); first.focus();
-      }
-    };
-    dialog.addEventListener('keydown', handleKey);
-    return () => {
-      dialog.removeEventListener('keydown', handleKey);
-      document.body.style.overflow = previousOverflow;
-      if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true });
-    };
-  }, [onClose]);
-  return dialogRef;
+function focusAfterNavigation(findTarget: () => HTMLElement | null | undefined) {
+  const origin = document.activeElement;
+  requestAnimationFrame(() => {
+    if (document.activeElement === origin || document.activeElement === document.body) {
+      findTarget()?.focus({ preventScroll: true });
+    }
+  });
 }
 
 type PrimaryNav = 'dashboard' | 'costManagement' | 'resources' | 'analytics' | 'recommendations' | 'reports';
@@ -344,6 +308,8 @@ export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelec
     try { return window.localStorage.getItem('mkai-nav-collapsed') === 'true'; } catch { return false; }
   });
   const [pageQuery, setPageQuery] = useState('');
+  const [railTooltip, setRailTooltip] = useState<{ group: PrimaryNav; top: number; left: number } | null>(null);
+  const [mobileMenuHeight, setMobileMenuHeight] = useState<number | null>(null);
   const [placement, setPlacement] = useState<{ top: number; left: number } | null>(null);
   const navRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -353,6 +319,8 @@ export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelec
     pages: PRIMARY_NAV_TABS[group].filter((page) => !query || `${PRIMARY_NAV_LABELS[group]} ${page}`.toLocaleLowerCase().includes(query)),
   })).filter(({ pages }) => pages.length > 0);
   const firstMatch = groups[0]?.pages[0];
+  const matchingPages = groups.reduce((total, { pages }) => total + pages.length, 0);
+  const activeGroup = PRIMARY_NAV_ORDER.find((group) => PRIMARY_NAV_TABS[group].includes(activeTab)) ?? 'dashboard';
 
   useEffect(() => {
     try { window.localStorage.setItem('mkai-nav-collapsed', String(collapsed)); } catch { /* storage unavailable */ }
@@ -361,7 +329,34 @@ export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelec
   useEffect(() => {
     const activeGroup = PRIMARY_NAV_ORDER.find((group) => PRIMARY_NAV_TABS[group].includes(activeTab));
     if (activeGroup) setExpandedGroups((current) => current.has(activeGroup) ? current : new Set([...current, activeGroup]));
+    setRailTooltip(null);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!railTooltip) return;
+    const dismiss = () => setRailTooltip(null);
+    window.addEventListener('resize', dismiss);
+    window.addEventListener('scroll', dismiss, true);
+    return () => {
+      window.removeEventListener('resize', dismiss);
+      window.removeEventListener('scroll', dismiss, true);
+    };
+  }, [railTooltip]);
+
+  useLayoutEffect(() => {
+    if (!mobileOpen) return;
+    const measureMenu = () => {
+      const toggle = navRef.current?.querySelector('.report-sidenav-mobile-toggle');
+      if (toggle) setMobileMenuHeight(Math.max(120, Math.floor(window.innerHeight - toggle.getBoundingClientRect().bottom - 24)));
+    };
+    measureMenu();
+    window.addEventListener('resize', measureMenu);
+    window.addEventListener('scroll', measureMenu, true);
+    return () => {
+      window.removeEventListener('resize', measureMenu);
+      window.removeEventListener('scroll', measureMenu, true);
+    };
+  }, [mobileOpen]);
 
   /* The rail is fixed to the viewport, so it is placed from the sticky header's
      bottom edge and the workspace's left edge, and re-placed when either moves. */
@@ -394,6 +389,7 @@ export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelec
 
   useEffect(() => {
     if (!mobileOpen) return;
+    searchRef.current?.focus({ preventScroll: true });
     const closeOutside = (event: PointerEvent) => {
       if (!navRef.current?.contains(event.target as Node)) setMobileOpen(false);
     };
@@ -416,7 +412,14 @@ export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelec
     onSelect(page);
   }
 
+  function showRailTooltip(group: PrimaryNav, button: HTMLButtonElement) {
+    if (!collapsed || window.innerWidth <= 900) return;
+    const box = button.getBoundingClientRect();
+    setRailTooltip({ group, left: box.right + 8, top: Math.max(8, Math.min(box.top, window.innerHeight - 100)) });
+  }
+
   function toggleGroup(group: PrimaryNav) {
+    setRailTooltip(null);
     if (collapsed) {
       setCollapsed(false);
       setExpandedGroups((current) => new Set([...current, group]));
@@ -435,7 +438,11 @@ export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelec
       ref={navRef}
       className={`report-sidenav${collapsed ? ' is-collapsed' : ''}${mobileOpen ? ' is-open' : ''}`}
       aria-label="Report navigation"
-      style={placement ? { '--sidenav-top': `${placement.top}px`, '--sidenav-left': `${placement.left}px` } as React.CSSProperties : undefined}
+      onKeyDown={event => { if (event.key === 'Escape') setRailTooltip(null); }}
+      style={{
+        ...(placement ? { '--sidenav-top': `${placement.top}px`, '--sidenav-left': `${placement.left}px` } : {}),
+        ...(mobileMenuHeight !== null ? { '--sidenav-menu-height': `${mobileMenuHeight}px` } : {}),
+      } as React.CSSProperties}
     >
       <button
         type="button"
@@ -446,21 +453,23 @@ export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelec
         onClick={() => setMobileOpen((open) => !open)}
       >
         <Menu size={18} aria-hidden="true" />
-        <span>{activeTab}</span>
+        <span><small>{PRIMARY_NAV_LABELS[activeGroup]}</small><strong>{activeTab}</strong></span>
         <ChevronDown size={16} aria-hidden="true" />
       </button>
       <div id="report-sidenav-body" className="report-sidenav-body">
+        <div className="report-sidenav-heading"><strong>Report pages</strong><span id="report-page-count" role="status">{matchingPages} {query ? 'matching ' : ''}{matchingPages === 1 ? 'page' : 'pages'}</span></div>
         <div className="report-sidenav-search">
           <Search size={15} aria-hidden="true" />
           <input
             ref={searchRef}
             type="search"
             aria-label="Find a report page"
+            aria-describedby="report-page-count"
             placeholder="Find a page"
             value={pageQuery}
             onChange={(event) => setPageQuery(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Escape') { event.stopPropagation(); setPageQuery(''); }
+              if (event.key === 'Escape' && pageQuery) { event.stopPropagation(); setPageQuery(''); }
               if (event.key === 'Enter' && query && firstMatch) { event.preventDefault(); selectPage(firstMatch); }
             }}
           />
@@ -481,10 +490,16 @@ export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelec
                 <button
                   type="button"
                   className="report-sidenav-group-toggle"
+                  aria-label={PRIMARY_NAV_LABELS[group]}
+                  aria-describedby={railTooltip?.group === group ? 'report-rail-tooltip' : undefined}
                   aria-expanded={open}
                   aria-controls={`report-sidenav-${group}`}
                   disabled={!!query}
                   title={collapsed ? PRIMARY_NAV_LABELS[group] : undefined}
+                  onMouseEnter={event => showRailTooltip(group, event.currentTarget)}
+                  onMouseLeave={() => setRailTooltip(null)}
+                  onFocus={event => showRailTooltip(group, event.currentTarget)}
+                  onBlur={() => setRailTooltip(null)}
                   onClick={() => toggleGroup(group)}
                 >
                   <span className="report-sidenav-icon"><Icon size={16} aria-hidden="true" /></span>
@@ -515,12 +530,17 @@ export function ReportSideNav({ activeTab, onSelect }: { activeTab: Tab; onSelec
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
           title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
           aria-expanded={!collapsed}
-          onClick={() => setCollapsed((value) => !value)}
+          onClick={() => { setRailTooltip(null); setCollapsed((value) => !value); }}
         >
           {collapsed ? <PanelLeftOpen size={16} aria-hidden="true" /> : <PanelLeftClose size={16} aria-hidden="true" />}
           <span>Collapse</span>
         </button>
       </div>
+      {railTooltip && <div id="report-rail-tooltip" role="tooltip" className="report-rail-tooltip" style={{ top: railTooltip.top, left: railTooltip.left }}>
+        <strong>{PRIMARY_NAV_LABELS[railTooltip.group]}</strong>
+        <span>{PRIMARY_NAV_TABS[railTooltip.group].length} {PRIMARY_NAV_TABS[railTooltip.group].length === 1 ? 'page' : 'pages'}{railTooltip.group === activeGroup ? ` · Current: ${activeTab}` : ''}</span>
+        <small>Select to expand this area</small>
+      </div>}
     </nav>
   );
 }
@@ -678,12 +698,24 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
     maximumFractionDigits: 2,
   });
   const formatExactMoney: MoneyFormatter = (value) => exactFormatter.format(value * conversionRate);
+  const fractionalFormatter = new Intl.NumberFormat(undefined, {
+    style: 'currency', currency: displayCurrency, currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: 2, maximumFractionDigits: 8,
+  });
+  const formatDistributionMoney: MoneyFormatter = value => {
+    const converted = value * conversionRate;
+    const magnitude = Math.abs(converted);
+    if (magnitude > 0 && magnitude < 0.00000001) {
+      return `${converted < 0 ? 'Credit' : 'Spend'} < ${fractionalFormatter.format(0.00000001)}`;
+    }
+    return magnitude > 0 && magnitude < 0.01 ? fractionalFormatter.format(converted) : exactFormatter.format(converted);
+  };
   const currencyNames = new Intl.DisplayNames(undefined, { type: 'currency' });
   const currencyOptions = exchangeRates ? Object.keys(exchangeRates.rates).sort() : [sourceCurrency];
 
   function selectTab(t: Tab) {
     setTab(t);
-    requestAnimationFrame(() => document.getElementById('report-page-heading')?.focus({ preventScroll: true }));
+    focusAfterNavigation(() => document.getElementById('report-page-heading'));
   }
 
   function openFinding(category: string) {
@@ -705,6 +737,11 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
         <div className="report-page-title">
           <span>{PRIMARY_NAV_LABELS[PRIMARY_NAV_ORDER.find((group) => PRIMARY_NAV_TABS[group].includes(tab)) ?? 'dashboard']}</span>
           <h1 id="report-page-heading" tabIndex={-1}>{tab}</h1>
+          <div className="page-scope-summary" aria-label="Report scope summary">
+            <span>{report.subscriptionBreakdown.length} {report.subscriptionBreakdown.length === 1 ? 'subscription' : 'subscriptions'}</span>
+            <span>{reportDate(costWindow.startDate)} – {reportDate(costWindow.endDate)} UTC</span>
+            <span title="Assessment snapshot timestamp, not the freshness of live budget or export data">Snapshot: {new Date(snapshotCreatedAt ?? report.reportMetadata.generatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
+          </div>
         </div>
         {/* The period badge ("2026-08") repeated the cost window's From/To,
             which sit directly above; removed so the dates appear once. */}
@@ -827,6 +864,7 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
               onOpenFinding={openFinding}
               formatMoney={formatMoney}
               formatExactMoney={formatExactMoney}
+              formatDistributionMoney={formatDistributionMoney}
               displayCurrency={displayCurrency}
               anomalyState={anomalyState}
               onOpenAnomalies={() => selectTab('Cost Anomalies')}
@@ -1177,7 +1215,7 @@ function CustomReportDialog({
   subscriptionIds: string[];
   onClose: () => void;
 }) {
-  const dialogRef = useDialogFocus(onClose);
+  const dialogRef = useDialogFocus(onClose, 'button[aria-label="Download stakeholder reports"]');
   const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>([]);
   const [selectedSnapshots, setSelectedSnapshots] = useState<Set<string>>(new Set([currentSnapshotId]));
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set(['summary', 'subscriptions', 'savings', 'findings', 'actionPlan']));
@@ -1556,6 +1594,7 @@ function ExecutiveSummaryTab({
   onOpenFinding,
   formatMoney,
   formatExactMoney,
+  formatDistributionMoney,
   displayCurrency,
   anomalyState,
   onOpenAnomalies,
@@ -1571,6 +1610,7 @@ function ExecutiveSummaryTab({
   onOpenFinding: (category: string) => void;
   formatMoney: MoneyFormatter;
   formatExactMoney: MoneyFormatter;
+  formatDistributionMoney: MoneyFormatter;
   displayCurrency: string;
   anomalyState: AnomalyState;
   onOpenAnomalies: () => void;
@@ -1708,7 +1748,7 @@ function ExecutiveSummaryTab({
         id="spend-distribution-overview"
         title="Spend Distribution"
       >
-        <ExecutiveSpendVisuals report={report} formatMoney={formatMoney} />
+        <ExecutiveSpendVisuals report={report} formatPreciseMoney={formatDistributionMoney} />
       </DashboardSection>
 
       <div className={`executive-evidence-grid${report.prioritizedFindings.length ? ' has-findings' : ''}`}>
@@ -1903,42 +1943,107 @@ function ExecutiveSummaryTab({
 const SPEND_CATEGORY_ORDER = ['Compute', 'Storage', 'Networking', 'Databases', 'AI/ML', 'Other'];
 const spendCategoryClass = (category: string) => `spend-${category.toLowerCase().replaceAll('/', '-').replaceAll(' ', '-')}`;
 
-function MonthlySpendChart({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
+const spendShare = (value: number) => value > 0 && value < 0.001 ? '<0.1%' : percent(value);
+
+function useChartInspection() {
+  const [active, setActive] = useState<string | null>(null);
+  const id = useId();
+  const bind = (key: string) => ({
+    'data-chart-point': key,
+    'aria-describedby': active === key ? id : undefined,
+    onPointerEnter: () => setActive(key),
+    onPointerLeave: (event: React.PointerEvent<HTMLElement | SVGElement>) => {
+      const focused = document.activeElement;
+      const samePointFocused = focused?.getAttribute('data-chart-point') === key
+        && focused.closest('.executive-visual') === event.currentTarget.closest('.executive-visual');
+      if (!samePointFocused) setActive(current => current === key ? null : current);
+    },
+    onFocus: () => setActive(key),
+    onBlur: () => setActive(current => current === key ? null : current),
+    onClick: () => setActive(key),
+    onKeyDown: (event: React.KeyboardEvent<HTMLElement | SVGElement>) => {
+      if (event.key === 'Escape') setActive(null);
+      moveChartFocus(event);
+      if (event.currentTarget instanceof SVGElement && ['Enter', ' '].includes(event.key)) {
+        event.preventDefault(); setActive(key);
+      }
+    },
+  });
+  return { active, id, bind, clear: () => setActive(null) };
+}
+
+function ChartReadout({ id, title, rows, note }: {
+  id: string; title: string; rows: { label: string; value: string }[]; note?: string;
+}) {
+  return <div className="chart-inspection" id={id} role="status">
+    <strong>{title}</strong>
+    <dl>{rows.map(row => <div key={row.label}><dt>{row.label}</dt><dd>{row.value}</dd></div>)}</dl>
+    {note && <small>{note}</small>}
+  </div>;
+}
+
+function MonthlySpendChart({ report, formatPreciseMoney }: { report: FullReport; formatPreciseMoney: MoneyFormatter }) {
+  const inspection = useChartInspection();
   const months = report.spendHistory.months;
   const maximum = Math.max(...months.map((item) => item.total), 0);
+  const minimum = Math.min(...months.map(item => item.total), 0);
+  const upperBound = maximum === 0 && minimum === 0 ? 1 : maximum;
+  const range = upperBound - minimum || 1;
+  const zeroTop = upperBound / range * 100;
+  const categories = [...SPEND_CATEGORY_ORDER, ...new Set(months.flatMap(month => Object.keys(month.categorySpend)).filter(key => !SPEND_CATEGORY_ORDER.includes(key)))];
+  const presentCategories = categories.filter(category => months.some(month => month.categorySpend[category] !== undefined));
+  const activeMonth = months.find(month => month.month === inspection.active);
   return (
     <section className="executive-visual executive-history-panel">
       <header>
         <span>Month-over-month spend</span>
         <small>{report.spendHistory.statusMessage}</small>
       </header>
+      {months.length > 0 && <div className="monthly-chart-legend" aria-label="Monthly cost categories">
+        {presentCategories.filter(category => months.some(month => month.categorySpend[category] > 0)).map(category => <span key={category}><i className={spendCategoryClass(SPEND_CATEGORY_ORDER.includes(category) ? category : 'Other')} aria-hidden="true" />{category}</span>)}
+        {minimum < 0 && <span><i className="monthly-credit-key" aria-hidden="true" />Net credit</span>}
+      </div>}
+      {months.length > 0 && <p className="chart-inspection-help">Hover, focus or tap a month for totals and category costs. Arrow keys move between months. Category colours show the positive-cost mix; totals include credits.</p>}
       {months.length > 0 ? (
-        <div className="monthly-chart-scroll">
+        <div className="monthly-chart-scroll" role="region" aria-label="Monthly spend history" tabIndex={0}>
           <div className="monthly-chart" style={{ gridTemplateColumns: `repeat(${months.length}, minmax(48px, 1fr))` }}>
-            {months.map((month) => (
-              <div className="monthly-column" key={month.month}>
-                <strong>{formatMoney(month.total)}</strong>
+            {months.map((month) => {
+              const positiveTotal = Object.values(month.categorySpend).reduce((sum, value) => sum + Math.max(0, value), 0);
+              return (
+              <button type="button" className="monthly-column" key={month.month} {...inspection.bind(month.month)}
+                aria-label={`${month.month}, ${formatPreciseMoney(month.total)}`}>
+                <strong>{formatPreciseMoney(month.total)}</strong>
                 <div className="monthly-bar-frame">
-                  <div className="monthly-stack" style={{ height: `${maximum > 0 ? (month.total / maximum) * 100 : 0}%` }}>
-                    {SPEND_CATEGORY_ORDER.map((category) => {
+                  {minimum < 0 && <span className="monthly-zero" style={{ top: `${zeroTop}%` }} aria-hidden="true" />}
+                  <div className={`monthly-stack${month.total < 0 ? ' monthly-credit' : ''}`} style={{
+                    top: `${month.total >= 0 ? (upperBound - month.total) / range * 100 : zeroTop}%`,
+                    height: `${Math.abs(month.total) / range * 100}%`,
+                  }}>
+                    {month.total >= 0 && presentCategories.map((category) => {
                       const spend = month.categorySpend[category] ?? 0;
                       return spend > 0 ? (
                         <i
-                          className={spendCategoryClass(category)}
+                          className={spendCategoryClass(SPEND_CATEGORY_ORDER.includes(category) ? category : 'Other')}
                           key={category}
-                          style={{ height: `${month.total > 0 ? (spend / month.total) * 100 : 0}%` }}
-                          title={`${category}: ${formatMoney(spend)}`}
+                          style={{ height: `${positiveTotal > 0 ? spend / positiveTotal * 100 : 0}%` }}
+                          title={`${category}: ${formatPreciseMoney(spend)}`}
                         />
                       ) : null;
                     })}
                   </div>
                 </div>
                 <span>{new Date(`${month.month}-01T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', year: '2-digit', timeZone: 'UTC' })}</span>
-              </div>
-            ))}
+              </button>
+              );
+            })}
           </div>
         </div>
       ) : <p className="visual-empty">Monthly export history is not available.</p>}
+      {activeMonth && <ChartReadout id={inspection.id} title={`Month ${activeMonth.month}`} rows={[
+        { label: 'Reported total', value: formatPreciseMoney(activeMonth.total) },
+        ...categories.filter(category => activeMonth.categorySpend[category] !== undefined)
+          .map(category => ({ label: category, value: formatPreciseMoney(activeMonth.categorySpend[category]) })),
+      ]} note={`Monthly snapshot history with ${report.spendHistory.status} coverage, not the selected daily window. Missing category keys are not inferred as zero.`} />}
     </section>
   );
 }
@@ -1950,7 +2055,9 @@ type TreemapNode = {
   resource?: CostHierarchyItem;
 };
 
-function CostTreemap({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
+function CostTreemap({ report, formatPreciseMoney }: { report: FullReport; formatPreciseMoney: MoneyFormatter }) {
+  const inspection = useChartInspection();
+  const treeRef = useRef<HTMLDivElement>(null);
   /* Opens at subscription level even when there is only one, so the view
      scales unchanged as more subscriptions are added; drill in from there. */
   const [subscriptionId, setSubscriptionId] = useState<string | null>(null);
@@ -1972,42 +2079,51 @@ function CostTreemap({ report, formatMoney }: { report: FullReport; formatMoney:
       resource: resourceGroup ? item : undefined,
     });
   }
-  /* Groups that round to nothing drew full-size "$0" cells (flex-basis has a
-     16% floor), so a third of the map was empty groups. */
-  const nodes = [...nodesByKey.values()].filter((node) => node.spend >= 0.5).sort((left, right) => right.spend - left.spend).slice(0, 24);
+  const allNodes = [...nodesByKey.values()].filter(node => node.spend > 0).sort((left, right) => right.spend - left.spend);
+  const nodes = allNodes.slice(0, 24);
   const total = nodes.reduce((sum, node) => sum + node.spend, 0);
+  const attributedTotal = allNodes.reduce((sum, node) => sum + node.spend, 0);
+  const activeNode = nodes.find(node => node.key === inspection.active);
+  const focusLevel = () => {
+    inspection.clear();
+    focusAfterNavigation(() => treeRef.current?.querySelector<HTMLElement>('button, a'));
+  };
   function selectNode(node: TreemapNode) {
     if (!subscriptionId) setSubscriptionId(node.key);
     else if (!resourceGroup) setResourceGroup(node.key);
+    focusLevel();
   }
   return (
     <section className="executive-visual executive-treemap-panel">
       <header>
         <span>Spend hierarchy</span>
         <nav className="treemap-breadcrumb" aria-label="Spend hierarchy level">
-          <button type="button" onClick={() => { setSubscriptionId(null); setResourceGroup(null); }}>Subscriptions</button>
-          {subscriptionId && <><ChevronRight size={12} /><button type="button" onClick={() => setResourceGroup(null)}>{selectedSubscription?.subscriptionName ?? subscriptionId}</button></>}
+          <button type="button" onClick={() => { setSubscriptionId(null); setResourceGroup(null); focusLevel(); }}>Subscriptions</button>
+          {subscriptionId && <><ChevronRight size={12} /><button type="button" onClick={() => { setResourceGroup(null); focusLevel(); }}>{selectedSubscription?.subscriptionName ?? subscriptionId}</button></>}
           {resourceGroup && <><ChevronRight size={12} /><b>{resourceGroup}</b></>}
         </nav>
       </header>
+      <p className="chart-inspection-help">Positive attributed spend · {nodes.length} of {allNodes.length} entries. Tile areas are approximate; inspect for exact values and share of this level. Select to drill in; resource links open Azure Portal.</p>
       {nodes.length > 0 ? (
-        <div className="cost-treemap">
+        <div className="cost-treemap" ref={treeRef}>
           {nodes.map((node, index) => {
-            const content = <><strong>{node.label}</strong><span>{formatMoney(node.spend)}</span><small>{node.detail}</small></>;
+            const content = <><strong>{node.label}</strong><span>{formatPreciseMoney(node.spend)}</span><small>{node.detail}</small></>;
             const style = { flexGrow: Math.max(node.spend, 1), flexBasis: `${Math.max(16, total > 0 ? (node.spend / total) * 100 : 16)}%` };
             return node.resource ? (
               <a
                 className={`treemap-cell tone-${index % 5}`}
+                {...inspection.bind(node.key)}
                 href={azurePortalResourceUrl(node.resource.resourceId)}
                 target="_blank"
                 rel="noreferrer"
                 style={style}
                 key={node.key}
-                title={`${node.label}: ${formatMoney(node.spend)}`}
+                title={`${node.label}: ${formatPreciseMoney(node.spend)}`}
               >{content}</a>
             ) : (
               <button
                 className={`treemap-cell tone-${index % 5}`}
+                {...inspection.bind(node.key)}
                 type="button"
                 style={style}
                 key={node.key}
@@ -2017,7 +2133,11 @@ function CostTreemap({ report, formatMoney }: { report: FullReport; formatMoney:
             );
           })}
         </div>
-      ) : <p className="visual-empty">Resource-level cost attribution is not available.</p>}
+      ) : <p className="visual-empty">{visible.length ? 'No positive attributed spend at this level; zero and credit entries are not tiled.' : 'Resource-level cost attribution is not available.'}</p>}
+      {activeNode && <ChartReadout id={inspection.id} title={activeNode.label} rows={[
+        { label: activeNode.detail, value: formatPreciseMoney(activeNode.spend) },
+        { label: 'Share of positive spend at this level', value: spendShare(activeNode.spend / attributedTotal) },
+      ]} />}
     </section>
   );
 }
@@ -2043,7 +2163,10 @@ const displayRegion = (region: string) => ({
   koreacentral: 'Korea Central', australiaeast: 'Australia East', global: 'Global', unassigned: 'Unassigned',
 }[normalizedRegion(region)] ?? region);
 
-function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
+function RegionSpendMap({ report, formatPreciseMoney }: { report: FullReport; formatPreciseMoney: MoneyFormatter }) {
+  const inspection = useChartInspection();
+  const regions = report.regionSpend.filter(item => item.monthlySpend > 0);
+  const activeRegion = regions.find(item => item.region === inspection.active);
   const plotted = report.regionSpend.filter((item) => REGION_POINTS[normalizedRegion(item.region)] && item.monthlySpend > 0);
   const maximum = Math.max(...plotted.map((item) => item.monthlySpend), 0);
   const nonGeographic = report.regionSpend.filter((item) => !REGION_POINTS[normalizedRegion(item.region)] && item.monthlySpend > 0);
@@ -2051,37 +2174,50 @@ function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMon
     <section className="executive-visual executive-region-panel">
       <header>
         <span>Spend by Azure region</span>
-        <strong>{plotted.length} mapped{nonGeographic.length > 0 ? ` · ${nonGeographic.length} global/unassigned` : ''}</strong>
+        <strong>{plotted.length} mapped{nonGeographic.length > 0 ? ` · ${nonGeographic.length} unmapped` : ''}</strong>
       </header>
+      <p className="chart-inspection-help">Bubble sizes are approximate; readouts show reported positive costs and shares. Global and unmapped regions remain in the ranking. Hover, focus or tap for values; arrow keys move between entries.</p>
       <div className="region-panel-body">
-        <svg className="region-map" viewBox="0 0 1010 666" role="img" aria-label="Azure region spend world map">
-            <image className="map-land-image" href={worldMapUrl} width="1010" height="666" />
+        <svg className="region-map" viewBox="0 0 1010 666" role="group" aria-label="Azure region spend world map">
+            <image className="map-land-image" href={worldMapUrl} width="1010" height="666" aria-hidden="true" />
             {plotted.map((item) => {
               const [x, y] = REGION_POINTS[normalizedRegion(item.region)];
               const intensity = maximum > 0 ? item.monthlySpend / maximum : 0;
               return (
                 <circle
                   className="region-heat"
+                  {...inspection.bind(item.region)}
+                  role="button" tabIndex={0}
+                  aria-label={`${displayRegion(item.region)}, ${formatPreciseMoney(item.monthlySpend)}, ${spendShare(item.pctOfTotal)}`}
+                  data-active={inspection.active === item.region || undefined}
                   cx={x}
                   cy={y}
                   r={7 + Math.sqrt(intensity) * 17}
                   key={item.region}
                   style={{ opacity: 0.42 + intensity * 0.58 }}
                 >
-                  <title>{displayRegion(item.region)}: {formatMoney(item.monthlySpend)} ({percent(item.pctOfTotal)})</title>
+                  <title>{displayRegion(item.region)}: {formatPreciseMoney(item.monthlySpend)} ({spendShare(item.pctOfTotal)})</title>
                 </circle>
               );
             })}
         </svg>
-        <div className="region-ranking">
+        <div className="region-ranking" role="group" aria-label="Regional spend ranking">
           {/* Every region with spend, so each dot on the map has its row - the
               ranking stopped at six while the map drew seven, leaving the
               seventh (Central India) as an unexplained dot. */}
-          {report.regionSpend.filter((item) => item.monthlySpend > 0).slice(0, 10).map((item) => (
-            <span key={item.region}><b>{displayRegion(item.region)}</b><i><em style={{ width: `${Math.max(2, item.pctOfTotal * 100)}%` }} /></i><strong>{formatMoney(item.monthlySpend)}</strong></span>
+          {regions.map((item) => (
+            <button type="button" key={item.region} {...inspection.bind(item.region)} data-active={inspection.active === item.region || undefined}>
+              <b>{displayRegion(item.region)}</b><i aria-hidden="true"><em style={{ width: `${Math.min(100, Math.max(0, item.pctOfTotal * 100))}%` }} /></i><strong>{formatPreciseMoney(item.monthlySpend)}</strong>
+            </button>
           ))}
         </div>
       </div>
+      {!regions.length && <p className="visual-empty">{report.regionSpend.length ? 'No positive regional spend to plot; zero and credit amounts are not mapped.' : 'Regional spend attribution is not available.'}</p>}
+      {activeRegion && <ChartReadout id={inspection.id} title={displayRegion(activeRegion.region)} rows={[
+        { label: 'Reported spend', value: formatPreciseMoney(activeRegion.monthlySpend) },
+        { label: 'Reported share', value: spendShare(activeRegion.pctOfTotal) },
+        { label: 'Map placement', value: REGION_POINTS[normalizedRegion(activeRegion.region)] ? 'Mapped Azure region' : 'Global or unmapped; included in ranking' },
+      ]} />}
       <a className="map-attribution" href="https://github.com/VictorCazanave/svg-maps" target="_blank" rel="noreferrer">
         Map data: SVG Maps · CC BY 4.0
       </a>
@@ -2089,15 +2225,15 @@ function RegionSpendMap({ report, formatMoney }: { report: FullReport; formatMon
   );
 }
 
-function ExecutiveSpendVisuals({ report, formatMoney }: { report: FullReport; formatMoney: MoneyFormatter }) {
+function ExecutiveSpendVisuals({ report, formatPreciseMoney }: { report: FullReport; formatPreciseMoney: MoneyFormatter }) {
   return (
     <div className="executive-distribution">
       <div className="executive-trend">
-        <MonthlySpendChart report={report} formatMoney={formatMoney} />
+        <MonthlySpendChart report={report} formatPreciseMoney={formatPreciseMoney} />
       </div>
       <div className="executive-visual-grid">
-        <CostTreemap report={report} formatMoney={formatMoney} />
-        <RegionSpendMap report={report} formatMoney={formatMoney} />
+        <CostTreemap report={report} formatPreciseMoney={formatPreciseMoney} />
+        <RegionSpendMap report={report} formatPreciseMoney={formatPreciseMoney} />
       </div>
     </div>
   );
@@ -2646,6 +2782,7 @@ function RateOptimizationTab({
     const controller = new AbortController();
     setLoading(true);
     setError(null);
+    setResult(null);
     getRateOptimization(
       report.subscriptionBreakdown.map((item) => item.subscriptionId),
       lookBackPeriod,
@@ -2653,9 +2790,9 @@ function RateOptimizationTab({
       resourceType,
       controller.signal,
     )
-      .then(setResult)
+      .then(value => { if (!controller.signal.aborted) setResult(value); })
       .catch((requestError) => {
-        if (requestError instanceof DOMException && requestError.name === 'AbortError') return;
+        if (controller.signal.aborted) return;
         setError(requestError instanceof Error ? requestError.message : 'Rate recommendations are unavailable.');
       })
       .finally(() => {
@@ -2718,7 +2855,8 @@ function RateOptimizationTab({
       <CommitmentActivitySection report={report} formatMoney={formatMoney} displayCurrency={displayCurrency} />
       <CommitmentInsightsSection report={report} formatMoney={formatMoney} />
       {loading && <EvidenceState loading title="Checking recommendations" detail="Loading Azure recommendation scenarios" />}
-      {!loading && error && <p className="pricing-unavailable" role="alert">{error}</p>}
+      {!loading && error && <EvidenceState tone="error" title="Recommendations unavailable" detail={error}
+        action={{ label: 'Retry recommendation lookup', onClick: () => setScenarioVersion(value => value + 1) }} />}
       {!loading && result && (
         <>
           <div className="pricing-note">{result.projectionNotice}</div>
@@ -3923,6 +4061,9 @@ function CostByTagsTab({
           ) : (
             <p className="section-subtitle">Daily cost detail is not available in this report.</p>
           )}
+          {allocatedBudgets.length > 1 && (
+            <p className="chart-context-note">{allocatedBudgets.length} budgets match this application. No single budget line is shown because their scopes or amounts can differ. Review each budget below.</p>
+          )}
           {selectionDay && report.costDetails?.status === 'complete' && (
             <section className="budget-day-drilldown tag-day-drilldown" aria-label={`Contributors on ${selectionDay} for ${scopeLabel}`}>
               <header className="cost-section-heading">
@@ -3995,33 +4136,76 @@ function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; c
   });
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const [form, setForm] = useState<BudgetWriteRequest>(emptyForm());
   const [editing, setEditing] = useState<{ subscriptionId: string; name: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [openBudget, setOpenBudget] = useState<string | null>(null);
+  const [budgetQuery, setBudgetQuery] = useState('');
+  const [budgetFilter, setBudgetFilter] = useState<'all' | 'expiring' | 'expired' | 'forecast' | 'over' | 'open'>('all');
 
   const subscriptionIds = report.subscriptionBreakdown.map((row) => row.subscriptionId);
+  const budgetScope = JSON.stringify(subscriptionIds.slice().sort());
+  const refreshBudgets = () => setRefreshVersion(value => value + 1);
+  const clearBudgetFilters = () => { setBudgetQuery(''); setBudgetFilter('all'); };
   const subscriptionNames = new Map(report.subscriptionBreakdown.map((row) => [row.subscriptionId, row.subscriptionName]));
+  const expiring = (budget: Budget) => {
+    const days = budgetExpiryDays(budget.periodEnd);
+    return days !== null && days >= 0 && days <= 30;
+  };
+  const expired = (budget: Budget) => {
+    const days = budgetExpiryDays(budget.periodEnd);
+    return days !== null && days < 0;
+  };
+  const forecastOver = (budget: Budget) => budget.forecastSpend !== null && budget.forecastSpend > budget.amount;
+  const filterChoices = [
+    { value: 'all', label: 'All budgets', count: budgets.length },
+    { value: 'expiring', label: 'Expiring in 30 days', count: budgets.filter(expiring).length },
+    { value: 'expired', label: 'Expired', count: budgets.filter(expired).length },
+    { value: 'forecast', label: 'Forecast over budget', count: budgets.filter(forecastOver).length },
+    { value: 'over', label: 'Over budget now', count: budgets.filter((budget) => budget.currentSpend !== null && budget.currentSpend > budget.amount).length },
+    { value: 'open', label: 'Open-ended', count: budgets.filter((budget) => !budget.periodEnd).length },
+  ] as const;
+  const visibleBudgets = budgets.filter((budget) => {
+    const text = [budget.name, budget.subscriptionId, subscriptionNames.get(budget.subscriptionId), budget.currency, budget.periodEnd].filter(Boolean).join(' ').toLocaleLowerCase();
+    if (!text.includes(budgetQuery.trim().toLocaleLowerCase())) return false;
+    switch (budgetFilter) {
+      case 'expiring': return expiring(budget);
+      case 'expired': return expired(budget);
+      case 'forecast': return forecastOver(budget);
+      case 'over': return budget.currentSpend !== null && budget.currentSpend > budget.amount;
+      case 'open': return !budget.periodEnd;
+      default: return true;
+    }
+  });
 
   useEffect(() => {
     const controller = new AbortController();
+    setLoadError(null);
+    setBudgets([]);
     if (subscriptionIds.length === 0) {
-      setBudgets([]);
       setLoading(false);
       return undefined;
     }
     setLoading(true);
+    const timer = window.setTimeout(() => {
+      controller.abort();
+      setLoading(false);
+      setLoadError('Azure budget lookup timed out. Retry the budget check.');
+    }, 15000);
     listBudgets(subscriptionIds, controller.signal)
-      .then(setBudgets)
+      .then(result => { if (!controller.signal.aborted) setBudgets(result); })
       .catch((err) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        setError(err instanceof Error ? err.message : 'Budgets are unavailable.');
+        if (controller.signal.aborted) return;
+        setLoadError(err instanceof Error ? err.message : 'Budgets are unavailable.');
       })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
+      .finally(() => { window.clearTimeout(timer); if (!controller.signal.aborted) setLoading(false); });
+    return () => { controller.abort(); window.clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.subscriptionBreakdown]);
+  }, [budgetScope, refreshVersion]);
 
   function formatNative(amount: number | null, currency: string): string {
     if (amount === null) return '—';
@@ -4104,10 +4288,14 @@ function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; c
         <h2 className="section-title">Budgets</h2>
         {/* live: fetched from Azure on every visit, unlike the rest of this report (snapshot-based) */}
         <span className="live-badge" title="Fetched live from Azure, not from the report snapshot">Live</span>
+        <button type="button" className="outline-command" onClick={refreshBudgets} disabled={loading || saving}
+          aria-label="Refresh managed budgets"><RefreshCw size={15} aria-hidden="true" /> Refresh budgets</button>
       </div>
       <p className="section-subtitle">Create, edit, and delete Azure Cost Management budgets directly for the selected subscriptions.</p>
+      <p className="budget-period-help">Recurrence resets the spending cycle. End date controls when the budget expires; leaving it blank lets Azure choose its default.</p>
       {error && <p className="workflow-error" role="alert">{error}</p>}
       <form
+        ref={formRef}
         className="budget-form"
         onSubmit={(event) => {
           event.preventDefault();
@@ -4209,26 +4397,46 @@ function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; c
           {editing && <button type="button" onClick={cancelEdit}><X size={16} aria-hidden="true" />Cancel</button>}
         </div>
       </form>
+      {!loading && budgets.length > 0 && (
+        <div className="table-toolbar budget-management-toolbar" role="search" aria-label="Filter budget management">
+          <label className="table-search"><Search size={15} aria-hidden="true" /><input type="search" aria-label="Search managed budgets" placeholder="Search name or subscription" value={budgetQuery} onChange={(event) => setBudgetQuery(event.target.value)} /></label>
+          <label className="billing-filter"><span>Show</span><select aria-label="Budget attention filter" value={budgetFilter} onChange={(event) => {
+            const value = filterChoices.find((choice) => choice.value === event.target.value)?.value;
+            if (value) setBudgetFilter(value);
+          }}>{filterChoices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label} ({choice.count})</option>)}</select></label>
+          <span className="table-count" role="status">{visibleBudgets.length} of {budgets.length} budgets</span>
+          {(budgetQuery || budgetFilter !== 'all') && <button type="button" className="ghost-button" onClick={clearBudgetFilters}>Clear budget filters</button>}
+        </div>
+      )}
       {loading ? (
-        <EvidenceState loading title="Checking budgets" detail="Loading budgets..." />
+        <EvidenceState loading title="Checking budgets" detail="Reading Azure budget configuration, current-cycle spend and forecasts. Your form draft is preserved." />
+      ) : loadError ? (
+        <EvidenceState tone="error" title="Budget lookup unavailable" detail={loadError}
+          action={{ label: 'Retry budget lookup', onClick: refreshBudgets }} />
       ) : budgets.length === 0 ? (
-        <EvidenceState title="No budgets in this scope" detail="No budgets defined yet for the selected subscriptions." />
+        <EvidenceState title="No budgets in this scope" detail="No budgets defined yet for the selected subscriptions. Use the form above to define an amount, recurrence and expiry."
+          action={{ label: 'Start a budget', onClick: () => formRef.current?.querySelector<HTMLInputElement>('[aria-label="Budget name"]')?.focus() }} />
+      ) : visibleBudgets.length === 0 ? (
+        <EvidenceState title="No budgets match these filters" detail="Clear the search or choose All budgets to see the full list."
+          action={{ label: 'Show all budgets', onClick: clearBudgetFilters }} />
       ) : (
-        <table className="report-table budget-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Subscription</th>
-              <th className="num">Amount</th>
-              <th className="num">Current spend</th>
-              <th className="num">Forecast spend</th>
-              <th>Projected outcome</th>
-              <th>Time grain</th>
-              <th><span className="sr-only">Actions</span></th>
+        <div className="billing-table-scroll budget-management-scroll mobile-card-scroll" tabIndex={0} role="region" aria-label="Managed budgets">
+        <table className="report-table budget-table mobile-card-table" role="table">
+          <thead role="rowgroup">
+            <tr role="row">
+              <th scope="col" role="columnheader">Name</th>
+              <th scope="col" role="columnheader">Subscription</th>
+              <th scope="col" role="columnheader" className="num">Amount</th>
+              <th scope="col" role="columnheader" className="num">Current spend</th>
+              <th scope="col" role="columnheader" className="num">Forecast spend</th>
+              <th scope="col" role="columnheader">Projected outcome</th>
+              <th scope="col" role="columnheader">Time grain</th>
+              <th scope="col" role="columnheader">End date</th>
+              <th scope="col" role="columnheader"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
-          <tbody>
-            {budgets.map((budget) => {
+          <tbody role="rowgroup">
+            {visibleBudgets.map((budget) => {
               const pctUsed = budget.amount && budget.currentSpend !== null ? budget.currentSpend / budget.amount : 0;
               const status = pctUsed >= 1 ? 'over' : pctUsed >= 0.85 ? 'at_risk' : 'on_track';
               const forecastDelta = budget.forecastSpend !== null ? budget.forecastSpend - budget.amount : null;
@@ -4236,20 +4444,20 @@ function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; c
               const drillable = report.costDetails?.status === 'complete';
               return (
                 <Fragment key={key}>
-                <tr>
-                  <td>{drillable
+                <tr role="row">
+                  <td role="cell" data-label="Name">{drillable
                     ? <button type="button" className="finding-link" aria-expanded={openBudget === key} aria-label={`Daily spend for ${budget.name}`} onClick={() => setOpenBudget((value) => value === key ? null : key)}>{budget.name}</button>
                     : budget.name}</td>
-                  <td>{subscriptionNames.get(budget.subscriptionId) ?? budget.subscriptionId}</td>
-                  <td className="num">{formatNative(budget.amount, budget.currency)}</td>
-                  <td className="num">
+                  <td role="cell" data-label="Subscription">{subscriptionNames.get(budget.subscriptionId) ?? budget.subscriptionId}</td>
+                  <td role="cell" data-label="Amount" className="num">{formatNative(budget.amount, budget.currency)}</td>
+                  <td role="cell" data-label="Current spend" className="num">
                     {formatNative(budget.currentSpend, budget.currency)}
-                    <span className="budget-progress-track">
+                    {budget.currentSpend !== null && <span className="budget-progress-track" aria-hidden="true">
                       <span className={`budget-progress-fill budget-progress-${status}`} style={{ width: `${Math.min(100, pctUsed * 100)}%` }} />
-                    </span>
+                    </span>}
                   </td>
-                  <td className="num">{formatNative(budget.forecastSpend, budget.currency)}</td>
-                  <td>
+                  <td role="cell" data-label="Forecast spend" className="num">{formatNative(budget.forecastSpend, budget.currency)}</td>
+                  <td role="cell" data-label="Projected outcome">
                     {forecastDelta === null ? (
                       <span className="budget-outcome budget-outcome-unknown">Forecast unavailable</span>
                     ) : forecastDelta > 0 ? (
@@ -4262,20 +4470,22 @@ function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; c
                       </span>
                     )}
                   </td>
-                  <td>{budget.timeGrain}<small>Expiry: <BudgetExpiry periodEnd={budget.periodEnd} highlightNearExpiry /></small></td>
-                  <td className="budget-actions">
-                    <button type="button" onClick={() => edit(budget)}>Edit</button>
-                    <button type="button" onClick={() => void remove(budget)}>Delete</button>
+                  <td role="cell" data-label="Time grain">{budget.timeGrain}</td>
+                  <td role="cell" data-label="End date" className="budget-end-date"><BudgetExpiry periodEnd={budget.periodEnd} highlightNearExpiry /></td>
+                  <td role="cell" data-label="Actions" className="budget-actions">
+                    <button type="button" aria-label={`Edit budget ${budget.name}`} onClick={() => edit(budget)}>Edit</button>
+                    <button type="button" aria-label={`Delete budget ${budget.name}`} onClick={() => void remove(budget)}>Delete</button>
                   </td>
                 </tr>
                 {drillable && openBudget === key && (
-                  <tr><td colSpan={8}><BudgetDailyChart budget={budget} details={report.costDetails} window={costWindow} formatMoney={formatMoney} /></td></tr>
+                  <tr role="row" className="mobile-card-detail"><td role="cell" colSpan={9}><BudgetDailyChart budget={budget} details={report.costDetails} window={costWindow} formatMoney={formatMoney} /></td></tr>
                 )}
                 </Fragment>
               );
             })}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
@@ -4375,8 +4585,9 @@ export function ActionPlanTab({
       <p className="section-subtitle">Phased plan, highest monthly saving first. Workflow updates are audited against the persisted report scope.</p>
       {!snapshotId && report.actionPlan.length > 0 && <p className="workflow-notice">Run or reload a persisted report to track action status.</p>}
       {snapshotId && <button className="outline-command" type="button" onClick={reloadActions} disabled={loadingActions || saving !== null}><RefreshCw size={14} /> Reload saved actions</button>}
-      {loadingActions && <p role="status">Loading saved actions...</p>}
-      {workflowError && <p className="workflow-error" role="alert">{workflowError}</p>}
+      {loadingActions && <EvidenceState loading title="Loading saved actions..." detail="Reading workflow values for this saved report. Updates remain disabled until the lookup completes." />}
+      {workflowError && <EvidenceState tone="error" title="Action workflow unavailable" detail={workflowError}
+        action={snapshotId ? { label: 'Reload saved values', onClick: reloadActions, disabled: loadingActions || saving !== null } : undefined} />}
       {saved && <p role="status">Action saved.</p>}
       {report.actionPlan.length === 0 ? (
         <EvidenceState title="No tracked actions" detail="No actions for the selected subscriptions." />

@@ -4,19 +4,27 @@ import { listBudgets } from '../api';
 import type { Budget, CostDetailRow, CostDetailSummary, FullReport } from '../report/models';
 import { costTagValue, costWindowDates, matchesCostFilter, sameTagKey, type CostFilter, type CostWindow } from '../report/costDetails';
 import { DailyBarChart } from './TrendChart';
+import { EvidenceState } from './EvidenceState';
 
 export type BudgetState = { budgets: Budget[]; loading: boolean; error: string | null; refresh: () => void };
 
-export function BudgetExpiry({ periodEnd, highlightNearExpiry = false }: Pick<Budget, 'periodEnd'> & { highlightNearExpiry?: boolean }) {
-  if (!periodEnd) return <span className="budget-expiry">Open-ended</span>;
+export function budgetExpiryDays(periodEnd: string, now = new Date()): number | null {
+  if (!periodEnd) return null;
   const date = periodEnd.slice(0, 10);
   const parsed = new Date(`${date}T00:00:00Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
-    return <span className="budget-expiry">Unavailable</span>;
+    return null;
   }
-  const now = new Date();
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const daysLeft = Math.round((parsed.getTime() - today) / 86400000);
+  return Math.round((parsed.getTime() - today) / 86400000);
+}
+
+export function BudgetExpiry({ periodEnd, highlightNearExpiry = false }: Pick<Budget, 'periodEnd'> & { highlightNearExpiry?: boolean }) {
+  if (!periodEnd) return <span className="budget-expiry">Open-ended</span>;
+  const daysLeft = budgetExpiryDays(periodEnd);
+  if (daysLeft === null) return <span className="budget-expiry">Unavailable</span>;
+  const date = periodEnd.slice(0, 10);
+  const parsed = new Date(`${date}T00:00:00Z`);
   const warning = highlightNearExpiry && daysLeft <= 30;
   const label = daysLeft < 0 ? 'Expired' : daysLeft === 0 ? 'Expires today' : `${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left`;
   return <span className={`budget-expiry${warning ? ' budget-expiry-warning' : ''}`}>
@@ -315,7 +323,12 @@ export function BudgetContext({ state, details, filters = {}, showHeading = true
       </div>
       <span className="table-count" role="status">{budgets.length} of {related.length} budgets</span>
     </div>}
-    {state.loading ? <p role="status">Checking subscription budgets...</p> : state.error ? <p role="alert">{state.error}</p> : !related.length ? <p role="status">No matching subscription-scope budgets were returned.</p> : !budgets.length ? <p role="status">No budgets match this search or status.</p> : <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Azure budget status"><table className="data-table billing-table budget-table"><thead><tr><th>Budget / scope</th><th>Budget</th><th>Spend this cycle</th><th>Remaining</th><th>Azure forecast</th><th>Status</th></tr></thead><tbody>{budgets.map(({ budget, relation }) => {
+    {state.loading ? <EvidenceState loading title="Checking subscription budgets..." detail="Reading configured budgets, current-cycle spend and forecasts from Azure." />
+      : state.error ? <EvidenceState tone="error" title="Subscription budget lookup unavailable" detail={state.error} action={{ label: 'Retry subscription budgets', onClick: state.refresh }} />
+      : !related.length ? <EvidenceState title="No matching subscription-scope budgets were returned." detail="No budget context is available for this selection. This does not mean spending is zero." />
+      : !budgets.length ? <EvidenceState title="No budgets match this search or status." detail="Reset these local filters to show the budgets returned for this scope."
+        action={{ label: 'Reset budget context filters', onClick: () => { setBudgetQuery(''); setStatusFilter('all'); } }} />
+      : <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Azure budget status"><table className="data-table billing-table budget-table"><thead><tr><th>Budget / scope</th><th>Budget</th><th>Spend this cycle</th><th>Remaining</th><th>Azure forecast</th><th>Status</th></tr></thead><tbody>{budgets.map(({ budget, relation }) => {
       const status = budgetThreshold(budget);
       const key = `${budget.subscriptionId}:${budget.name}`;
       /* The drilldown needs a period to chart and a formatter to label it, so
