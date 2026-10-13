@@ -441,6 +441,7 @@ def test_compiled_stage_defaults_are_explicit_and_safe(compiled_profiles):
         assert values["apiClientId"] == values["webClientId"] == ""
         assert values["modelDeployments"] == []
         assert not any(values[name] for name in ("enableProcessor", "enableAiRuntime", "enableChatRuntime", "reuseAiAccount", "allowNativeExportTrustedServices"))
+        assert (values["apiCpu"], values["apiLivenessFailureThreshold"], values["processorCpu"]) == ("4.0", 10, "4.0")
         modules = resource_map(template)
         assert "condition" not in modules["core"]
         assert modules["data"]["condition"] == "[variables('dataEnabled')]"
@@ -475,6 +476,26 @@ def test_compiled_core_and_apps_enforce_identity_and_ingress_boundaries(compiled
         assert app["properties"]["workloadProfileName"] == "Consumption"
         assert app["properties"]["configuration"]["ingress"]["allowInsecure"] is False
         assert len(app["properties"]["template"]["containers"][0]["probes"]) == 3
+
+
+def test_compiled_sizing_pairs_cpu_with_consumption_memory(compiled_profiles):
+    _, template = compiled_profiles["data"]
+    memory = template["variables"]["consumptionMemory"]
+    for name in ("apiCpu", "processorCpu"):
+        allowed = template["parameters"][name]["allowedValues"]
+        assert set(allowed) == set(memory)
+        assert all(float(memory[cpu].removesuffix("Gi")) == float(cpu) * 2 for cpu in allowed)
+    modules = resource_map(template)
+    assert modules["apps"]["properties"]["parameters"]["apiMemory"]["value"] == "[variables('consumptionMemory')[parameters('apiCpu')]]"
+    assert modules["processor"]["properties"]["parameters"]["processorMemory"]["value"] == "[variables('consumptionMemory')[parameters('processorCpu')]]"
+    apps = list(resource_map(modules["apps"]["properties"]["template"]).values())
+    api = next(resource for resource in apps if "ca-api-" in resource["name"])["properties"]["template"]["containers"][0]
+    assert api["resources"] == {"cpu": "[json(parameters('apiCpu'))]", "memory": "[parameters('apiMemory')]"}
+    liveness = next(probe for probe in api["probes"] if probe["type"] == "Liveness")
+    assert liveness["failureThreshold"] == "[parameters('apiLivenessFailureThreshold')]"
+    processor = list(resource_map(modules["processor"]["properties"]["template"]).values())
+    job = next(resource for resource in processor if resource["type"] == "Microsoft.App/jobs")
+    assert job["properties"]["template"]["containers"][0]["resources"] == {"cpu": "[json(parameters('processorCpu'))]", "memory": "[parameters('processorMemory')]"}
 
 
 def test_compiled_data_ai_and_processor_do_not_add_queues_or_implicit_credentials(compiled_profiles):

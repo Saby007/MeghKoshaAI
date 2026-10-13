@@ -236,6 +236,25 @@ pwsh ./scripts/deploy-end-to-end.ps1 `
 
 `-PrivateRegistry` remains a script switch for compatibility, but it is operationally mandatory. `-BlobDataProtection` is optional and defaults to off.
 
+#### Sizing the API and processor for large subscriptions
+
+Each report loads the subscription's FOCUS export data into memory: in the API when a user runs it, and in the processor job when it rebuilds the saved report after each daily and monthly pull. Both therefore default to the largest Consumption replica, 4 vCPU / 8 GiB, which holds six months of history for subscriptions with several thousand cost rows a day. Memory always follows at 2 GiB per vCPU, the only pairing the Consumption profile accepts:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `APP_API_CPU` | `4.0` (8 GiB) | API vCPU, `0.5` to `4.0` in steps of `0.25`. |
+| `APP_API_LIVENESS_FAILURE_THRESHOLD` | `10` | Failed liveness checks, 30 seconds apart, tolerated before the API restarts (`3` to `20`), so a long report build isn't mistaken for a hung replica. |
+| `APP_PROCESSOR_CPU` | `4.0` (8 GiB) | Processor job vCPU, same range. |
+
+The API keeps at least one replica running, so its size is billed around the clock. Lower both for small subscriptions:
+
+```powershell
+azd env set APP_API_CPU 1.0
+azd env set APP_PROCESSOR_CPU 1.0
+```
+
+As a rough guide, one report needs about 0.5 GiB, plus 2.7 KB for every FOCUS row across the six months, plus 15 KB for every row in the largest month. Each export run's `manifest.json` reports its `dataRowCount`. The same settings apply to Option 2, and Option 3 exposes them as the `apiCpu`, `apiLivenessFailureThreshold` and `processorCpu` parameters. Resizing a running deployment with `az containerapp update` takes effect immediately, but the next provision reapplies these values, so set them too or the resize is reverted.
+
 ### Option 2 — Azure Developer CLI, step by step
 
 Use this when you want to drive each stage yourself. Requires the same tooling as Option 1, plus the [provider registration above](#prerequisites). Clone the repo first — `azd` reads `azure.yaml`/`infra/`/`api/`/`web/` from your local copy, it doesn't deploy directly from GitHub:

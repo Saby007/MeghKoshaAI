@@ -18,6 +18,12 @@ param apiEnvironment array = []
 @minValue(0)
 @maxValue(3)
 param minimumReplicas int = 1
+@description('API vCPU; apiMemory must be the matching Consumption allocation of 2 GiB per vCPU.')
+param apiCpu string = '4.0'
+param apiMemory string = '8Gi'
+@minValue(3)
+@maxValue(20)
+param apiLivenessFailureThreshold int = 10
 
 resource api 'Microsoft.App/containerApps@2024-03-01' = {
   name: 'ca-api-${resourceToken}'
@@ -48,7 +54,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
         {
           name: 'api'
           image: apiImage
-          resources: { cpu: json('0.5'), memory: '1Gi' }
+          resources: { cpu: json(apiCpu), memory: apiMemory }
           env: concat([
             { name: 'AZURE_CLIENT_ID', value: apiIdentity.clientId }
             { name: 'AZURE_TENANT_ID', value: tenant().tenantId }
@@ -70,7 +76,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               httpGet: { path: '/api/health', port: 8000, scheme: 'HTTP' }
               periodSeconds: 30
               timeoutSeconds: 3
-              failureThreshold: 3
+              failureThreshold: apiLivenessFailureThreshold
             }
             {
               type: 'Readiness'

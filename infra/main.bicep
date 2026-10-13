@@ -22,6 +22,13 @@ param webClientId string = ''
 @minValue(0)
 @maxValue(3)
 param minimumReplicas int = 1
+@description('API vCPU on the Consumption profile; memory follows at 2 GiB per vCPU. The 4.0 default (8 GiB) holds six months of FOCUS history for large subscriptions; lower it for small ones.')
+@allowed(['0.5', '0.75', '1.0', '1.25', '1.5', '1.75', '2.0', '2.25', '2.5', '2.75', '3.0', '3.25', '3.5', '3.75', '4.0'])
+param apiCpu string = '4.0'
+@description('Consecutive failed API liveness checks, 30 seconds apart, tolerated before the replica restarts. Large report builds can block the health check for over a minute.')
+@minValue(3)
+@maxValue(20)
+param apiLivenessFailureThreshold int = 10
 @minValue(30)
 @maxValue(730)
 param logRetentionDays int = 30
@@ -56,6 +63,9 @@ param reuseAiAccount bool = false
 param processorImage string = ''
 @description('Worker cadence. Each tick advances monthly pulls and starts daily pulls once their UTC time has passed.')
 param processorSchedule string = '*/5 * * * *'
+@description('Processor job vCPU on the Consumption profile; memory follows at 2 GiB per vCPU. The job rebuilds the full report after each pull, so it needs the same headroom as the API.')
+@allowed(['0.5', '0.75', '1.0', '1.25', '1.5', '1.75', '2.0', '2.25', '2.5', '2.75', '3.0', '3.25', '3.5', '3.75', '4.0'])
+param processorCpu string = '4.0'
 @minLength(2)
 @maxLength(32)
 param foundryProjectName string = 'cost-agent-project'
@@ -75,6 +85,24 @@ var dataEnabled = contains(['data', 'ai'], profile)
 var aiEnabled = profile == 'ai'
 var deployApplications = !empty(apiImage) && !empty(webImage)
 var deployProcessor = dataEnabled && enableProcessor && !empty(processorImage)
+// Consumption replicas only accept CPU/memory pairs of 2 GiB per vCPU.
+var consumptionMemory = {
+  '0.5': '1Gi'
+  '0.75': '1.5Gi'
+  '1.0': '2Gi'
+  '1.25': '2.5Gi'
+  '1.5': '3Gi'
+  '1.75': '3.5Gi'
+  '2.0': '4Gi'
+  '2.25': '4.5Gi'
+  '2.5': '5Gi'
+  '2.75': '5.5Gi'
+  '3.0': '6Gi'
+  '3.25': '6.5Gi'
+  '3.5': '7Gi'
+  '3.75': '7.5Gi'
+  '4.0': '8Gi'
+}
 
 resource group 'Microsoft.Resources/resourceGroups@2024-03-01' = {
   name: empty(resourceGroupName) ? 'rg-${environmentName}' : resourceGroupName
@@ -175,6 +203,9 @@ module apps './modules/apps.bicep' = if (deployApplications) {
     apiClientId: apiClientId
     webClientId: webClientId
     minimumReplicas: minimumReplicas
+    apiCpu: apiCpu
+    apiMemory: consumptionMemory[apiCpu]
+    apiLivenessFailureThreshold: apiLivenessFailureThreshold
     apiEnvironment: [
       { name: 'APP_PROFILE', value: profile }
       { name: 'APP_SCHEDULER_ENABLED', value: string(deployProcessor) }
@@ -215,6 +246,8 @@ module processor './modules/processor.bicep' = if (deployProcessor) {
     dailyExportName: dailyExportName
     exportParallelMonths: exportParallelMonths
     schedule: processorSchedule
+    processorCpu: processorCpu
+    processorMemory: consumptionMemory[processorCpu]
   }
 }
 

@@ -15,6 +15,9 @@ param dailyExportName string
 @maxValue(6)
 param exportParallelMonths int = 1
 param schedule string = '*/5 * * * *'
+@description('Processor vCPU; processorMemory must be the matching Consumption allocation of 2 GiB per vCPU.')
+param processorCpu string = '4.0'
+param processorMemory string = '8Gi'
 
 resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: registryName
@@ -58,7 +61,7 @@ resource processor 'Microsoft.App/jobs@2024-03-01' = {
           name: 'processor'
           image: processorImage
           command: ['/usr/bin/python', '-m', 'jobs.scheduler']
-          resources: { cpu: json('1.0'), memory: '2Gi' }
+          resources: { cpu: json(processorCpu), memory: processorMemory }
           env: [
             { name: 'AZURE_CLIENT_ID', value: processorIdentity.clientId }
             { name: 'AZURE_TENANT_ID', value: tenant().tenantId }

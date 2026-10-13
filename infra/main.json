@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "6485073714621672345"
+      "templateHash": "8839033920899523908"
     }
   },
   "definitions": {
@@ -111,6 +111,39 @@
       "minValue": 0,
       "maxValue": 3
     },
+    "apiCpu": {
+      "type": "string",
+      "defaultValue": "4.0",
+      "allowedValues": [
+        "0.5",
+        "0.75",
+        "1.0",
+        "1.25",
+        "1.5",
+        "1.75",
+        "2.0",
+        "2.25",
+        "2.5",
+        "2.75",
+        "3.0",
+        "3.25",
+        "3.5",
+        "3.75",
+        "4.0"
+      ],
+      "metadata": {
+        "description": "API vCPU on the Consumption profile; memory follows at 2 GiB per vCPU. The 4.0 default (8 GiB) holds six months of FOCUS history for large subscriptions; lower it for small ones."
+      }
+    },
+    "apiLivenessFailureThreshold": {
+      "type": "int",
+      "defaultValue": 10,
+      "minValue": 3,
+      "maxValue": 20,
+      "metadata": {
+        "description": "Consecutive failed API liveness checks, 30 seconds apart, tolerated before the replica restarts. Large report builds can block the health check for over a minute."
+      }
+    },
     "logRetentionDays": {
       "type": "int",
       "defaultValue": 30,
@@ -208,6 +241,30 @@
         "description": "Worker cadence. Each tick advances monthly pulls and starts daily pulls once their UTC time has passed."
       }
     },
+    "processorCpu": {
+      "type": "string",
+      "defaultValue": "4.0",
+      "allowedValues": [
+        "0.5",
+        "0.75",
+        "1.0",
+        "1.25",
+        "1.5",
+        "1.75",
+        "2.0",
+        "2.25",
+        "2.5",
+        "2.75",
+        "3.0",
+        "3.25",
+        "3.5",
+        "3.75",
+        "4.0"
+      ],
+      "metadata": {
+        "description": "Processor job vCPU on the Consumption profile; memory follows at 2 GiB per vCPU. The job rebuilds the full report after each pull, so it needs the same headroom as the API."
+      }
+    },
     "foundryProjectName": {
       "type": "string",
       "defaultValue": "cost-agent-project",
@@ -253,6 +310,23 @@
     "aiEnabled": "[equals(parameters('profile'), 'ai')]",
     "deployApplications": "[and(not(empty(parameters('apiImage'))), not(empty(parameters('webImage'))))]",
     "deployProcessor": "[and(and(variables('dataEnabled'), parameters('enableProcessor')), not(empty(parameters('processorImage'))))]",
+    "consumptionMemory": {
+      "0.5": "1Gi",
+      "0.75": "1.5Gi",
+      "1.0": "2Gi",
+      "1.25": "2.5Gi",
+      "1.5": "3Gi",
+      "1.75": "3.5Gi",
+      "2.0": "4Gi",
+      "2.25": "4.5Gi",
+      "2.5": "5Gi",
+      "2.75": "5.5Gi",
+      "3.0": "6Gi",
+      "3.25": "6.5Gi",
+      "3.5": "7Gi",
+      "3.75": "7.5Gi",
+      "4.0": "8Gi"
+    },
     "resourceToken": "[toLower(uniqueString(subscription().id, parameters('environmentName'), if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))))]",
     "exportName": "[format('focus-closed-month-{0}', variables('resourceToken'))]",
     "dailyExportName": "[format('focus-daily-{0}', variables('resourceToken'))]"
@@ -1913,6 +1987,15 @@
           "minimumReplicas": {
             "value": "[parameters('minimumReplicas')]"
           },
+          "apiCpu": {
+            "value": "[parameters('apiCpu')]"
+          },
+          "apiMemory": {
+            "value": "[variables('consumptionMemory')[parameters('apiCpu')]]"
+          },
+          "apiLivenessFailureThreshold": {
+            "value": "[parameters('apiLivenessFailureThreshold')]"
+          },
           "apiEnvironment": {
             "value": [
               {
@@ -1997,7 +2080,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "10403295295197169524"
+              "templateHash": "2776572042526867910"
             }
           },
           "parameters": {
@@ -2050,6 +2133,23 @@
               "defaultValue": 1,
               "minValue": 0,
               "maxValue": 3
+            },
+            "apiCpu": {
+              "type": "string",
+              "defaultValue": "4.0",
+              "metadata": {
+                "description": "API vCPU; apiMemory must be the matching Consumption allocation of 2 GiB per vCPU."
+              }
+            },
+            "apiMemory": {
+              "type": "string",
+              "defaultValue": "8Gi"
+            },
+            "apiLivenessFailureThreshold": {
+              "type": "int",
+              "defaultValue": 10,
+              "minValue": 3,
+              "maxValue": 20
             }
           },
           "resources": [
@@ -2090,8 +2190,8 @@
                       "name": "api",
                       "image": "[parameters('apiImage')]",
                       "resources": {
-                        "cpu": "[json('0.5')]",
-                        "memory": "1Gi"
+                        "cpu": "[json(parameters('apiCpu'))]",
+                        "memory": "[parameters('apiMemory')]"
                       },
                       "env": "[concat(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('apiIdentity').clientId), createObject('name', 'AZURE_TENANT_ID', 'value', tenant().tenantId), createObject('name', 'MEGHKOSHA_API_CLIENT_ID', 'value', parameters('apiClientId')), createObject('name', 'MEGHKOSHA_WEB_CLIENT_ID', 'value', parameters('webClientId')), createObject('name', 'MEGHKOSHA_OBO_MANAGED_IDENTITY_CLIENT_ID', 'value', parameters('oboIdentity').clientId), createObject('name', 'MEGHKOSHA_ACTION_WRITES_PAUSED', 'value', 'true')), parameters('apiEnvironment'))]",
                       "probes": [
@@ -2115,7 +2215,7 @@
                           },
                           "periodSeconds": 30,
                           "timeoutSeconds": 3,
-                          "failureThreshold": 3
+                          "failureThreshold": "[parameters('apiLivenessFailureThreshold')]"
                         },
                         {
                           "type": "Readiness",
@@ -2309,6 +2409,12 @@
           },
           "schedule": {
             "value": "[parameters('processorSchedule')]"
+          },
+          "processorCpu": {
+            "value": "[parameters('processorCpu')]"
+          },
+          "processorMemory": {
+            "value": "[variables('consumptionMemory')[parameters('processorCpu')]]"
           }
         },
         "template": {
@@ -2318,7 +2424,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "2356258718951169693"
+              "templateHash": "9304488378649255739"
             }
           },
           "parameters": {
@@ -2366,6 +2472,17 @@
             "schedule": {
               "type": "string",
               "defaultValue": "*/5 * * * *"
+            },
+            "processorCpu": {
+              "type": "string",
+              "defaultValue": "4.0",
+              "metadata": {
+                "description": "Processor vCPU; processorMemory must be the matching Consumption allocation of 2 GiB per vCPU."
+              }
+            },
+            "processorMemory": {
+              "type": "string",
+              "defaultValue": "8Gi"
             }
           },
           "resources": [
@@ -2422,8 +2539,8 @@
                         "jobs.scheduler"
                       ],
                       "resources": {
-                        "cpu": "[json('1.0')]",
-                        "memory": "2Gi"
+                        "cpu": "[json(parameters('processorCpu'))]",
+                        "memory": "[parameters('processorMemory')]"
                       },
                       "env": [
                         {
