@@ -14,7 +14,7 @@ You deploy it once into a subscription of your choice, grant it three read/cost-
 - [Dashboards and tabs](#dashboards-and-tabs)
 - [Prerequisites](#prerequisites)
 - [Deploying to Azure](#deploying-to-azure)
-- [The three manual role assignments](#the-three-manual-role-assignments)
+- [The four manual role assignments](#the-four-manual-role-assignments)
 - [Local development](#local-development)
 - [Security notes](#security-notes)
 
@@ -63,7 +63,7 @@ flowchart TB
     ApiMI -- "read/write schedule metadata" --> ADLS
     ApiMI -- "create/verify export" --> CM
     Processor == "ManagedIdentityCredential" ==> ProcMI
-    ProcMI -- "Cost Mgmt Contributor" --> Targets
+    ProcMI -- "Reader + Cost Mgmt Contributor" --> Targets
     ProcMI -- "run monthly export + checkpoints" --> ADLS
     CM -- "FOCUS CSV/gzip files" --> ADLS
     API -- "stream + parse FOCUS files" --> ADLS
@@ -162,7 +162,7 @@ There are three ways to deploy: one command that does the whole thing, the step-
 
 ### Option 1 — One command, end to end (recommended)
 
-`scripts/deploy-end-to-end.ps1` is this entire page in a single self-contained script: clone, sign in, environment settings, preview, the repeated `azd up` passes with automatic retries, the scheduled processor, `bootstrap-identity.ps1` plus the client-ID redeploy, and the three role assignments on every subscription you name. When it finishes, the app is deployed, sign-in works, and the subscriptions you listed are ready to assess — no manual follow-up steps.
+`scripts/deploy-end-to-end.ps1` is this entire page in a single self-contained script: clone, sign in, environment settings, preview, the repeated `azd up` passes with automatic retries, the scheduled processor, `bootstrap-identity.ps1` plus the client-ID redeploy, and the four role assignments on every subscription you name. When it finishes, the app is deployed, sign-in works, and the subscriptions you listed are ready to assess — no manual follow-up steps.
 
 Requires [git](https://git-scm.com/), the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/), the [Azure CLI](https://learn.microsoft.com/cli/azure/), **PowerShell 7+** (`pwsh`), and the [provider registration above](#prerequisites).
 
@@ -199,7 +199,7 @@ Every phase is idempotent, so a run that stops partway can simply be rerun — i
 | `-MaxAttempts` | Allow more `azd up` retries (default 3). |
 | `-SkipIdentityBootstrap` | A separate Entra administrator creates the app registrations. |
 | `-ServiceManagementReference` | Your tenant requires a Service Tree ID on app registrations. If you leave it out, the script asks when the tenant refuses, suggests the ID your existing registrations use, and remembers your answer. |
-| `-SkipRoleAssignments` | A subscription Owner grants the three roles separately. |
+| `-SkipRoleAssignments` | A subscription Owner grants the four roles separately. |
 | `-SkipProcessor` | Scheduled exports are intentionally out of scope. |
 | `-SkipPreview` | Skip `azd provision --preview` on a rerun you have already reviewed. |
 
@@ -474,22 +474,23 @@ azd up
 
 #### 5. Grant access to the subscriptions you want to assess
 
-See [the three manual role assignments](#the-three-manual-role-assignments) below — this is the only manual, per-subscription step in the whole flow.
+See [the four manual role assignments](#the-four-manual-role-assignments) below — this is the only manual, per-subscription step in the whole flow.
 
 #### 6. Open the app
 
 Sign in, open **Schedules**, and use **Refresh schedules**. Once the roles above are visible, the app finishes export and schedule setup on its own. After the first export cycle completes, open **Report** and select **Run report**.
 
-If **Schedules** keeps reporting **Export status unavailable** or *"FOCUS export configuration could not be confirmed"* even though all three role assignments are in place, re-check the [`Microsoft.CostManagementExports` registration](#prerequisites) on the subscription you deployed into — that is the most common cause, and it is not something role assignments or a redeploy can fix.
+If **Schedules** keeps reporting **Export status unavailable** or *"FOCUS export configuration could not be confirmed"* even though all four role assignments are in place, re-check the [`Microsoft.CostManagementExports` registration](#prerequisites) on the subscription you deployed into — that is the most common cause, and it is not something role assignments or a redeploy can fix.
 
-## The three manual role assignments
+## The four manual role assignments
 
-Subscription access is deliberately kept **outside** the application — there is no in-app subscription-onboarding flow, and the app can never grant itself access. For every subscription you want it to assess, a user with **Owner** (or **User Access Administrator**) on that subscription must add three role assignments:
+Subscription access is deliberately kept **outside** the application — there is no in-app subscription-onboarding flow, and the app can never grant itself access. For every subscription you want it to assess, a user with **Owner** (or **User Access Administrator**) on that subscription must add four role assignments:
 
 | Managed identity | Role to assign | Why |
 | --- | --- | --- |
 | API identity | **Reader** | Lets the app discover the subscription and read its resources, tags, policy, and Advisor data for the dashboards. |
 | API identity | **Cost Management Contributor** | Lets the app create the native FOCUS export and save the schedule — a write action that Cost Management **Reader** cannot perform. |
+| Processor identity | **Reader** | Lets the scheduled worker see the subscription's resources when it rebuilds the saved report after each pull. Without this, that report shows costs but no resource or idle findings. |
 | Processor identity | **Cost Management Contributor** | Lets the separate scheduled worker actually execute each export run. Without this, the schedule can look "active" while monthly and daily pulls silently fail to advance. |
 
 **Portal:** find both identities in **Azure portal → your resource group → id-api-\* / id-processor-\*** (their names start with those prefixes), then **Subscriptions → target subscription → Access control (IAM) → Add role assignment** for each role/identity pair above.
@@ -506,12 +507,13 @@ $targetSubscriptionId = "<subscription-id-you-want-to-assess>"
 
 az role assignment create --assignee-object-id $apiPrincipalId --assignee-principal-type ServicePrincipal --role "Reader" --scope "/subscriptions/$targetSubscriptionId"
 az role assignment create --assignee-object-id $apiPrincipalId --assignee-principal-type ServicePrincipal --role "Cost Management Contributor" --scope "/subscriptions/$targetSubscriptionId"
+az role assignment create --assignee-object-id $processorPrincipalId --assignee-principal-type ServicePrincipal --role "Reader" --scope "/subscriptions/$targetSubscriptionId"
 az role assignment create --assignee-object-id $processorPrincipalId --assignee-principal-type ServicePrincipal --role "Cost Management Contributor" --scope "/subscriptions/$targetSubscriptionId"
 ```
 
 Allow a few minutes for RBAC propagation, then use **Refresh schedules** in the app.
 
-> [`scripts/deploy-end-to-end.ps1`](#option-1--one-command-end-to-end-recommended) performs exactly these three assignments for every subscription passed to `-TargetSubscriptionId` (comma-separated), skipping any that already exist. It still needs a signed-in user with **Owner** or **User Access Administrator** on each target subscription — the script cannot grant itself that.
+> [`scripts/deploy-end-to-end.ps1`](#option-1--one-command-end-to-end-recommended) performs exactly these four assignments for every subscription passed to `-TargetSubscriptionId` (comma-separated), skipping any that already exist. It still needs a signed-in user with **Owner** or **User Access Administrator** on each target subscription — the script cannot grant itself that.
 
 > Use **Cost Management Contributor**, not **Cost Management Reader**, on both identities — creating and running a native export are both write actions (`.../exports/write` and `.../exports/run/action`), which Reader's `*/read` permissions do not cover.
 

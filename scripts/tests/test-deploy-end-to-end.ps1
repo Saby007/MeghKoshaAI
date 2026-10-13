@@ -386,13 +386,14 @@ if (`$global:deployTestState.requireServiceTree -and -not `$ServiceManagementRef
     if (($state.upCalls -join ',') -ne 'failed,succeeded,succeeded,succeeded,succeeded') {
         throw "Unexpected azd up sequence: $($state.upCalls -join ',')"
     }
-    if ($state.roleCreates.Count -ne 6) { throw "Expected six role assignments, got $($state.roleCreates.Count)." }
+    if ($state.roleCreates.Count -ne 8) { throw "Expected eight role assignments, got $($state.roleCreates.Count)." }
     foreach ($scope in @("/subscriptions/$targetOne", "/subscriptions/$targetTwo")) {
         $roles = @($state.roleCreates | Where-Object { $_.scope -eq $scope })
         if (@($roles | Where-Object { $_.principalId -eq $apiPrincipalId -and $_.role -eq 'Reader' }).Count -ne 1 -or
             @($roles | Where-Object { $_.principalId -eq $apiPrincipalId -and $_.role -eq 'Cost Management Contributor' }).Count -ne 1 -or
+            @($roles | Where-Object { $_.principalId -eq $processorPrincipalId -and $_.role -eq 'Reader' }).Count -ne 1 -or
             @($roles | Where-Object { $_.principalId -eq $processorPrincipalId -and $_.role -eq 'Cost Management Contributor' }).Count -ne 1) {
-            throw "The three documented role assignments were not all made on $scope."
+            throw "The four documented role assignments were not all made on $scope."
         }
     }
     if ($summary.webUrl -ne 'https://web.example.test' -or -not $summary.processorEnabled -or
@@ -563,7 +564,7 @@ if (`$global:deployTestState.requireServiceTree -and -not `$ServiceManagementRef
     if ($state.upCalls.Count -eq 0) { throw '-SkipModelAvailabilityCheck did not allow the deployment to proceed.' }
     if ($state.interactiveAzd.Count) { throw "azd ran without --no-prompt: $($state.interactiveAzd -join '; ')" }
 
-    [ordered]@{ result = 'passed'; deployments = 5; roleAssignments = 6; rerunRedeploysOnce = $true
+    [ordered]@{ result = 'passed'; deployments = 5; roleAssignments = 8; rerunRedeploysOnce = $true
                 modelGateStopsBeforeProvisioning = 3; catalogueFailureIsNonFatal = $true; gateOverridable = $true
                 privateRegistryProvisionsOnly = $true; agentPoolImageBuilds = $agentPoolBuilds
                 agentPoolRegionGateStops = $true; permanentFailuresNotRetried = $true

@@ -816,6 +816,7 @@ try {
                 @{ PrincipalId = $apiPrincipalId; Role = 'Cost Management Contributor' }
             )
             if ($processorPrincipalId) {
+                $grants += @{ PrincipalId = $processorPrincipalId; Role = 'Reader' }
                 $grants += @{ PrincipalId = $processorPrincipalId; Role = 'Cost Management Contributor' }
             }
             $granted = $true
