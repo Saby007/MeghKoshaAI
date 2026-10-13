@@ -156,10 +156,13 @@ pwsh ./scripts/deploy-end-to-end.ps1 `
   -EnvironmentName my-environment `
   -Location centralindia `
   -FoundryLocation eastus2 `
+  -PrivateRegistry `
   -TargetSubscriptionId '<subscription-id>,<another-subscription-id>'
 ```
 
 `-TargetSubscriptionId` takes a comma-separated list (or several values) so one run can grant access to every subscription you want to assess; omit it and only the subscription you deploy into is granted. The deployment subscription itself defaults to the Azure CLI's current one — pass `-SubscriptionId` to deploy somewhere else. The script pins that subscription into the azd environment and into every `az` lookup, so no step stops to prompt you halfway through a long run.
+
+> **`-PrivateRegistry` is mandatory for MeghKoshaAI deployments.** The target subscriptions enforce an Azure Policy that blocks public access to Azure Container Registry. Omitting this switch sets `APP_PRIVATE_REGISTRY=false`, enables the registry's public endpoint, and causes `azd provision --preview` to fail with `RequestDisallowedByPolicy`.
 
 **Expect the run to take roughly 30–60 minutes, and expect it to retry itself.** A brand-new environment reliably hits one or more of [the four known transient errors](#known-transient-azd-up-errors) — the Foundry account still settling in `Accepted`, the container images landing after infrastructure planning, a still-active ARM deployment, or the ACR data plane lagging behind its AcrPull grant. The script recognizes each one, applies the documented fix (including switching to `APP_REUSE_AI_ACCOUNT=true`), waits, and retries. Warnings like *"The AI Foundry account is still settling"* are normal progress, not failures. Raise `-MaxAttempts` (default 3) if a slow subscription needs more passes.
 
@@ -173,6 +176,7 @@ Every phase is idempotent, so a run that stops partway can simply be rerun — i
 | `-SubscriptionId` | Deploy into a subscription other than the Azure CLI's current one. |
 | `-Location` | Choose the region for the app, data and networking resources. |
 | `-FoundryLocation` | Choose the region for the AI Foundry account, project and Model Router. |
+| `-PrivateRegistry` | **Required.** Deploy the Premium registry with public access disabled, a private endpoint, and an in-VNet build agent pool. |
 | `-SkipModelAvailabilityCheck` | Deploy anyway when you are certain the regional catalogue is wrong. |
 | `-MaxAttempts` | Allow more `azd up` retries (default 3). |
 | `-SkipIdentityBootstrap` | A separate Entra administrator creates the app registrations. |
@@ -191,9 +195,9 @@ Before provisioning anything, the script checks that the exact approved model, v
 az cognitiveservices model list --location <region> --query "[?model.name=='model-router']"
 ```
 
-#### Deploying into a policy-restricted subscription
+#### Mandatory private registry and optional blob data protection
 
-Some subscriptions carry policies that the default template deliberately does not satisfy — most commonly ones that **deny public access to the container registry** and **audit blob versioning and soft delete**. Two opt-in switches adapt the deployment without changing anything for subscriptions that don't need them:
+MeghKoshaAI target subscriptions deny public access to the container registry, so every deployment must pass `-PrivateRegistry`. Add `-BlobDataProtection` when the target subscription also audits blob versioning and soft delete:
 
 ```powershell
 pwsh ./scripts/deploy-end-to-end.ps1 `
@@ -212,7 +216,7 @@ pwsh ./scripts/deploy-end-to-end.ps1 `
 
 > Build agent pools are a **preview** feature offered only in certain regions, and they add cost on top of the Premium registry. If the pool cannot be created in your region, the run stops and tells you how to verify it. The Premium tier is not optional — private endpoints are a Premium-only capability.
 
-Neither switch affects a normal deployment: both default to off, every added resource is conditional, and with them off the template compiles to the same registry tier, the same public access and the same blob settings as before.
+`-PrivateRegistry` remains a script switch for compatibility, but it is operationally mandatory. `-BlobDataProtection` is optional and defaults to off.
 
 ### Option 2 — Azure Developer CLI, step by step
 
