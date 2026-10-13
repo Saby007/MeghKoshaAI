@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { CostDetailSummary } from '../report/models';
 import { compareCostGroups, costWindowDates, matchesCostFilter, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 
@@ -15,6 +15,7 @@ const SERIES_COLORS = [
 
 const CHART_HEIGHT = 260;
 const CHART_MIN_WIDTH = 640;
+export const CHART_POINT_HINT = 'Hover, tap or focus a day for values. Arrow keys move between days';
 
 /* Every day carries a label, so the axis - not the plot - decides how wide the
    chart has to be.
@@ -75,6 +76,23 @@ export function useChartWidth(ref: { current: HTMLElement | null }, minimum = CH
     return () => observer.disconnect();
   }, [ref, minimum]);
   return width;
+}
+
+export function chartTooltipPlacement(plotWidth: number, pointX: number, viewportLeft: number, viewportWidth: number) {
+  const width = Math.min(320, viewportWidth - 16);
+  const left = Math.max(viewportLeft + 8, Math.min(pointX + 12, viewportLeft + viewportWidth - width - 8, plotWidth - width - 8));
+  return { left, width };
+}
+
+export function moveChartFocus(event: KeyboardEvent<HTMLElement | SVGElement>) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const points = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLElement | SVGElement>('[data-cost-date], [data-chart-point]') ?? []);
+  const index = points.indexOf(event.currentTarget);
+  if (index < 0) return;
+  event.preventDefault();
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1
+    : Math.max(0, Math.min(points.length - 1, index + (event.key === 'ArrowRight' ? 1 : -1)));
+  points[next].focus();
 }
 
 export type TrendSeries = { id: string; name: string; points: (number | null)[] };
@@ -197,6 +215,9 @@ export function DailyBarChart({
   reference?: { value: number; label: string } | null;
 }) {
   const frame = useRef<HTMLDivElement>(null);
+  const tooltipId = useId();
+  const [activeDate, setActiveDate] = useState<string | null>(null);
+  const [viewportLeft, setViewportLeft] = useState(0);
   const measured = useChartWidth(frame);
   const padLeft = 78;
   const padRight = 20;
@@ -212,25 +233,29 @@ export function DailyBarChart({
      top of the frame whenever spend was below budget, which reads as "at
      budget" - the opposite of what it means. */
   const maximum = Math.max(...present, reference?.value ?? 0, 0) || 1;
+  const minimum = Math.min(...present, reference?.value ?? 0, 0);
   const slot = (width - padLeft - padRight) / Math.max(1, dates.length);
   const barWidth = Math.max(2, Math.min(slot * 0.68, 34));
   const xFor = (index: number) => padLeft + slot * (index + 0.5);
-  const yFor = (value: number) => baseline - (value / maximum) * (baseline - padTop);
+  const yFor = (value: number) => baseline - (value - minimum) / (maximum - minimum) * (baseline - padTop);
+  const activeIndex = activeDate === null ? -1 : dates.indexOf(activeDate);
+  const activeValue = values[activeIndex];
+  const tooltip = chartTooltipPlacement(width, xFor(activeIndex), viewportLeft, frame.current?.clientWidth || width);
 
   if (!dates.length || !present.length) {
     return <p role="status" className="empty-state">{emptyMessage}</p>;
   }
 
-  const ticks = [0, 1, 2, 3, 4].map((step) => maximum * step / 4);
+  const ticks = [0, 1, 2, 3, 4].map((step) => minimum + (maximum - minimum) * step / 4);
 
   return (
     <div className="trend-chart">
       <div className="cost-chart-legend">
         <span><i style={{ background: SERIES_COLORS[0] }} />{seriesName}</span>
         {reference && <span><i className="cost-chart-reference-key" />{reference.label}</span>}
-        {onSelectDate && <span>Select a day for its resource costs</span>}
+        <span>{CHART_POINT_HINT}{onSelectDate ? '; select to open resource costs.' : '.'}</span>
       </div>
-      <div className="cost-chart-scroll" ref={frame} tabIndex={0} role="region" aria-label={ariaLabel}>
+      <div className="cost-chart-scroll" ref={frame} tabIndex={0} role="region" aria-label={ariaLabel} onScroll={event => setViewportLeft(event.currentTarget.scrollLeft)}>
         <div className="cost-bar-plot" style={{ width: `${width}px`, height: `${height}px` }}>
           <svg viewBox={`0 0 ${width} ${height}`} style={{ width: `${width}px`, minWidth: `${width}px` }} className="cost-comparison-chart" role="img" aria-label={ariaLabel}>
             {ticks.map((value) => (
@@ -242,7 +267,7 @@ export function DailyBarChart({
             {dates.map((date, index) => {
               const value = values[index];
               if (value === null || value === undefined) return null;
-              const top = yFor(value);
+              const top = Math.min(yFor(value), yFor(0));
               const selected = selectedDate === date;
               return (
                 <rect
@@ -250,13 +275,14 @@ export function DailyBarChart({
                   x={xFor(index) - barWidth / 2}
                   y={top}
                   width={barWidth}
-                  height={Math.max(1, baseline - top)}
+                  height={Math.max(1, Math.abs(yFor(value) - yFor(0)))}
                   rx={2}
                   className={`cost-bar${selected ? ' cost-bar-selected' : selectedDate ? ' cost-bar-dim' : ''}`}
                   data-cost-date={date}
                 />
               );
             })}
+            {minimum < 0 && <line x1={padLeft} x2={width - padRight} y1={yFor(0)} y2={yFor(0)} className="cost-chart-zero" />}
             {reference && (
               <line
                 x1={padLeft}
@@ -268,7 +294,6 @@ export function DailyBarChart({
             )}
             <DayAxis dates={dates} xFor={xFor} y={baseline + (axis.rotated ? 16 : 26)} rotated={axis.rotated} />
           </svg>
-          {onSelectDate && (
             <div className="cost-bar-hits" aria-label={`${ariaLabel} by day`}>
               {dates.map((date, index) => {
                 const value = values[index];
@@ -278,16 +303,38 @@ export function DailyBarChart({
                     key={date}
                     type="button"
                     className={`cost-bar-hit${selectedDate === date ? ' cost-bar-hit-selected' : ''}`}
+                    data-cost-date={date}
                     style={{ left: `${xFor(index) - slot / 2}px`, width: `${slot}px`, top: `${padTop}px`, height: `${baseline - padTop}px` }}
-                    aria-label={selectLabel(date, value ?? null)}
-                    aria-pressed={selectedDate === date}
+                    aria-label={onSelectDate ? selectLabel(date, value ?? null) : `${seriesName}, ${date}, ${money}`}
+                    aria-pressed={onSelectDate ? selectedDate === date : undefined}
+                    aria-describedby={activeDate === date ? tooltipId : undefined}
                     title={`${date}: ${money}`}
-                    onClick={() => onSelectDate(date)}
+                    onPointerEnter={() => setActiveDate(date)}
+                    onPointerLeave={event => {
+                      if (document.activeElement !== event.currentTarget) setActiveDate(current => current === date ? null : current);
+                    }}
+                    onFocus={() => setActiveDate(date)}
+                    onBlur={() => setActiveDate(null)}
+                    onClick={() => { setActiveDate(date); onSelectDate?.(date); }}
+                    onKeyDown={event => {
+                      if (event.key === 'Escape') setActiveDate(null);
+                      moveChartFocus(event);
+                    }}
                   />
                 );
               })}
             </div>
-          )}
+          {activeIndex >= 0 && <div className="cost-point-tooltip cost-bar-tooltip" id={tooltipId} role="tooltip" style={{
+            left: tooltip.left, width: tooltip.width,
+            top: Math.max(8, Math.min(yFor(activeValue ?? 0) - 110, baseline - 110)),
+          }}>
+            <strong title={seriesName}>{seriesName}</strong>
+            <dl>
+              <div><dt>Date (UTC)</dt><dd>{activeDate}</dd></div>
+              <div><dt>Cost</dt><dd>{activeValue == null ? 'Unavailable' : formatMoney(activeValue)}</dd></div>
+              {reference && <div><dt title={reference.label}>Daily reference</dt><dd>{formatMoney(reference.value)}</dd></div>}
+            </dl>
+          </div>}
         </div>
       </div>
     </div>
