@@ -45,6 +45,56 @@ async function prepare(page: Page, theme: 'dark' | 'light') {
 }
 
 for (const theme of ['dark', 'light'] as const) {
+  test(`application selectors keep the lower costs in sync ${theme}`, async ({ page }) => {
+    const state = await prepare(page, theme);
+    const report = { ...detailReportFixture, tagCosts: {
+      available: true, status: 'Synthetic application costs', totalSpend: 200, growthRate: null,
+      dimensions: [{ tagKey: 'application', unallocatedCost: 0, rows: [
+        { value: 'Finance', monthlyCost: 120, pctOfTotal: 0.6, forecastNextMonth: null },
+        { value: 'Platform', monthlyCost: 80, pctOfTotal: 0.4, forecastNextMonth: null },
+      ] }],
+    } };
+    await page.route('**/api/report/latest**', route => route.fulfill({ json: { ...snapshotFixture, report } }));
+    await page.reload();
+    await expect(page.locator('#report-page-heading')).toHaveText('Executive Summary');
+    const nav = page.getByRole('navigation', { name: 'Report navigation' });
+    await nav.getByRole('button', { name: 'Cost by Tags/Application', exact: true }).click();
+    await page.getByLabel('Cost window start').fill('2026-09-01');
+    await page.getByLabel('Cost window end').fill('2026-09-07');
+    const top = page.getByLabel('Tag value', { exact: true });
+    await expect(page.getByLabel('Tag key', { exact: true })).toHaveValue('');
+    await expect(top).toHaveValue('');
+    await expect(top).toBeDisabled();
+    await expect(page.locator('.tag-cost-breakdowns .cost-breakdown-total')).toContainText('$1,836.00');
+    const breakdown = page.getByRole('region', { name: 'Tagged cost breakdown', exact: true });
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.getByLabel('Tag key', { exact: true }).selectOption({ label: 'application' });
+      const bottom = page.getByLabel('Cost tag value', { exact: true });
+      await top.selectOption({ label: 'Finance' });
+      await expect(bottom).toHaveValue(JSON.stringify('Finance'));
+      await expect(breakdown).toContainText('$1,632.00');
+      await bottom.selectOption({ label: 'Platform' });
+      await expect(top).toHaveValue(JSON.stringify('Platform'));
+      await expect(breakdown).toContainText('$204.00');
+      await expect(breakdown).not.toContainText('Virtual Machines');
+      await page.getByRole('group', { name: 'Group cost by', exact: true }).getByRole('button', { name: 'Resource', exact: true }).click();
+      await expect(breakdown).toContainText('shared-disk');
+      await expect(breakdown).not.toContainText('finance-vm');
+      await top.selectOption('');
+      await expect(bottom).toHaveValue('');
+      await expect(breakdown).toContainText('finance-vm');
+      await expect(page.locator('.tag-cost-breakdowns .cost-breakdown-total')).toContainText('$1,836.00');
+      await page.getByRole('group', { name: 'Group cost by', exact: true }).getByRole('button', { name: 'Service', exact: true }).click();
+      await page.getByLabel('Cost tag key', { exact: true }).selectOption('');
+      await expect(page.getByLabel('Tag key', { exact: true })).toHaveValue('');
+      await expect(top).toHaveValue('');
+      await expect(top).toBeDisabled();
+      await expect(page.locator('.tag-cost-breakdowns .cost-breakdown-total')).toContainText('$1,836.00');
+    }
+    expect(state.writes).toEqual([]);
+  });
+
   test(`polished read-only interactions and mobile recovery ${theme}`, async ({ page }) => {
     const state = await prepare(page, theme);
     const nav = page.getByRole('navigation', { name: 'Report navigation' });

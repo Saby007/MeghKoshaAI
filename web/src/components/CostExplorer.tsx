@@ -3,7 +3,7 @@ import { Activity, ArrowRight, Download, TriangleAlert, X } from 'lucide-react';
 import { downloadCostDetailReport, getResourceAvailability, type ResourceAvailability } from '../api';
 import { countTone } from './AnomalyOverview';
 import type { CostDetailSummary, FullReport } from '../report/models';
-import { compareCostGroups, costCoverage, costWindowDates, dailySubscriptionCosts, isMonthToDate, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { compareCostGroups, costCoverage, costWindowDates, dailySubscriptionCosts, isMonthToDate, presetCostWindow, previousCostWindow, sameTagKey, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import './cost-explorer.css';
 import { BudgetContext, type BudgetState } from './BudgetContext';
 import { CHART_POINT_HINT, chartTooltipPlacement, DayAxis, dayAxis, moveChartFocus } from './TrendChart';
@@ -45,19 +45,24 @@ function useChartWidth(ref: { current: HTMLElement | null }) {
   return width;
 }
 
-export function CostFilters({ details, value, onChange }: { details?: CostDetailSummary; value: CostFilter; onChange: (value: CostFilter) => void }) {
+export function CostFilters({ details, value, onChange, tagDimensions }: {
+  details?: CostDetailSummary; value: CostFilter; onChange: (value: CostFilter) => void;
+  tagDimensions?: { tagKey: string; values: string[] }[];
+}) {
   const rows = details?.rows ?? [];
   const fields = [
     { key: 'subscriptionId', label: 'Subscription', options: [...new Map(rows.map((row) => [row.subscriptionId, row.subscriptionName])).entries()] },
     ...(['serviceName', 'resourceGroup', 'region'] as const).map((key) => ({ key, label: key === 'serviceName' ? 'Service' : key === 'resourceGroup' ? 'Resource group' : 'Region', options: [...new Set(rows.map((row) => row[key]))].sort().map((text) => [text, text]) })),
   ];
-  const tagKeys = [...new Set(rows.flatMap((row) => Object.keys(row.tags)))].sort();
-  const tagValues = [...new Set(rows.flatMap((row) => Object.entries(row.tags).filter(([key]) => key.toLowerCase() === value.tagKey?.toLowerCase()).map(([, text]) => text)))].sort();
+  const tagKeys = tagDimensions ? tagDimensions.map(dimension => dimension.tagKey) : [...new Set(rows.flatMap((row) => Object.keys(row.tags)))].sort();
+  const tagValues = tagDimensions
+    ? tagDimensions.find(dimension => value.tagKey && sameTagKey(dimension.tagKey, value.tagKey))?.values ?? []
+    : [...new Set(rows.flatMap((row) => Object.entries(row.tags).filter(([key]) => value.tagKey && sameTagKey(key, value.tagKey)).map(([, text]) => text)))].sort();
   return <div className="billing-filters cost-detail-filters">
     {fields.map((field) => <label className="billing-filter" key={field.key}><span>{field.label}</span><select aria-label={`Cost ${field.label.toLowerCase()}`} value={value[field.key as keyof CostFilter] ?? ''} onChange={(event) => onChange({ ...value, [field.key]: event.target.value || undefined })}>
       <option value="">All</option>{field.options.map(([id, name]) => <option value={id} key={id}>{name}</option>)}
     </select></label>)}
-    <label className="billing-filter"><span>Tag key</span><select aria-label="Cost tag key" value={value.tagKey ?? ''} onChange={(event) => onChange({ ...value, tagKey: event.target.value || undefined, tagValue: undefined })}><option value="">All tags</option>{tagKeys.map((key) => <option key={key}>{key}</option>)}</select></label>
+    <label className="billing-filter"><span>Tag key</span><select aria-label="Cost tag key" value={value.tagKey ?? ''} onChange={(event) => onChange({ ...value, tagKey: event.target.value || undefined, tagValue: undefined })}><option value="">{tagDimensions ? 'All tag keys' : 'All tags'}</option>{tagKeys.map((key) => <option key={key}>{key}</option>)}</select></label>
     {value.tagKey && <label className="billing-filter"><span>Tag value</span><select aria-label="Cost tag value" value={value.tagValue === undefined ? '' : JSON.stringify(value.tagValue)} onChange={(event) => onChange({ ...value, tagValue: event.target.value === '' ? undefined : JSON.parse(event.target.value) })}><option value="">All values</option>{tagValues.map((text) => <option key={text} value={JSON.stringify(text)}>{text || '(Empty value)'}</option>)}</select></label>}
   </div>;
 }

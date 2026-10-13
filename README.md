@@ -136,6 +136,8 @@ Executive monthly history, spend hierarchy and regional distributions support ho
 
 Light/dark readability is guarded by shared-token contrast checks: body/semantic text targets 4.5:1 on the main surfaces and control strokes target 3:1, including hover surfaces. Placeholders and percentage-change annotations retain full opacity; primary-button hover avoids a brightening filter that weakens light-theme text contrast. Browser regressions cover both actual theme modes, read-only recovery, mobile cards, chart keyboard controls and dialog focus return. These checks are not an exhaustive accessibility certification or a live Entra sign-in test.
 
+On Cost by Tags/Application, the page defaults to All tag keys / All values, with an overview of each key's attribution and an unfiltered lower breakdown (including untagged resources). Attributed amounts across keys overlap and are not additive. Selecting a key enables its value selector. The upper tag selectors and the lower cost-breakdown tag selectors share one selection. Changing either updates the daily graph, matching budgets and service/resource-group/resource breakdown together. Choosing All values clears the page's value restriction; unrelated subscription/service/region filters remain in effect, and tag filters from other report pages are not silently applied.
+
 ## Prerequisites
 
 The subscription you deploy MeghKoshaAI **into** must have the [`Microsoft.CostManagementExports` resource provider](https://learn.microsoft.com/azure/azure-resource-manager/management/resource-providers-and-types) registered. Azure Cost Management uses it to reach the export destination storage account that this deployment creates. Register it once, before your first deployment:

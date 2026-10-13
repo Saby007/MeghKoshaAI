@@ -1187,6 +1187,7 @@ test('application daily trend keeps every label aligned for a full and custom pe
   await page.getByLabel('Cost window start').fill('2026-08-09');
   await page.getByLabel('Cost window end').fill('2026-09-07');
   await selectReportPage(page, 'Cost by Tags/Application');
+  await page.getByLabel('Tag key', { exact: true }).selectOption({ label: 'application' });
   await page.getByLabel('Tag value', { exact: true }).selectOption({ label: 'Finance' });
 
   const chart = page.getByRole('img', { name: 'Daily cost for application = Finance', exact: true });

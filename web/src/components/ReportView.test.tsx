@@ -781,6 +781,10 @@ it('shows no graph or budget for a key alone and charts the chosen value over th
   await act(async () => root.render(<ReportView report={applicationTagReport} narration={null} snapshotId="visual-report-1" costWindow={window} onCostWindowChange={vi.fn()} />));
   await act(async () => button('Cost by Tags/Application').click());
 
+  expect(tagSelect('Tag key').value).toBe('');
+  expect(tagSelect('Tag value').value).toBe('');
+  expect(tagSelect('Tag value').disabled).toBe(true);
+  await chooseTagOption('Tag key', 'application');
   // Filters lead the page; the old tag-set pie and all-values trend are gone.
   expect(container.querySelector('.executive-donut-panel')).toBeNull();
   expect(container.querySelector('[aria-label="Daily cost trend"]')).toBeNull();
@@ -816,7 +820,10 @@ it('ranks tag keys and states what one explains from its rows, not from a stored
   };
   await act(async () => root.render(<ReportView report={staleSnapshot} narration={null} snapshotId="visual-report-1" />));
   await act(async () => button('Cost by Tags/Application').click());
-  expect([...tagSelect('Tag key').options].map((option) => option.textContent)).toEqual(['Environment', 'Team']);
+  expect([...tagSelect('Tag key').options].map((option) => option.textContent)).toEqual(['All tag keys', 'Environment', 'Team']);
+  expect(container.querySelector('[aria-label="Tag key coverage"]')?.textContent).toContain('Environment$250.00');
+  expect(container.querySelector('.tag-cost-coverage')?.textContent).toContain('must not be added together');
+  await chooseTagOption('Tag key', 'Environment');
   const explains = container.querySelector('.tag-cost-coverage')!.textContent!;
   expect(explains).toContain('Environment explains $250.00 of $250.00');
   expect(explains).not.toContain('%');
@@ -826,7 +833,7 @@ it('filters tag costs by the selected key and value without changing financial e
   await act(async () => root.render(<ReportView report={tagReportFixture} narration={null} snapshotId="visual-report-1" />));
   await act(async () => button('Cost by Tags/Application').click());
   // Keys open most-explanatory first: Environment (250) before Team (200).
-  expect([...tagSelect('Tag key').options].map((option) => option.value)).toEqual(['Environment', 'Team']);
+  expect([...tagSelect('Tag key').options].map((option) => option.value)).toEqual(['', 'Environment', 'Team']);
   await chooseTagOption('Tag key', 'Team');
   expect(tagSelect('Tag value')).not.toBeNull();
   expect([...tagSelect('Tag value').options].map((option) => option.textContent)).toEqual(['All values', 'Platform', 'Sales']);
@@ -869,8 +876,10 @@ it('falls back to all values after report changes and allows selecting values on
     ...tagReportFixture.tagCosts, dimensions: [{ ...team, tagKey: 'Owner' }],
   } };
   await act(async () => root.render(<ReportView report={changedKeyReport} narration={null} snapshotId="visual-report-1" />));
-  expect(tagSelect('Tag key').value).toBe('Owner');
+  expect(tagSelect('Tag key').value).toBe('');
   expect(tagSelect('Tag value').selectedOptions[0].textContent).toBe('All values');
+  expect(tagSelect('Tag value').disabled).toBe(true);
+  await chooseTagOption('Tag key', 'Owner');
   expect(tagValueRows()).toHaveLength(2);
   await chooseTagOption('Tag value', 'Sales');
   expect(tagValueRows()).toHaveLength(1);
@@ -884,6 +893,7 @@ it.each(['', 'All values', 'Team "A" & Operations'])('matches the literal tag va
   } };
   await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" />));
   await act(async () => button('Cost by Tags/Application').click());
+  await chooseTagOption('Tag key', 'Team');
   const select = tagSelect('Tag value');
   expect(select.options[1].value).not.toBe(select.options[0].value);
   await act(async () => { select.value = select.options[1].value; select.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -926,6 +936,7 @@ const renderTagBudgets = async (budgets: unknown[]) => {
   vi.mocked(listBudgets).mockResolvedValue(budgets as never);
   await act(async () => root.render(<ReportView report={applicationTagReport} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} onCostWindowChange={() => {}} />));
   await act(async () => button('Cost by Tags/Application').click());
+  await chooseTagOption('Tag key', 'application');
 };
 
 const dayBar = (date: string) => container.querySelector<HTMLButtonElement>(`.tag-selection .cost-bar-hit[title^="${date}"]`);
@@ -1031,6 +1042,7 @@ it('matches a budget on a hyphenated tag key shown in display form', async () =>
   vi.mocked(listBudgets).mockResolvedValue([{ ...financeBudget, filter: { tags: { name: 'azd-env-name', operator: 'In', values: ['Finance'] } } }] as never);
   await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} onCostWindowChange={() => {}} />));
   await act(async () => button('Cost by Tags/Application').click());
+  await chooseTagOption('Tag key', 'Azd Env Name');
   await chooseTagOption('Tag value', 'Finance');
   // "Azd Env Name" in the report is `azd-env-name` on the rows and in the budget.
   expect(container.querySelector('.tag-selection')!.textContent).toContain('$1,632.00 in the selected period');
@@ -1038,15 +1050,136 @@ it('matches a budget on a hyphenated tag key shown in display form', async () =>
 });
 
 it('ignores a tag value inherited from a different tag key when scoping the selection', async () => {
-  await renderTagBudgets([financeBudget]);
+  vi.mocked(listBudgets).mockResolvedValue([financeBudget]);
+  await act(async () => root.render(<ReportView report={applicationTagReport} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} />));
+  await act(async () => button('Subscription Breakdown').click());
   await chooseTagOption('Cost tag key', 'owner');
   await chooseTagOption('Cost tag value', 'Finance team');
+  await act(async () => button('Cost by Tags/Application').click());
+  await chooseTagOption('Tag key', 'application');
   await chooseTagOption('Tag value', 'Finance');
   // "owner = Finance team" must not be tested against the application key, which
   // matches nothing and previously emptied the evidence for the page.
   const selection = container.querySelector('.tag-selection')!;
   expect(selection.textContent).toContain('$1,632.00 in the selected period');
   expect(selection.textContent).not.toContain('No daily cost evidence');
+});
+
+it('defaults to all keys and values and resets either selector set back to the whole breakdown', async () => {
+  const report = { ...applicationTagReport, costDetails: { ...applicationTagReport.costDetails!, rows: [
+    ...applicationTagReport.costDetails!.rows,
+    { ...applicationTagReport.costDetails!.rows[0], detailId: 'untagged', resourceName: 'untagged-resource',
+      resourceId: '/subscriptions/sub-1/resourceGroups/untagged/providers/Microsoft.Storage/storageAccounts/untagged',
+      serviceName: 'Untagged service', tags: {}, dailyCosts: { '2026-09-01': 10 } },
+  ] } };
+  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} />));
+  await act(async () => button('Cost by Tags/Application').click());
+  const lower = container.querySelector('.tag-cost-breakdowns')!;
+  expect(tagSelect('Tag key').selectedOptions[0].textContent).toBe('All tag keys');
+  expect(tagSelect('Tag value').selectedOptions[0].textContent).toBe('All values');
+  expect(tagSelect('Cost tag key').value).toBe('');
+  expect(lower.querySelector('.cost-breakdown-total')?.textContent).toContain('$1,846.00');
+  const keyLink = container.querySelector<HTMLButtonElement>('[aria-label="Tag key coverage"] button')!;
+  await act(async () => keyLink.click());
+  expect(tagSelect('Tag key').value).toBe('application');
+  await chooseTagOption('Tag value', 'Finance');
+  expect(lower.querySelector('.cost-breakdown-total')?.textContent).toContain('$1,632.00');
+  await chooseTagOption('Cost tag key', 'All tag keys');
+  expect(tagSelect('Tag key').value).toBe('');
+  expect(tagSelect('Tag value').value).toBe('');
+  expect(tagSelect('Tag value').disabled).toBe(true);
+  expect(lower.querySelector('.cost-breakdown-total')?.textContent).toContain('$1,846.00');
+  await chooseTagOption('Tag key', 'application');
+  await chooseTagOption('Tag value', 'Platform');
+  await chooseTagOption('Tag key', 'All tag keys');
+  expect(lower.querySelector('.cost-breakdown-total')?.textContent).toContain('$1,846.00');
+  expect(container.querySelector('.tag-selection')).toBeNull();
+});
+
+it('synchronizes both tag value selectors and recomputes every lower breakdown dimension', async () => {
+  await renderTagBudgets([]);
+  await chooseTagOption('Tag value', 'Finance');
+  expect(tagSelect('Cost tag value').value).toBe(JSON.stringify('Finance'));
+  const lower = container.querySelector('[aria-label="Cost breakdown by dimension"]')!;
+  expect(lower.textContent).toContain('$1,632.00');
+  await chooseTagOption('Cost tag value', 'Platform');
+  expect(tagSelect('Tag value').value).toBe(JSON.stringify('Platform'));
+  expect(lower.textContent).toContain('$204.00');
+  expect(lower.querySelector('tbody')?.textContent).not.toContain('Virtual Machines');
+  expect(container.querySelector('.tag-selection')?.textContent).toContain('application = Platform');
+  for (const label of ['Resource group', 'Resource']) {
+    const group = [...lower.querySelectorAll<HTMLButtonElement>('[aria-label="Group cost by"] button')].find(item => item.textContent === label)!;
+    await act(async () => group.click());
+    expect(lower.textContent).toContain('$204.00');
+    expect(lower.textContent).not.toContain('finance-vm');
+  }
+  await chooseTagOption('Tag value', 'All values');
+  expect(tagSelect('Cost tag value').value).toBe('');
+  expect(lower.textContent).toContain('$1,836.00');
+  expect(lower.textContent).toContain('finance-vm');
+  expect(lower.textContent).toContain('shared-disk');
+  expect(container.querySelector('.tag-selection')).toBeNull();
+});
+
+it('synchronizes display-form tag keys and resets the value when either key selector changes', async () => {
+  const report = { ...applicationTagReport, tagCosts: { ...applicationTagReport.tagCosts, dimensions: [
+    ...applicationTagReport.tagCosts.dimensions,
+    { tagKey: 'azd env name', unallocatedCost: 0, rows: [{ value: 'Dev', monthlyCost: 20, pctOfTotal: 0.1, forecastNextMonth: null }] },
+  ] }, costDetails: { ...applicationTagReport.costDetails!, rows: applicationTagReport.costDetails!.rows.map((row, index) => ({
+    ...row, tags: { ...row.tags, 'azd-env-name': index ? 'Other' : 'Dev' },
+  })) } };
+  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} />));
+  await act(async () => button('Cost by Tags/Application').click());
+  await chooseTagOption('Tag key', 'application');
+  await chooseTagOption('Tag value', 'Platform');
+  await chooseTagOption('Cost tag key', 'azd env name');
+  expect(tagSelect('Tag key').value).toBe('azd env name');
+  expect(tagSelect('Tag value').value).toBe('');
+  await chooseTagOption('Cost tag value', 'Dev');
+  expect(tagSelect('Tag value').value).toBe(JSON.stringify('Dev'));
+  expect(container.querySelector('.tag-cost-breakdowns')?.textContent).toContain('$1,632.00');
+  await chooseTagOption('Tag key', 'application');
+  expect(tagSelect('Cost tag key').value).toBe('application');
+  expect(tagSelect('Cost tag value').value).toBe('');
+});
+
+it('restores all application values despite an inherited same-key value and preserves service restrictions', async () => {
+  await act(async () => root.render(<ReportView report={applicationTagReport} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} />));
+  await act(async () => button('Subscription Breakdown').click());
+  await chooseTagOption('Cost tag key', 'application');
+  await chooseTagOption('Cost tag value', 'Finance');
+  await act(async () => button('Cost by Tags/Application').click());
+  const lower = container.querySelector('.tag-cost-breakdowns')!;
+  expect(tagSelect('Tag value').value).toBe('');
+  expect(lower.querySelector('.cost-breakdown-total')?.textContent).toContain('$1,836.00');
+  await chooseTagOption('Cost service', 'Storage');
+  await chooseTagOption('Cost tag key', 'application');
+  await chooseTagOption('Cost tag value', 'Finance');
+  expect(lower.textContent).toContain('No service charges match');
+  await chooseTagOption('Tag value', 'All values');
+  expect(tagSelect('Cost service').value).toBe('Storage');
+  expect(lower.querySelector('.cost-breakdown-total')?.textContent).toContain('$204.00');
+  await act(async () => button('Subscription Breakdown').click());
+  expect(tagSelect('Cost tag key').value).toBe('application');
+  expect(tagSelect('Cost tag value').value).toBe(JSON.stringify('Finance'));
+});
+
+it.each(['', 'All values', 'Team "A" & Operations'])('filters the lower breakdown for the literal tag value %j', async value => {
+  const report = { ...applicationTagReport,
+    tagCosts: { ...applicationTagReport.tagCosts, dimensions: [{ ...applicationTagReport.tagCosts.dimensions[0], rows: [
+      { ...applicationTagReport.tagCosts.dimensions[0].rows[0], value }, applicationTagReport.tagCosts.dimensions[0].rows[1],
+    ] }] },
+    costDetails: { ...applicationTagReport.costDetails!, rows: applicationTagReport.costDetails!.rows.map((row, index) => ({
+      ...row, tags: { ...row.tags, application: index ? 'Platform' : value },
+    })) },
+  };
+  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} />));
+  await act(async () => button('Cost by Tags/Application').click());
+  await chooseTagOption('Cost tag key', 'application');
+  const select = tagSelect('Cost tag value');
+  await act(async () => { select.value = JSON.stringify(value); select.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(tagSelect('Tag value').value).toBe(JSON.stringify(value));
+  expect(container.querySelector('.tag-cost-breakdowns .cost-breakdown-total')?.textContent).toContain('$1,632.00');
 });
 
 it.each([true, false])('shows the same realized RI and Savings Plan evidence in EA Pricing and Rate Optimization when pricing is available: %s', async (available) => {

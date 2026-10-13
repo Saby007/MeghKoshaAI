@@ -3830,18 +3830,15 @@ function CostByTagsTab({
   snapshotId: string | null;
 }) {
   const summary = report.tagCosts;
-  /* Most explanatory key first. Saved snapshots written before the API ordered them this
-     way are alphabetical - which opened this page on `Action`, one value and 3% of
-     spend. Sorted here so every snapshot opens on its most useful key; stable, so the
-     API's own order is kept on ties. */
+  // Rank the available keys by attribution, without preselecting a scope.
   const dimensions = useMemo(
     () => [...(summary?.dimensions ?? [])].sort((left, right) => allocatedOf(right) - allocatedOf(left)),
     [summary?.dimensions],
   );
-  const [selectedKey, setSelectedKey] = useState<string>(dimensions[0]?.tagKey ?? '');
+  const [selectedKey, setSelectedKey] = useState<string>('');
   const [selectedValue, setSelectedValue] = useState<string | null>(null);
   const [breakdown, setBreakdown] = useState<CostDimension>('service');
-  const dimension = dimensions.find((item) => item.tagKey === selectedKey) ?? dimensions[0];
+  const dimension = dimensions.find((item) => item.tagKey === selectedKey);
   const allRows = dimension?.rows ?? [];
   const activeValue = dimension?.tagKey === selectedKey && allRows.some((row) => row.value === selectedValue)
     ? selectedValue : null;
@@ -3853,23 +3850,20 @@ function CostByTagsTab({
   const dimensionAllocated = dimension ? allocatedOf(dimension) : 0;
   const dimensionTotal = dimensionAllocated + (dimension?.unallocatedCost ?? 0);
   const barBasis = Math.max(dimensionTotal, ...allRows.map((row) => row.monthlyCost), 1);
-  /* Selecting a tag key and value here scopes the breakdowns below, so the two
-     halves of this page answer the same question rather than sitting side by
-     side unaware of each other.
-
-     The page's own selectors own the tag dimension outright. Overriding
-     `tagKey` while still inheriting `tagValue` from the shared cost filters
-     tested one key's value against a different key - a scope that matches
-     nothing - so every budget on the page was mapped against an empty
-     selection. An inherited value is kept only while it belongs to the key
-     actually being shown. */
+  // Both selector sets share the page's tag selection; shared filters own only
+  // the remaining dimensions, so an old tag value cannot override "All values".
   const pageTagKey = dimension?.tagKey;
-  const inheritedTagValue = pageTagKey && costFilters.tagKey && sameTagKey(costFilters.tagKey, pageTagKey)
-    ? costFilters.tagValue
-    : undefined;
+  const { tagKey: _sharedTagKey, tagValue: _sharedTagValue, ...nonTagFilters } = costFilters;
   const scopedFilters: CostFilter = pageTagKey
-    ? { ...costFilters, tagKey: pageTagKey, tagValue: activeValue === null ? inheritedTagValue : activeValue }
-    : costFilters;
+   ? { ...nonTagFilters, tagKey: pageTagKey, tagValue: activeValue ?? undefined }
+   : nonTagFilters;
+  function changeScopedFilters(next: CostFilter) {
+   const nextDimension = dimensions.find(item => next.tagKey && sameTagKey(item.tagKey, next.tagKey));
+   setSelectedKey(nextDimension?.tagKey ?? '');
+   setSelectedValue(nextDimension && next.tagValue !== undefined && nextDimension.rows.some(row => row.value === next.tagValue) ? next.tagValue : null);
+   const { tagKey: _nextTagKey, tagValue: _nextTagValue, ...nextNonTagFilters } = next;
+   onCostFiltersChange({ ...nextNonTagFilters, tagKey: costFilters.tagKey, tagValue: costFilters.tagValue });
+  }
   /* The graph and budgets answer "how is this application doing", so they appear
      only once a key and a value are both chosen. For a key alone they described
      every value at once - a question the table above already answers better. */
@@ -3949,10 +3943,11 @@ function CostByTagsTab({
           <div className="tag-cost-controls">
             <label className="currency-control">
               <span>Tag key</span>
-              <select aria-label="Tag key" title={dimension?.tagKey} value={dimension?.tagKey ?? ''} onChange={(event) => {
+              <select aria-label="Tag key" title={dimension?.tagKey ?? 'All tag keys'} value={dimension?.tagKey ?? ''} onChange={(event) => {
                 setSelectedKey(event.target.value);
                 setSelectedValue(null);
               }}>
+                <option value="">All tag keys</option>
                 {dimensions.map((item) => (
                   <option value={item.tagKey} key={item.tagKey}>{item.tagKey}</option>
                 ))}
@@ -3982,7 +3977,7 @@ function CostByTagsTab({
               on an estate that is mostly untagged it showed a short list of small
               numbers with no indication that it was describing a few percent of the
               bill. */}
-          <p className="tag-cost-coverage">
+          {dimension ? <><p className="tag-cost-coverage">
             <strong>{dimension?.tagKey}</strong> explains {formatMoney(dimensionAllocated)} of {formatMoney(summary?.totalSpend ?? 0)}
             {' '}across {allRows.length === 1 ? '1 value' : `${allRows.length} values`}.
             {dimension && dimension.unallocatedCost > 0 && (
@@ -4033,7 +4028,20 @@ function CostByTagsTab({
                 )}
               </tbody>
             </table>
-          </div>
+          </div></> : <>
+            <p className="tag-cost-coverage">All tag keys · {formatMoney(summary.totalSpend)} total assessed spend. Keys can overlap; their attributed amounts must not be added together.</p>
+            <div className="tag-cost-table-scroll" role="region" aria-label="Tag key coverage" tabIndex={0}>
+              <table className="report-table app-cost-table">
+                <thead><tr><th>Tag key</th><th className="num">Attributed monthly cost ({displayCurrency})</th><th className="num">Unallocated cost</th><th className="num">Values</th></tr></thead>
+                <tbody>{dimensions.map(item => <tr key={item.tagKey}>
+                  <td><button type="button" className="finding-link" onClick={() => { setSelectedKey(item.tagKey); setSelectedValue(null); }}>{item.tagKey}</button></td>
+                  <td className="num">{formatMoney(allocatedOf(item))}</td>
+                  <td className="num">{formatMoney(item.unallocatedCost)}</td>
+                  <td className="num">{item.rows.length}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+          </>}
         </>
       )}
 
@@ -4090,7 +4098,9 @@ function CostByTagsTab({
           )}
         </section>
       ) : dimensions.length > 0 && (
-        <p className="tag-selection-hint">Choose a value for <strong>{dimension?.tagKey ?? 'this tag'}</strong> above to see its daily spend and budget.</p>
+        <p className="tag-selection-hint">{dimension
+          ? <>Choose a value for <strong>{dimension.tagKey}</strong> above to see its daily spend and budget.</>
+          : 'Choose a tag key and value above to see an application’s daily spend and budget. The breakdown below currently includes all tag keys and values.'}</p>
       )}
 
       {/* Where the tagged money actually went. Scoped by the tag selection
@@ -4103,7 +4113,8 @@ function CostByTagsTab({
             ? `Across the selected range${dimension?.tagKey ? `, all ${dimension.tagKey} values` : ''}.`
             : `Scoped to ${dimension?.tagKey} = ${activeValue || '(empty)'}.`}
         </p>
-        <CostFilters details={report.costDetails} value={costFilters} onChange={onCostFiltersChange} />
+        <CostFilters details={report.costDetails} value={scopedFilters} onChange={changeScopedFilters}
+          tagDimensions={dimensions.map(item => ({ tagKey: item.tagKey, values: item.rows.map(row => row.value) }))} />
         <GroupedCostBreakdown
           details={report.costDetails}
           window={costWindow}
