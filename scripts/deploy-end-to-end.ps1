@@ -403,17 +403,23 @@ function Build-ImagesOnAgentPool {
     $subscriptionArgs = Get-SubscriptionArgument
     $tag = "build-$(Get-Date -Format 'yyyyMMddHHmmss')"
     foreach ($service in @('api', 'web')) {
-        $repository = "cost-assessment-app/$service-$EnvironmentName"
+        # Image repositories must be lowercase, but azd accepts a mixed-case environment name (and
+        # ValidatePattern ignores case), so lowercase it the same way azd's own image names do.
+        $repository = "cost-assessment-app/$service-$($EnvironmentName.ToLowerInvariant())"
         Write-Step "Building the $service image on agent pool '$pool'"
         # Streaming the build log kills the Azure CLI on a non-UTF8 Windows console (colorama
         # writes the log through the console code page and raises UnicodeEncodeError) long after
         # the build itself has succeeded. --no-logs still waits for the run and reports its status,
         # so the outcome comes from the run object rather than from parsing a log stream.
-        $json = Get-CliText (& az acr build --registry $registry @subscriptionArgs --agent-pool $pool `
+        $output = @(& az acr build --registry $registry @subscriptionArgs --agent-pool $pool `
             --image "${repository}:$tag" --file "$service/Dockerfile" "./$service" `
-            --no-logs --output json --only-show-errors 2>$null)
+            --no-logs --output json --only-show-errors 2>&1)
+        $json = Get-CliText ($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
         if ($LASTEXITCODE -ne 0 -or -not $json) {
-            throw "Building the $service image on agent pool '$pool' could not be started. Confirm the pool with 'az acr agentpool show --registry $registry --name $pool'."
+            # ACR refuses some requests before it queues a run, and the reason is only on stderr.
+            $detail = Get-CliText $output
+            if (-not $detail) { $detail = "Confirm the pool with 'az acr agentpool show --registry $registry --name $pool'." }
+            throw "Building the $service image on agent pool '$pool' could not be started. $detail"
         }
         $run = $json | ConvertFrom-Json
         if ($run.status -ne 'Succeeded') {

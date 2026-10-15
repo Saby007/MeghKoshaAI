@@ -36,6 +36,7 @@ $global:deployTestState = @{
     questions = [System.Collections.Generic.List[string]]::new()
     acrBuilds = [System.Collections.Generic.List[object]]::new()
     buildStatus = 'Succeeded'
+    rejectBuild = $false
     providerChecks = 0
     agentPoolRegions = @('East US', 'West Europe', 'Central US')
     modelChecks = 0
@@ -272,6 +273,13 @@ function az {
         # Streaming the log crashes the CLI on a non-UTF8 console, so the helper must ask for the
         # run object instead of parsing a stream.
         if ($a -notcontains '--no-logs') { throw 'The image build must not stream logs; it must report the run status instead.' }
+        # ACR refuses a repository name that is not lowercase before it queues any run, and the CLI
+        # reports why on stderr only.
+        if ($state.rejectBuild -or ($image -split ':')[0] -cmatch '[A-Z]') {
+            Write-Error -Message "ERROR: (InvalidInputValue) Some of the properties of 'runRequest' are invalid.. InnerErrors: DockerBuildRequest:Image name '$image' is invalid." -ErrorAction Continue
+            $global:LASTEXITCODE = 1
+            return
+        }
         return (ConvertTo-Json -Depth 3 -InputObject @{ runId = "run$($state.acrBuilds.Count)"; status = $state.buildStatus })
     }
     if ($a[0] -eq 'role' -and $a[1] -eq 'assignment' -and $a[2] -eq 'list') {
@@ -495,6 +503,27 @@ if (`$global:deployTestState.requireServiceTree -and -not `$ServiceManagementRef
     if (-not $buildFailed) { throw 'A failed image build was reported as a successful deployment.' }
     if ($buildFailed -notmatch 'az acr task logs') { throw "A failed build must say how to read its log. Got: $buildFailed" }
 
+    # azd accepts a mixed-case environment name, but image repositories must be lowercase, so the
+    # agent-pool build has to lowercase it the way azd names its own images.
+    $state.upCalls.Clear()
+    $state.acrBuilds.Clear()
+    $mixed = $private.Clone()
+    $mixed.EnvironmentName = 'App-Mixed'
+    & $script @mixed -PrivateRegistry -SkipPreview | Out-Null
+    foreach ($service in @('api', 'web')) {
+        if (@($state.acrBuilds | Where-Object { $_.image -clike "cost-assessment-app/$service-app-mixed:*" }).Count -ne 1) {
+            throw "The $service image repository was not lowercased for a mixed-case environment name: $(@($state.acrBuilds | ForEach-Object { $_.image }) -join ', ')"
+        }
+    }
+
+    # A build ACR refuses before it queues a run must surface the CLI's reason, which is only on stderr.
+    $state.rejectBuild = $true
+    $refusedBuild = $null
+    try { & $script @private -PrivateRegistry -SkipPreview | Out-Null } catch { $refusedBuild = $_.Exception.Message }
+    $state.rejectBuild = $false
+    if (-not $refusedBuild) { throw 'A refused image build was reported as a successful deployment.' }
+    if ($refusedBuild -notmatch 'InvalidInputValue') { throw "A refused image build must report the Azure CLI error. Got: $refusedBuild" }
+
     # Agent pools exist in a subset of regions. An unsupported region must stop the run up front,
     # because the resulting validation failure is deterministic and would otherwise be retried.
     $state.upCalls.Clear()
@@ -567,6 +596,7 @@ if (`$global:deployTestState.requireServiceTree -and -not `$ServiceManagementRef
     [ordered]@{ result = 'passed'; deployments = 5; roleAssignments = 8; rerunRedeploysOnce = $true
                 modelGateStopsBeforeProvisioning = 3; catalogueFailureIsNonFatal = $true; gateOverridable = $true
                 privateRegistryProvisionsOnly = $true; agentPoolImageBuilds = $agentPoolBuilds
+                mixedCaseEnvironmentImagesLowercased = $true; refusedBuildReportsCliError = $true
                 agentPoolRegionGateStops = $true; permanentFailuresNotRetried = $true
                 defaultsUnchanged = $true; noHiddenPrompts = $true; azdQuestionsAskedInTerminal = $true
                 serviceTreeIdAskedAndRemembered = $true } | ConvertTo-Json -Compress
