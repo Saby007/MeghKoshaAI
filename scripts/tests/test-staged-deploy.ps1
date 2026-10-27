@@ -2,14 +2,23 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "meghkosha-staged-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path (Join-Path $testRoot 'scripts'), (Join-Path $testRoot '.azure\staged-test'), (Join-Path $testRoot 'api\jobs') | Out-Null
-foreach ($file in @('deploy-staged.ps1', 'validate-deployment-inputs.ps1', 'private-builder.sh')) {
+foreach ($file in @('deploy-staged.ps1', 'deploy-end-to-end.ps1', 'validate-deployment-inputs.ps1', 'private-builder.sh')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\$file") -Destination (Join-Path $testRoot "scripts\$file")
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\..\api\jobs\scheduler.py') -Destination (Join-Path $testRoot 'api\jobs\scheduler.py')
+[IO.File]::WriteAllText((Join-Path $testRoot 'scripts\bootstrap-identity.ps1'), @'
+[CmdletBinding(SupportsShouldProcess)]
+param($TenantId,$SubscriptionId,$EnvironmentName,$WebOrigin,$OboManagedIdentityResourceId,$ServiceManagementReference,[switch]$Apply,[switch]$IncludeLocalhostRedirects)
+$global:stagedState.calls.Add('identity')
+@{ MEGHKOSHA_API_CLIENT_ID='44444444-4444-4444-4444-444444444444'; MEGHKOSHA_WEB_CLIENT_ID='55555555-5555-5555-5555-555555555555' } | ConvertTo-Json -Compress
+'@)
 $global:stagedState = @{
     calls = [Collections.Generic.List[string]]::new()
     provisions = 0; previews = 0; badBuild = $false; bootstrapFailed = $false; quotaInsufficient = $false
     assignments = [Collections.Generic.List[object]]::new()
+    responses = [Collections.Generic.Queue[string]]::new()
+    prompts = [Collections.Generic.List[string]]::new()
+    environmentExists = $true; cleanupFailed = $false; imageDrift = $false; keyCreates = 0
     values = @{
         AZURE_ENV_NAME = 'staged-test'; AZURE_SUBSCRIPTION_ID = '11111111-1111-1111-1111-111111111111'
         AZURE_TENANT_ID = '22222222-2222-2222-2222-222222222222'; AZURE_LOCATION = 'centralindia'
@@ -24,6 +33,8 @@ $global:stagedState = @{
         ASSESSMENT_BOOTSTRAP_JOB = 'job-db-bootstrap-test'; APP_WEB_ORIGIN = 'https://web.example.test'
         ASSESSMENT_DB_HOST = 'pg-test.postgres.database.azure.com'
         SERVICE_API_RESOURCE_NAME = 'ca-api-test'; SERVICE_ASSESSMENT_RESOURCE_NAME = 'ca-assessment-test'
+        SERVICE_WEB_RESOURCE_NAME = 'ca-web-test'
+        MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-staged-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-obo-test'
     }
 }
 function azd {
@@ -31,9 +42,23 @@ function azd {
     $global:stagedState.calls.Add("azd $($a[0])")
     if ($a[0] -eq 'env' -and $a[1] -eq 'get-values') { return ($global:stagedState.values | ConvertTo-Json -Depth 10) }
     if ($a[0] -eq 'env' -and $a[1] -eq 'set') { $global:stagedState.values[$a[2]] = $a[3]; return }
-    if ($a[0] -eq 'env' -and $a[1] -eq 'list') { return '[{"Name":"staged-test"}]' }
+    if ($a[0] -eq 'auth' -and $a[1] -eq 'login') { return }
+    if ($a[0] -eq 'env' -and $a[1] -eq 'list') {
+        return $(if ($global:stagedState.environmentExists) { '[{"Name":"staged-test"}]' } else { '[]' })
+    }
+    if ($a[0] -eq 'env' -and $a[1] -eq 'new') {
+        if ($a -notcontains '--location' -or $a -notcontains '--subscription' -or $a -notcontains '--no-prompt') {
+            throw 'New environment must pin subscription/region without hidden AZD questions.'
+        }
+        $global:stagedState.environmentExists=$true
+        return
+    }
     if ($a[0] -eq 'provision') {
-        if ($a -contains '--preview') { $global:stagedState.previews++ } else { $global:stagedState.provisions++ }
+        if ($a -contains '--preview') { $global:stagedState.previews++ }
+        else {
+            $global:stagedState.provisions++
+            $global:stagedState.values.APP_APPLICATIONS_DEPLOYED = $(if ($global:stagedState.values.APP_ASSESSMENT_FOUNDATION_ONLY -eq 'true') { 'false' } else { 'true' })
+        }
         return
     }
     throw "Unexpected offline AZD call: $($a -join ' ')"
@@ -45,7 +70,10 @@ function az {
     if ($a[0] -eq 'acr' -and $a[1] -eq 'show') {
         return '{"sku":{"name":"Premium"},"publicNetworkAccess":"Disabled","adminUserEnabled":false}'
     }
-    if ($a[0] -eq 'account' -and $a[1] -eq 'show') { return '{"state":"Enabled","tenantId":"22222222-2222-2222-2222-222222222222"}' }
+    if ($a[0] -eq 'account' -and $a[1] -eq 'show') {
+        if ($a -contains 'none') { return }
+        return '{"state":"Enabled","tenantId":"22222222-2222-2222-2222-222222222222"}'
+    }
     if ($command -eq 'postgres flexible-server show') {
         return '{"network":{"publicNetworkAccess":"Disabled"},"authConfig":{"passwordAuth":"Disabled","activeDirectoryAuth":"Enabled"}}'
     }
@@ -60,7 +88,13 @@ function az {
     if ($a[0] -eq 'vm' -and $a[1] -eq 'show') {
         return '{"publicIps":"","powerState":"VM deallocated","hardwareProfile":{"vmSize":"Standard_D2s_v5"}}'
     }
-    if ($a[0] -eq 'vm' -and $a[1] -in @('start', 'deallocate')) { return '{}' }
+    if ($a[0] -eq 'vm' -and $a[1] -in @('start', 'deallocate')) {
+        if ($a[1] -eq 'deallocate' -and $global:stagedState.cleanupFailed) {
+            $global:LASTEXITCODE=1
+            return
+        }
+        return '{}'
+    }
     if ($command -eq 'vm run-command invoke') {
         $argument = [string]$a[[array]::IndexOf($a, '--scripts') + 1]
         if (-not $argument.StartsWith('@')) { throw 'Run Command must read a local file, not shell-escaped inline code.' }
@@ -81,7 +115,12 @@ function az {
         return "[{`"name`":`"bootstrap-execution`",`"properties`":{`"status`":`"$status`"}}]"
     }
     if ($a[0] -eq 'containerapp' -and $a[1] -eq 'show') {
-        return '{"properties":{"provisioningState":"Succeeded","runningStatus":"Running"}}'
+        $name = [string]$a[[array]::IndexOf($a, '--name') + 1]
+        $image = if ($name -eq 'ca-web-test') { $global:stagedState.values.SERVICE_WEB_IMAGE_NAME }
+            elseif ($name -eq 'ca-api-test') { $global:stagedState.values.SERVICE_API_IMAGE_NAME }
+            else { $global:stagedState.values.SERVICE_ASSESSMENT_IMAGE_NAME }
+        if ($global:stagedState.imageDrift) { $image = 'acrstagedtest.azurecr.io/unreviewed:latest' }
+        return (@{ properties=@{ provisioningState='Succeeded'; runningStatus='Running'; template=@{ containers=@(@{image=$image}) } } } | ConvertTo-Json -Depth 7)
     }
     if ($a[0] -eq 'identity' -and $a[1] -eq 'show') {
         $id = if (($a -join ' ') -match 'id-api-test') { '66666666-6666-6666-6666-666666666666' } else { '77777777-7777-7777-7777-777777777777' }
@@ -117,6 +156,21 @@ function Invoke-RestMethod {
     throw "Unexpected offline HTTP call: $Uri"
 }
 function Start-Sleep { param([int] $Seconds) }
+function Read-Host {
+    param([string] $Prompt)
+    $global:stagedState.prompts.Add($Prompt)
+    if (-not $global:stagedState.responses.Count) { throw "Unexpected question: $Prompt" }
+    return $global:stagedState.responses.Dequeue()
+}
+function ssh-keygen {
+    $global:LASTEXITCODE=0
+    $a=@($args)
+    $path=[string]$a[[array]::IndexOf($a,'-f')+1]
+    if (Test-Path -LiteralPath $path) { throw 'Do not overwrite a private key.' }
+    $global:stagedState.keyCreates++
+    [IO.File]::WriteAllText($path,'synthetic-local-private-key')
+    [IO.File]::WriteAllText("$path.pub",'ssh-ed25519 AAAAC3NzaSyntheticGenerated')
+}
 function Assert-Refused([scriptblock] $Action, [string] $Message) {
     $failure = ''
     try { & $Action | Out-Null } catch { $failure = $_.Exception.Message }
@@ -124,6 +178,7 @@ function Assert-Refused([scriptblock] $Action, [string] $Message) {
 }
 try {
     $script = Join-Path $testRoot 'scripts\deploy-staged.ps1'
+    $initialValues = $global:stagedState.values.Clone()
     $common = @{ EnvironmentName = 'staged-test'; Apply = $true; ApproveAzureChanges = $true }
     $plan = & $script -Stage Foundation -EnvironmentName staged-test | ConvertFrom-Json
     if ($plan.appliesChanges -or $global:stagedState.calls.Count) { throw 'Plan-only mode made an external call.' }
@@ -158,10 +213,94 @@ try {
     if ($global:stagedState.values.APP_ASSESSMENT_FOUNDATION_ONLY -ne 'false') { throw 'Release stage did not open the reviewed application gate.' }
     & $script -Stage Verify @common | Out-Null
     & $script -Stage StopBuilder @common | Out-Null
+    $driver=Join-Path $testRoot 'scripts\deploy-end-to-end.ps1'
+    $plan=& $driver -EnvironmentName staged-test -PlanOnly | ConvertFrom-Json
+    if ($plan.stage -ne 'All' -or $plan.appliesChanges) { throw 'End-to-end default must describe every private stage without execution.' }
+    function Reset-Rollout {
+        $global:stagedState.values=$initialValues.Clone()
+        $global:stagedState.calls.Clear()
+        $global:stagedState.prompts.Clear()
+        $global:stagedState.responses.Clear()
+        $global:stagedState.assignments.Clear()
+        $global:stagedState.provisions=0
+        $global:stagedState.previews=0
+        $global:stagedState.badBuild=$false
+        $global:stagedState.bootstrapFailed=$false
+        $global:stagedState.cleanupFailed=$false
+        $global:stagedState.imageDrift=$false
+    }
+    Reset-Rollout
+    $global:stagedState.responses.Enqueue('NO')
+    Assert-Refused { & $driver -EnvironmentName staged-test -SkipLogin } 'not approved'
+    if ($global:stagedState.provisions -or $global:stagedState.assignments.Count) { throw 'Declined rollout made changes.' }
+    Reset-Rollout
+    $global:stagedState.environmentExists=$false
+    $global:stagedState.values.Remove('APP_PRIVATE_BUILDER_SSH_PUBLIC_KEY')
+    $global:stagedState.responses.Enqueue('11111111-1111-1111-1111-111111111111')
+    $global:stagedState.responses.Enqueue('YES')
+    $result=& $driver -EnvironmentName staged-test | ConvertFrom-Json
+    if ($result.status -ne 'deployment_completed' -or -not $result.builderDeallocated) { throw 'One-command deployment did not complete.' }
+    if ($global:stagedState.prompts.Count -ne 2) { throw 'Expected only subscription entry and one upfront approval.' }
+    if ($global:stagedState.provisions -ne 3) { throw 'One-command cold run must provision foundation, bootstrap and release.' }
+    if ($global:stagedState.keyCreates -ne 1 -or
+        -not (Test-Path -LiteralPath (Join-Path $testRoot '.azure\builder-keys\meghkosha-builder-staged-test.pub'))) {
+        throw 'One-command setup did not create its dedicated local public key automatically.'
+    }
+    $calls=$global:stagedState.calls
+    $build=$calls.IndexOf('az vm run-command invoke')
+    $bootstrap=$calls.IndexOf('az containerapp job start')
+    $identity=$calls.IndexOf('identity')
+    $permissions=$calls.IndexOf('az role assignment create')
+    $verify=$calls.IndexOf('az containerapp show --resource-group')
+    $stop=$calls.IndexOf('az vm deallocate --resource-group')
+    if (-not (0 -le $build -and $build -lt $bootstrap -and $bootstrap -lt $identity -and $identity -lt $permissions -and $permissions -lt $verify -and $verify -lt $stop)) {
+        throw "End-to-end stages ran out of order: $($calls -join ', ')"
+    }
+    if ($global:stagedState.values.APP_EXPORT_TRUSTED_SERVICES -ne 'true') { throw 'End-to-end export setting was not forwarded.' }
+    $provisions=$global:stagedState.provisions
+    $global:stagedState.calls.Clear()
+    $rerun=& $driver -EnvironmentName staged-test -SkipLogin -ApproveAll | ConvertFrom-Json
+    if ($rerun.status -ne 'deployment_completed' -or $global:stagedState.provisions -ne $provisions) { throw 'Same-commit rerun unnecessarily reprovisioned.' }
+    if (@($global:stagedState.calls | Where-Object { $_ -in @('az vm run-command invoke','az containerapp job start') }).Count) {
+        throw 'Same-commit rerun rebuilt images or reexecuted bootstrap.'
+    }
+    if ($global:stagedState.keyCreates -ne 1) { throw 'Rerun must not replace the local SSH key.' }
+    $global:stagedState.imageDrift=$true
+    Assert-Refused { & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll } 'reviewed immutable image'
+    $global:stagedState.imageDrift=$false
+    $global:stagedState.values.APP_STAGED_BUILD_COMMIT='d'*40
+    Assert-Refused { & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll } 'different source commit'
+    Reset-Rollout
+    $global:stagedState.bootstrapFailed=$true
+    Assert-Refused { & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll } 'bootstrap failed'
+    if ($global:stagedState.calls.Contains('identity') -or -not $global:stagedState.calls.Contains('az vm deallocate --resource-group')) {
+        throw 'Failed bootstrap must stop later stages and deallocate the builder.'
+    }
+    $buildCount=@($global:stagedState.calls | Where-Object { $_ -eq 'az vm run-command invoke' }).Count
+    $global:stagedState.bootstrapFailed=$false
+    $resume=& $driver -EnvironmentName staged-test -SkipLogin -ApproveAll | ConvertFrom-Json
+    if ($resume.status -ne 'deployment_completed' -or @($global:stagedState.calls | Where-Object { $_ -eq 'az vm run-command invoke' }).Count -ne $buildCount) {
+        throw 'Resuming after bootstrap failure did not reuse the completed build.'
+    }
+    Reset-Rollout
+    $result=& $driver -EnvironmentName staged-test -SkipLogin -ApproveAll `
+        -TargetSubscriptionId 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' | ConvertFrom-Json
+    if ($result.assessedSubscriptions.Count -ne 2 -or $global:stagedState.assignments.Count -ne 8) {
+        throw 'The end-to-end entry point did not preserve the explicitly selected subscription scopes.'
+    }
+    Reset-Rollout
+    $global:stagedState.badBuild=$true
+    $global:stagedState.cleanupFailed=$true
+    Assert-Refused { & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll } 'does not match'
+    if ($global:stagedState.calls.Contains('az containerapp job start')) { throw 'Bad build must not run bootstrap.' }
+    Reset-Rollout
+    $global:stagedState.cleanupFailed=$true
+    Assert-Refused { & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll } 'cleanup failed'
     [ordered]@{
         result = 'passed'; liveNetworkCalls = 0; defaultIsPlanOnly = $true
         failedBootstrapBlocksRelease = $true; staleBuildAttestationRejected = $true
         stagesAreExplicit = $true; provisioningCallsStubbed = $global:stagedState.provisions
+        oneCommandCompletes = $true; checkpointResumeVerified = $true; failureCleanupVerified = $true
     } | ConvertTo-Json -Compress
 } finally {
     Remove-Item -LiteralPath $testRoot -Recurse -Force

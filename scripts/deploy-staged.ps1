@@ -1,7 +1,7 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('Initialize', 'Foundation', 'Build', 'Bootstrap', 'Identity', 'Permissions', 'Release', 'Verify', 'StopBuilder')]
+    [ValidateSet('All', 'Initialize', 'Foundation', 'Build', 'Bootstrap', 'Identity', 'Permissions', 'Release', 'Verify', 'StopBuilder')]
     [string] $Stage,
     [ValidatePattern('^[a-z0-9][a-z0-9-]{0,63}$')]
     [string] $EnvironmentName = 'meghkoshaai-scalable-dev',
@@ -16,6 +16,10 @@ param(
     [guid[]] $TargetSubscriptionId = @(),
     [string] $ServiceManagementReference = '',
     [switch] $AllowNativeExportTrustedServices,
+    [switch] $BlobDataProtection,
+    [switch] $IncludeLocalhostRedirects,
+    [switch] $SkipLogin,
+    [switch] $ApproveAll,
     [switch] $Apply,
     [switch] $PreviewOnly,
     [switch] $ApproveAzureChanges,
@@ -37,6 +41,8 @@ if (-not $Apply -or $WhatIfPreference) {
         location = $Location; privateRegistry = $true; privateDatabase = $true
         privateBuilder = @{ vmSize = $BuilderVmSize; publicVmIp = $false; inboundAccess = $false; outboundNat = $true }
         source = @{ repository = $Repository; commit = $SourceCommit }
+        stages = $(if ($Stage -eq 'All') { @('Initialize', 'Foundation', 'Build', 'Bootstrap', 'Identity', 'Permissions', 'Release', 'Verify', 'StopBuilder') } else { @($Stage) })
+        targets = $TargetSubscriptionId
         appliesChanges = $false
         nativeExportTrustedServicesException = [bool]$AllowNativeExportTrustedServices
         note = 'Plan only. No Azure calls. VM, disk, NAT, registry and database add cost; deallocation does not remove retained charges.'
@@ -141,9 +147,188 @@ function Check-Build {
     }
 }
 
+function Check-Source {
+    $head = (& git rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or (& git status --porcelain)) { throw 'Build only a reviewed clean checkout.' }
+    if ($head -notmatch '^[a-f0-9]{40}$' -or ($SourceCommit -and $SourceCommit -ne $head)) {
+        throw 'SourceCommit must equal the reviewed local HEAD.'
+    }
+    $repoPath = $Repository -replace '^https://github.com/', '' -replace '\.git$', ''
+    $metadata = Invoke-RestMethod "https://api.github.com/repos/$repoPath"
+    if ($metadata.private -or $metadata.visibility -ne 'public') { throw 'This builder accepts public source only; no GitHub credentials are copied.' }
+    $published = Invoke-RestMethod "https://api.github.com/repos/$repoPath/commits/$head"
+    if ($published.sha -ne $head) { throw 'The reviewed commit is not published in the selected public repository.' }
+    return $head
+}
+
+function Invoke-AllStages {
+    foreach ($tool in @('git', 'azd', 'az')) {
+        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "$tool is required." }
+    }
+    $commit = Check-Source
+    if (-not $SkipLogin) {
+        $nativeErrors = $PSNativeCommandUseErrorActionPreference
+        try {
+            $PSNativeCommandUseErrorActionPreference = $false
+            & azd auth login --check-status 2>$null | Out-Host
+            $needsAzdLogin = $LASTEXITCODE -ne 0
+            & az account show --output none --only-show-errors 2>$null
+            $needsAzLogin = $LASTEXITCODE -ne 0
+        } finally {
+            $PSNativeCommandUseErrorActionPreference = $nativeErrors
+        }
+        if ($needsAzdLogin) {
+            & azd auth login | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw 'AZD sign-in failed; no resources were provisioned.' }
+        }
+        if ($needsAzLogin) {
+            & az login --output none --only-show-errors | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw 'Azure CLI sign-in failed; no resources were provisioned.' }
+        }
+    }
+    $environments = @(Invoke-Json 'azd' @('env', 'list', '--output', 'json'))
+    $existing = @($environments | Where-Object { $_.Name -eq $EnvironmentName }).Count -gt 0
+    if ($existing) { Reload }
+    $selectedSubscription = $SubscriptionId
+    if (-not $selectedSubscription -and $existing) { $selectedSubscription = Value 'AZURE_SUBSCRIPTION_ID' -Required }
+    if (-not $selectedSubscription) { $selectedSubscription = (Read-Host 'Hosting subscription UUID').Trim() }
+    $parsed = [guid]::Empty
+    if (-not [guid]::TryParse($selectedSubscription, [ref]$parsed) -or $parsed -eq [guid]::Empty) {
+        throw 'A nonzero hosting subscription UUID is required.'
+    }
+    $script:subscription = $parsed.ToString()
+    if ($existing -and (Value 'AZURE_SUBSCRIPTION_ID' -Required) -ne $script:subscription) {
+        throw 'Environment belongs to another subscription.'
+    }
+    if ($existing -and (Value 'AZURE_LOCATION' -Required) -ne $Location) { throw 'Existing environment region differs from -Location.' }
+    $account = Azure @('account', 'show')
+    if ($account.state -ne 'Enabled') { throw 'The selected subscription is not enabled.' }
+    $targets = $TargetSubscriptionId
+    if (-not $targets.Count -and (Value 'APP_STAGED_TARGET_SUBSCRIPTIONS')) {
+        $targets = [guid[]]@((Value 'APP_STAGED_TARGET_SUBSCRIPTIONS') | ConvertFrom-Json)
+    }
+    if (-not $targets.Count) { $targets = [guid[]]@($script:subscription) }
+    $targets = [guid[]]@($targets | Select-Object -Unique)
+    if ($targets -contains [guid]::Empty) { throw 'Target subscription IDs must be nonzero.' }
+    $deployed = (Value 'APP_APPLICATIONS_DEPLOYED') -eq 'true'
+    if ($deployed -and (Value 'APP_STAGED_BUILD_COMMIT') -ne $commit) {
+        throw 'This environment already runs a different source commit. Review its image/schema update before using the individual stages; no automatic migration was started.'
+    }
+    Write-Host "`nEnd-to-end private deployment: $EnvironmentName"
+    Write-Host "Hosting subscription: $script:subscription; tenant: $($account.tenantId); region: $Location"
+    Write-Host "Assessed subscriptions: $($targets -join ', ')"
+    Write-Host "Source commit: $commit"
+    Write-Host 'Includes private ACR Premium, PostgreSQL, VM/disk/NAT costs, image publication, sign-in registration, and Reader/Cost Management Contributor grants.'
+    Write-Host "Blob trusted-service export exception: $($AllowNativeExportTrustedServices.IsPresent). No public ACR/PostgreSQL access or inbound VM access."
+    Write-Host 'The builder is deallocated on completion/failure; disk, NAT, registry and database charges remain.'
+    if (-not $ApproveAll -and (Read-Host 'Approve this complete rollout? Type YES').Trim() -cne 'YES') {
+        throw 'End-to-end rollout was not approved. No resource changes were started.'
+    }
+    $keyPath = $BuilderSshPublicKeyPath
+    if (-not $keyPath -and -not (Value 'APP_PRIVATE_BUILDER_SSH_PUBLIC_KEY')) {
+        if (-not (Get-Command ssh-keygen -ErrorAction SilentlyContinue)) { throw 'OpenSSH ssh-keygen is required to create the local builder key.' }
+        $keyDirectory = Join-Path $root '.azure\builder-keys'
+        if (-not (Test-Path -LiteralPath $keyDirectory)) { New-Item -ItemType Directory -Path $keyDirectory | Out-Null }
+        $privateKey = Join-Path $keyDirectory "meghkosha-builder-$EnvironmentName"
+        $keyPath = "$privateKey.pub"
+        if (-not (Test-Path -LiteralPath $keyPath)) {
+            if (Test-Path -LiteralPath $privateKey) { throw "Private key exists without its public key. Recover $keyPath; it will not be overwritten." }
+            & ssh-keygen -t ed25519 -N '' -f $privateKey | Out-Host
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $keyPath)) { throw 'Could not create the local builder SSH key.' }
+        }
+    }
+    $common = @{
+        EnvironmentName = $EnvironmentName; SubscriptionId = $script:subscription
+        Location = $Location; BuilderVmSize = $BuilderVmSize; BuilderSshPublicKeyPath = $keyPath
+        Repository = $Repository; SourceCommit = $commit; Apply = $true; ApproveAzureChanges = $true
+        Confirm = $false; AllowNativeExportTrustedServices = $AllowNativeExportTrustedServices
+        BlobDataProtection = $BlobDataProtection; IncludeLocalhostRedirects = $IncludeLocalhostRedirects
+    }
+    $runner = $PSCommandPath
+    function Run-Stage([string] $Name, [hashtable] $Extra = @{}) {
+        Write-Host "`n==> $Name" -ForegroundColor Cyan
+        $output = & $runner @common -Stage $Name @Extra
+        $result = $output -join "`n" | ConvertFrom-Json -AsHashtable
+        if ($result.status -ne 'stage_completed') { throw "Stage $Name did not confirm completion." }
+        Reload
+    }
+    $cleanup = $false
+    $deploymentError = $null
+    try {
+        Run-Stage 'Initialize'
+        $cleanup = $true
+        if ((Value 'APP_STAGED_FOUNDATION_READY') -eq 'true' -or $deployed) {
+            $null = Value 'APP_PRIVATE_BUILDER_VM_NAME' -Required
+            Check-Private
+            Write-Host 'Reusing the private foundation.'
+        } else {
+            Run-Stage 'Foundation' @{ ApproveCosts = $true }
+        }
+        if ((Value 'APP_STAGED_BUILD_COMMIT') -eq $commit -and (Value 'APP_STAGED_BUILD_REPOSITORY') -eq $Repository) {
+            Check-Build
+            Write-Host 'Reusing the attested images for this exact commit.'
+        } else {
+            Run-Stage 'Build' @{ ApproveImagePublication = $true }
+        }
+        if ((Value 'APP_ASSESSMENT_DB_BOOTSTRAPPED') -eq 'true' -and
+            (Value 'APP_STAGED_BOOTSTRAP_IMAGE') -eq (Value 'APP_STAGED_API_IMAGE')) {
+            Write-Host 'Reusing the verified database bootstrap for this image.'
+        } else {
+            Run-Stage 'Bootstrap' @{ ApproveDatabaseBootstrap = $true }
+        }
+        $treeId = $ServiceManagementReference
+        if (-not $treeId) { $treeId = Value 'APP_SERVICE_MANAGEMENT_REFERENCE' }
+        try {
+            Run-Stage 'Identity' @{ ApproveIdentityChanges = $true; ServiceManagementReference = $treeId }
+        } catch {
+            if ($treeId -or $_.Exception.Message -notmatch 'serviceManagementReference') { throw }
+            $treeId = (Read-Host 'This tenant requires a Service Tree UUID').Trim()
+            $treeGuid = [guid]::Empty
+            if (-not [guid]::TryParse($treeId, [ref]$treeGuid) -or $treeGuid -eq [guid]::Empty) { throw 'A valid Service Tree UUID is required.' }
+            Run-Stage 'Identity' @{ ApproveIdentityChanges = $true; ServiceManagementReference = $treeGuid.ToString() }
+        }
+        if ($treeId) { Save 'APP_SERVICE_MANAGEMENT_REFERENCE' $treeId }
+        Run-Stage 'Permissions' @{ ApproveRoleAssignments = $true; TargetSubscriptionId = $targets }
+        if ((Value 'APP_APPLICATIONS_DEPLOYED') -eq 'true' -and
+            (Value 'APP_STAGED_RELEASE_COMMIT') -eq $commit -and
+            (Value 'SERVICE_API_IMAGE_NAME') -eq (Value 'APP_STAGED_API_IMAGE') -and
+            (Value 'SERVICE_WEB_IMAGE_NAME') -eq (Value 'APP_STAGED_WEB_IMAGE') -and
+            (Value 'APP_STAGED_RELEASE_API_CLIENT_ID') -eq (Value 'MEGHKOSHA_API_CLIENT_ID') -and
+            (Value 'APP_STAGED_RELEASE_WEB_CLIENT_ID') -eq (Value 'MEGHKOSHA_WEB_CLIENT_ID')) {
+            Write-Host 'The same images and sign-in configuration are already released; verifying them.'
+        } else {
+            Run-Stage 'Release' @{ ApproveRelease = $true }
+        }
+        Run-Stage 'Verify'
+    } catch {
+        $deploymentError = $_
+        Write-Warning 'Rollout stopped. Completed checkpoints are retained; rerun the same command after resolving the reported failure.'
+        throw
+    } finally {
+        if ($cleanup) {
+            try {
+                Reload
+                if (Value 'APP_PRIVATE_BUILDER_VM_NAME') { Run-Stage 'StopBuilder' }
+                else { Write-Warning 'No builder name was returned. Inspect any partially provisioned VM for ongoing charges.' }
+            } catch {
+                Write-Warning "Builder deallocation failed: $($_.Exception.Message)"
+                if ($null -eq $deploymentError) { throw 'Applications were processed, but builder cleanup failed. Inspect/deallocate the builder before accepting the rollout.' }
+            }
+        }
+    }
+    return [ordered]@{
+        stage = 'All'; environment = $EnvironmentName; status = 'deployment_completed'
+        sourceCommit = $commit; webOrigin = (Value 'APP_WEB_ORIGIN' -Required)
+        builderDeallocated = $true; assessedSubscriptions = $targets
+        note = 'Sign in, complete native FOCUS exports, and validate a representative assessment. Live workload acceptance is not implied by readiness.'
+    }
+}
+
 Push-Location $root
 try {
-    if ($Stage -eq 'Initialize') {
+    if ($Stage -eq 'All') {
+        Invoke-AllStages | ConvertTo-Json -Depth 5
+    } elseif ($Stage -eq 'Initialize') {
         $id = [guid]::Empty
         if (-not [guid]::TryParse($SubscriptionId, [ref]$id) -or $id -eq [guid]::Empty) { throw 'Initialize requires a nonzero -SubscriptionId.' }
         $script:subscription = $id.ToString()
@@ -154,7 +339,7 @@ try {
             Reload
             if ((Value 'AZURE_SUBSCRIPTION_ID' -Required) -ne $script:subscription) { throw 'Environment belongs to another subscription.' }
         } else {
-            & azd env new $EnvironmentName --no-prompt | Out-Host
+            & azd env new $EnvironmentName --location $Location --subscription $script:subscription --no-prompt | Out-Host
             if ($LASTEXITCODE -ne 0) { throw 'Could not create the local AZD environment.' }
         }
         $defaults = [ordered]@{
@@ -176,6 +361,7 @@ try {
         }
         Check-Compute
         if ($AllowNativeExportTrustedServices) { Save 'APP_EXPORT_TRUSTED_SERVICES' 'true' }
+        if ($BlobDataProtection) { Save 'APP_BLOB_DATA_PROTECTION' 'true' }
     } else {
         Reload
         $script:subscription = Value 'AZURE_SUBSCRIPTION_ID' -Required
@@ -194,18 +380,11 @@ try {
                 Provision
                 if ($PreviewOnly) { break }
                 Check-Private
+                Save 'APP_STAGED_FOUNDATION_READY' 'true'
             }
             'Build' {
                 Check-Private
-                $head = (& git rev-parse HEAD).Trim()
-                if ($LASTEXITCODE -ne 0 -or (& git status --porcelain)) { throw 'Build only a reviewed clean checkout.' }
-                if (-not $SourceCommit) { $SourceCommit = $head }
-                if ($SourceCommit -ne $head) { throw 'SourceCommit must equal the reviewed local HEAD.' }
-                $repoPath = $Repository -replace '^https://github.com/', '' -replace '\.git$', ''
-                $metadata = Invoke-RestMethod "https://api.github.com/repos/$repoPath"
-                if ($metadata.private -or $metadata.visibility -ne 'public') { throw 'This builder accepts public source only; no GitHub credentials are copied.' }
-                $published = Invoke-RestMethod "https://api.github.com/repos/$repoPath/commits/$SourceCommit"
-                if ($published.sha -ne $SourceCommit) { throw 'The reviewed commit is not published in the selected public repository.' }
+                $SourceCommit = Check-Source
                 $vm = Value 'APP_PRIVATE_BUILDER_VM_NAME' -Required
                 $details = Azure @('vm', 'show', '--resource-group', $group, '--name', $vm, '--show-details')
                 if ($details.publicIps) { throw 'Builder VM must not have a public IP.' }
@@ -240,6 +419,7 @@ try {
                     }
                 }
                 Save 'APP_STAGED_BUILD_COMMIT' $SourceCommit
+                Save 'APP_STAGED_BUILD_REPOSITORY' $Repository
                 Save 'APP_STAGED_API_IMAGE' $result.apiImage
                 Save 'APP_STAGED_WEB_IMAGE' $result.webImage
                 Save 'SERVICE_ASSESSMENT_IMAGE_NAME' $result.apiImage
@@ -275,6 +455,8 @@ try {
                     Apply = $true
                 }
                 if ($ServiceManagementReference) { $arguments.ServiceManagementReference = $ServiceManagementReference }
+                $arguments.Confirm = $false
+                if ($IncludeLocalhostRedirects) { $arguments.IncludeLocalhostRedirects = $true }
                 $identity = & (Join-Path $PSScriptRoot 'bootstrap-identity.ps1') @arguments | ConvertFrom-Json -AsHashtable
                 Save 'MEGHKOSHA_API_CLIENT_ID' $identity.MEGHKOSHA_API_CLIENT_ID
                 Save 'MEGHKOSHA_WEB_CLIENT_ID' $identity.MEGHKOSHA_WEB_CLIENT_ID
@@ -312,13 +494,26 @@ try {
                 Save 'APP_ENABLE_PROCESSOR' 'true'
                 Save 'APP_ASSESSMENT_FOUNDATION_ONLY' 'false'
                 Provision
+                if (-not $PreviewOnly) {
+                    Save 'APP_STAGED_RELEASE_COMMIT' (Value 'APP_STAGED_BUILD_COMMIT')
+                    Save 'APP_STAGED_RELEASE_API_CLIENT_ID' (Value 'MEGHKOSHA_API_CLIENT_ID')
+                    Save 'APP_STAGED_RELEASE_WEB_CLIENT_ID' (Value 'MEGHKOSHA_WEB_CLIENT_ID')
+                }
             }
             'Verify' {
                 Check-Private
-                foreach ($name in @((Value 'SERVICE_API_RESOURCE_NAME' -Required), (Value 'SERVICE_ASSESSMENT_RESOURCE_NAME' -Required))) {
+                $expected = @{
+                    (Value 'SERVICE_API_RESOURCE_NAME' -Required) = (Value 'SERVICE_API_IMAGE_NAME' -Required)
+                    (Value 'SERVICE_WEB_RESOURCE_NAME' -Required) = (Value 'SERVICE_WEB_IMAGE_NAME' -Required)
+                    (Value 'SERVICE_ASSESSMENT_RESOURCE_NAME' -Required) = (Value 'SERVICE_ASSESSMENT_IMAGE_NAME' -Required)
+                }
+                foreach ($name in $expected.Keys) {
                     $app = Azure @('containerapp', 'show', '--resource-group', $group, '--name', $name)
                     if ($app.properties.provisioningState -ne 'Succeeded' -or $app.properties.runningStatus -ne 'Running') {
                         throw "Application $name is not provisioned/running."
+                    }
+                    if ($app.properties.template.containers[0].image -ne $expected[$name]) {
+                        throw "Application $name is not configured with the reviewed immutable image."
                     }
                 }
                 $origin = Value 'APP_WEB_ORIGIN' -Required
@@ -329,11 +524,11 @@ try {
             }
         }
     }
-    [ordered]@{
+    if ($Stage -ne 'All') { [ordered]@{
         stage = $Stage; environment = $EnvironmentName; status = $(if ($PreviewOnly) { 'preview_completed' } else { 'stage_completed' })
         webOrigin = (Value 'APP_WEB_ORIGIN')
         note = 'Only this stage ran. Sign-in, native exports and realistic private-network load/restart acceptance remain separate checks.'
-    } | ConvertTo-Json -Depth 4
+    } | ConvertTo-Json -Depth 4 }
 } finally {
     Pop-Location
 }

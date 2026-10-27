@@ -4,6 +4,11 @@
     the per-subscription role assignments - as a single self-contained script.
 
 .DESCRIPTION
+    PostgreSQL mode (the default) runs the private-builder workflow end to end with one
+    upfront approval. It handles sign-in, a local SSH key, private infrastructure and image
+    builds, database bootstrap, identity/permissions, release, verification and VM deallocation.
+    Explicit -AssessmentMode blob retains the legacy flow described below.
+
     This is the whole "Deploying to Azure" README flow in one file:
 
       1. Checks prerequisites and clones the repository (skipped when already run from a checkout).
@@ -100,6 +105,9 @@ param(
     [switch] $SkipModelAvailabilityCheck,
     [switch] $PrivateRegistry,
     [switch] $BlobDataProtection,
+    [string] $BuilderVmSize = 'Standard_D2s_v5',
+    [string] $BuilderSshPublicKeyPath = '',
+    [switch] $ApproveAll,
     [switch] $PlanOnly
 )
 
@@ -108,8 +116,36 @@ $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion -lt [version]'7.0') {
     throw 'PowerShell 7 or later is required. Run this script with `pwsh`, not Windows PowerShell 5.1.'
 }
-if (-not $PlanOnly -and $AssessmentMode -eq 'postgres') {
-    throw 'PostgreSQL/private-ACR rollout is staged. Use scripts/deploy-staged.ps1 and docs/manual-staged-deployment.md for the private build VM, or docs/manual-scalable-deployment.md for an existing private builder. No Azure action was performed. Use -AssessmentMode blob only for reviewed legacy compatibility.'
+if ($AssessmentMode -eq 'postgres') {
+    if ($SkipProcessor -or $SkipIdentityBootstrap -or $SkipRoleAssignments -or $SkipPreview -or $GrantAdminConsent) {
+        throw 'The private end-to-end rollout cannot skip its required stages or add administrator consent. Use docs/manual-staged-deployment.md for separately governed stages.'
+    }
+    $targetIds = [guid[]]@(
+        $TargetSubscriptionId | ForEach-Object { $_ -split ',' } |
+            ForEach-Object {
+                $id = [guid]::Empty
+                if (-not [guid]::TryParse($_.Trim(), [ref]$id) -or $id -eq [guid]::Empty) {
+                    throw "Invalid target subscription UUID: $_"
+                }
+                $id
+            } | Select-Object -Unique
+    )
+    $checkout = if ($RepoDirectory) { [IO.Path]::GetFullPath($RepoDirectory) } else { Split-Path $PSScriptRoot -Parent }
+    $runner = Join-Path $checkout 'scripts\deploy-staged.ps1'
+    if (-not (Test-Path -LiteralPath $runner)) {
+        throw 'Run this command from the feature/private-postgres-assessments checkout. The private rollout runner was not found; no Azure changes were started.'
+    }
+    $arguments = @{
+        Stage = 'All'; EnvironmentName = $EnvironmentName; SubscriptionId = $SubscriptionId
+        Location = $Location; Repository = $RepoUrl; TargetSubscriptionId = $targetIds
+        ServiceManagementReference = $ServiceManagementReference
+        BuilderVmSize = $BuilderVmSize; BuilderSshPublicKeyPath = $BuilderSshPublicKeyPath
+        SkipLogin = $SkipLogin; ApproveAll = $ApproveAll; IncludeLocalhostRedirects = $IncludeLocalhostRedirects
+        BlobDataProtection = $BlobDataProtection; AllowNativeExportTrustedServices = $true
+        Apply = (-not $PlanOnly); ApproveAzureChanges = (-not $PlanOnly); Confirm = $false
+    }
+    & $runner @arguments
+    return
 }
 
 $modelRouter = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]'

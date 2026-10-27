@@ -5,9 +5,10 @@ does not execute them. Review the cost, network, identity and policy changes fir
 No step enables public ACR access or uses registry/database passwords.
 
 If you do not already have private Docker/VPN connectivity, use the
-[staged script with a private build VM](manual-staged-deployment.md) instead.
-That script provisions the private builder/NAT explicitly and runs builds through
-Azure Run Command; it does not require opening inbound VM or registry access.
+[one-command script with a private build VM](manual-staged-deployment.md) instead:
+`scripts\deploy-end-to-end.ps1 -EnvironmentName meghkoshaai-scalable-dev -SubscriptionId '<uuid>'`.
+It provisions the builder/NAT and runs the stages automatically through Azure Run
+Command; it does not require opening inbound VM or registry access.
 
 The implementation branch is `feature/private-postgres-assessments`, based on `Dev`.
 Review the published branch and exact commit before using this guide. Provisioning,
@@ -20,8 +21,10 @@ operator-run steps. Do not commit `.azure`, `.env`, credentials, or sign-in stat
   Apps whereas this branch declares an ACA web service. **Do not run this guide against
   that environment as an implicit migration.** Use a separately approved parallel Dev
   environment, or resolve/review the existing migration first.
-- Do not use `deploy-end-to-end.ps1`, `deploy-ai.ps1`, `azd up`, or `azd deploy` for
-  this staged PostgreSQL rollout. This guide releases immutable images through Bicep.
+- This guide is the existing-private-builder/manual alternative. The default
+  `deploy-end-to-end.ps1` now orchestrates the private-VM rollout described in the
+  linked guide. Do not mix the two flows or call `deploy-ai.ps1`, `azd up` or
+  `azd deploy` for the PostgreSQL rollout. Both flows release immutable images through Bicep.
 - A public GitHub-hosted runner or ordinary public Cloud Shell is not a private build
   host. Do not temporarily enable registry public access to work around connectivity.
 - If policy, permissions, regional quota, SKU availability, private DNS or bootstrap

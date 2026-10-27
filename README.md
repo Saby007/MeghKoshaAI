@@ -89,7 +89,15 @@ Each profile is a superset of the previous one. Application containers only depl
 **Operator-run deployment:** use the
 [private-ACR/private-PostgreSQL manual rollout](docs/manual-scalable-deployment.md).
 For Central India without an existing private Docker host, use
-[the explicit staged script with a private build VM](docs/manual-staged-deployment.md).
+[the one-command end-to-end script with a private build VM](docs/manual-staged-deployment.md):
+
+```powershell
+.\scripts\deploy-end-to-end.ps1 -EnvironmentName meghkoshaai-scalable-dev -SubscriptionId '<hosting-subscription-uuid>'
+```
+
+It handles sign-in, one upfront scope/cost approval, local builder-key creation,
+private provisioning/build/bootstrap, identity/grants, release, verification and
+builder deallocation. Individual stage commands are optional, not required.
 The assistant does not execute provisioning, deployment, bootstrap, permission
 changes or workflow runs. Review the published feature branch and exact commit
 before following the operator-run rollout.
@@ -299,10 +307,11 @@ az provider show --namespace Microsoft.CostManagementExports --subscription <sub
 
 ## Deploying to Azure
 
-**New PostgreSQL deployments require private ACR and the staged
-[manual rollout guide](docs/manual-scalable-deployment.md).** Do not run `azd up`
-or the legacy one-command helpers for that path. The sections below describe the
-Blob compatibility workflow; its helpers require explicit `-AssessmentMode blob`.
+**New PostgreSQL deployments use private ACR and the
+[one-command private-builder rollout](docs/manual-staged-deployment.md).**
+The default `deploy-end-to-end.ps1` runs its stages automatically. Do not call
+`azd up` or `azd deploy` directly. The sections below describe the separate Blob
+compatibility workflow, selected explicitly with `-AssessmentMode blob`.
 
 There are three ways to deploy: one command that does the whole thing, the step-by-step Azure Developer CLI workflow, or a portal-button path (ARM/Bicep templates can only reference already-built container images — they cannot build code from a repository by themselves).
 

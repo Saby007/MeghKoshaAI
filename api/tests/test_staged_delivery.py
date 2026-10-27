@@ -21,6 +21,9 @@ def test_staged_rollout_has_offline_approval_and_attestation_regressions():
     assert proof["liveNetworkCalls"] == 0
     assert proof["failedBootstrapBlocksRelease"]
     assert proof["staleBuildAttestationRejected"]
+    assert proof["oneCommandCompletes"]
+    assert proof["checkpointResumeVerified"]
+    assert proof["failureCleanupVerified"]
 
 
 def test_private_builder_shell_syntax():

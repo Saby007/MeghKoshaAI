@@ -1,12 +1,69 @@
-# Operator-run stages with a private build VM
+# One-command deployment with a private build VM
 
 Use the published `feature/private-postgres-assessments` branch. This path prepares
 private ACR, private PostgreSQL and a private build VM in Central India, then builds
-images through the VM's managed identity. **You run every stage.** Nothing in this
-guide authorizes an assistant-run deployment.
+images through the VM's managed identity. **You run one command; the script runs
+the stages in order.** Nothing in this guide authorizes an assistant-run deployment.
 
-The old end-to-end/AI helpers intentionally refuse PostgreSQL mode. Use
-`scripts\deploy-staged.ps1`, not `azd up` or `azd deploy`.
+## Recommended: run the existing end-to-end entry point
+
+From the reviewed feature-branch checkout, use PowerShell 7.4+:
+
+```powershell
+git pull --ff-only
+.\scripts\deploy-end-to-end.ps1 `
+    -EnvironmentName meghkoshaai-scalable-dev `
+    -SubscriptionId '<hosting-subscription-uuid>' `
+    -Location centralindia
+```
+
+Replace the subscription placeholder. If omitted, the script asks for it (or uses
+the selected environment's existing subscription). By default it grants access to
+that hosting subscription only. To assess other approved subscriptions, add
+`-TargetSubscriptionId '<subscription-a>,<subscription-b>'`.
+
+The script handles:
+
+1. Existing Azure/AZD sign-in or an interactive sign-in when required.
+2. One approval showing the hosting scope, target subscriptions, private
+   infrastructure/NAT costs, image publication, app registrations and role grants.
+3. A dedicated local SSH key under ignored `.azure\builder-keys` when needed.
+4. Private foundation and builder VM provisioning, then private image build/push.
+5. Database bootstrap, sign-in registration, target grants, immutable-image release
+   and verification of the deployed images and readiness.
+6. Builder VM deallocation after success or failure.
+
+The default PostgreSQL flow includes Blob Storage's trusted-service ingress exception
+for native exports, as the legacy end-to-end flow did. It keeps Storage default-deny;
+ACR and PostgreSQL public access stay disabled. This exception is displayed in the
+upfront approval. If that exception is not approved by your policy, use the individual
+stages with your separately approved native-export configuration; do not bypass policy.
+
+No separate SSH, login, build, bootstrap or release commands are required for a normal
+run. A tenant-mandated Service Tree ID is requested only if needed; you can supply
+`-ServiceManagementReference '<uuid>'` upfront. `-SkipLogin` reuses existing verified
+sign-in. For a reviewed unattended run, `-ApproveAll` supplies the upfront approval
+explicitly; without it the script requires you to type `YES`.
+
+Use the same command after resolving a failure. Verified foundation, exact-commit
+images and successful bootstrap are reused; the same completed release is reverified.
+The script never proceeds past a failed stage. Cleanup errors are reported explicitly.
+It does not automatically migrate an already released environment to a different
+source/schema commit; review that update through individual stages instead.
+
+To see the complete plan without sign-in, Azure calls or resource changes:
+
+```powershell
+.\scripts\deploy-end-to-end.ps1 `
+    -EnvironmentName meghkoshaai-scalable-dev `
+    -SubscriptionId '<hosting-subscription-uuid>' `
+    -PlanOnly
+```
+
+The default uses the private builder stages internally, not `azd up` or `azd deploy`.
+`-AssessmentMode blob` retains the separate legacy compatibility workflow. No
+unsupported skip-stage or administrator-consent flags are silently accepted in
+the PostgreSQL end-to-end flow.
 
 ## Requirements, cost and boundaries
 
@@ -16,7 +73,8 @@ The old end-to-end/AI helpers intentionally refuse PostgreSQL mode. Use
   The existing `meghkoshaai-dev` layout hold is not bypassed.
 - Hosting permissions to create resources/assign scoped roles and run Azure VM
   commands. Entra app registration and target-subscription grants require their
-  own permissions and explicit stage approvals. No client secrets are created.
+  own permissions. The one-command upfront approval covers all displayed stages;
+  individual-stage execution retains separate approval switches. No client secrets are created.
 - The private builder defaults to `Standard_D2s_v5`, pinned regional Ubuntu 24.04,
   a 128-GB disk, Trusted Launch and SSH-key-only authentication. It has **no public
   IP and no inbound access**. Management uses Azure Run Command, not SSH.
@@ -35,6 +93,11 @@ The old end-to-end/AI helpers intentionally refuse PostgreSQL mode. Use
   Availability was not checked against a live subscription during code preparation.
   PostgreSQL/ACA quota, policy, identity, network and live workload acceptance
   remain deployment-time checks. Local tests do not guarantee Azure success.
+
+## Advanced: individual stages
+
+The remaining commands are optional controls for debugging or separately governed
+changes. They are **not required** when using the end-to-end command above.
 
 ## 1. Clone the feature branch and sign in
 
@@ -70,7 +133,7 @@ the script does not use it to connect to the builder.
 
 ## 2. Review the plan; initialize the local environment
 
-Without `-Apply`, every stage is **plan-only** and makes no Azure calls:
+For the advanced stage runner, without `-Apply` every stage is **plan-only** and makes no Azure calls:
 
 ```powershell
 $EnvName = 'meghkoshaai-scalable-dev'

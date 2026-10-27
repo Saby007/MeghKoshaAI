@@ -169,7 +169,7 @@ def test_dashboard_reads_keep_capacity_while_work_admission_is_occupied(monkeypa
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("script", ["deploy-ai.ps1", "deploy-end-to-end.ps1"])
+@pytest.mark.parametrize("script", ["deploy-ai.ps1"])
 def test_legacy_helpers_refuse_default_postgres_rollout_before_any_azure_command(script):
     shell = shutil.which("pwsh")
     if not shell:
@@ -181,6 +181,26 @@ def test_legacy_helpers_refuse_default_postgres_rollout_before_any_azure_command
     )
     assert result.returncode != 0
     assert "manual-scalable-deployment.md" in result.stderr
+
+
+def test_default_end_to_end_command_plans_every_private_stage_without_cloud_execution():
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("PowerShell is required")
+    root = Path(__file__).parents[2]
+    result = subprocess.run(
+        [shell, "-NoProfile", "-File", str(root / "scripts" / "deploy-end-to-end.ps1"),
+         "-EnvironmentName", "offline-only", "-PlanOnly"],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    assert plan["stage"] == "All"
+    assert plan["privateRegistry"] and plan["privateDatabase"]
+    assert not plan["appliesChanges"]
+    assert plan["stages"] == [
+        "Initialize", "Foundation", "Build", "Bootstrap", "Identity", "Permissions", "Release", "Verify", "StopBuilder",
+    ]
 
 
 def test_manual_runbook_powershell_blocks_parse_without_executing_them(tmp_path):
