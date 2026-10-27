@@ -90,6 +90,11 @@ param privateRegistry bool = false
 @description('PostgreSQL deployments always require private ACR. Use a private Docker build host, or opt into a managed pool only in a supported region.')
 @allowed(['private-runner', 'managed-pool'])
 param registryBuildMode string = assessmentMode == 'postgres' ? 'private-runner' : 'managed-pool'
+@description('Optional operator-controlled private Docker VM with NAT egress. Adds VM/disk/NAT cost; no public VM IP or inbound access.')
+param enablePrivateBuilder bool = false
+param privateBuilderVmSize string = 'Standard_D2s_v5'
+param privateBuilderSshPublicKey string = ''
+param privateBuilderImageVersion string = ''
 @description('Policy-restricted subscriptions: enable blob versioning and blob/container soft delete on the export storage account.')
 param blobDataProtection bool = false
 @minValue(1)
@@ -161,6 +166,22 @@ module core './modules/core.bicep' = {
     logRetentionDays: logRetentionDays
     privateRegistry: privateRegistryEnabled
     registryBuildMode: registryBuildMode
+    enablePrivateBuilder: enablePrivateBuilder
+  }
+}
+
+module privateBuilder './modules/private-builder.bicep' = if (enablePrivateBuilder && privateRegistryEnabled && registryBuildMode == 'private-runner') {
+  name: 'app-private-builder'
+  scope: group
+  params: {
+    resourceToken: resourceToken
+    location: location
+    tags: tags
+    subnetId: core.outputs.buildAgentSubnetId
+    registryName: core.outputs.registryName
+    vmSize: privateBuilderVmSize
+    sshPublicKey: privateBuilderSshPublicKey
+    imageVersion: privateBuilderImageVersion
   }
 }
 
@@ -382,6 +403,8 @@ output AZURE_CONTAINER_REGISTRY_NAME string = core.outputs.registryName
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = core.outputs.registryServer
 output APP_PRIVATE_REGISTRY bool = privateRegistryEnabled
 output APP_REGISTRY_BUILD_MODE string = registryBuildMode
+output APP_PRIVATE_BUILDER_VM_NAME string = enablePrivateBuilder && privateRegistryEnabled && registryBuildMode == 'private-runner' ? privateBuilder!.outputs.vmName : ''
+output APP_PRIVATE_BUILDER_CLIENT_ID string = enablePrivateBuilder && privateRegistryEnabled && registryBuildMode == 'private-runner' ? privateBuilder!.outputs.identityClientId : ''
 output APP_BUILD_AGENT_SUBNET_ID string = core.outputs.buildAgentSubnetId
 output APP_BUILD_AGENT_POOL string = core.outputs.buildAgentPoolName
 output AZURE_CONTAINER_APPS_ENVIRONMENT_ID string = core.outputs.environmentId

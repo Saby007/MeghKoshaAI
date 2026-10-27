@@ -15,6 +15,7 @@ param logRetentionDays int = 30
 param privateRegistry bool = false
 @allowed(['private-runner', 'managed-pool'])
 param registryBuildMode string = 'managed-pool'
+param enablePrivateBuilder bool = false
 @allowed(['S1', 'S2', 'S3'])
 @description('Build agent size. S1 is 2 CPU/3 GB, S2 is 4 CPU/8 GB, S3 is 8 CPU/16 GB.')
 param buildAgentTier string = 'S2'
@@ -49,9 +50,51 @@ var buildAgentSubnets = [
     name: 'build-agents'
     properties: {
       addressPrefix: buildAgentSubnetPrefix
+      ...(enablePrivateBuilder ? {
+        defaultOutboundAccess: false
+        natGateway: { id: builderNat!.id }
+        networkSecurityGroup: { id: builderNsg!.id }
+      } : {})
     }
   }
 ]
+
+resource builderIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = if (enablePrivateBuilder) {
+  name: 'pip-builder-egress-${resourceToken}'
+  location: location
+  tags: tags
+  sku: { name: 'Standard' }
+  properties: { publicIPAllocationMethod: 'Static' }
+}
+
+resource builderNat 'Microsoft.Network/natGateways@2024-05-01' = if (enablePrivateBuilder) {
+  name: 'nat-builder-${resourceToken}'
+  location: location
+  tags: tags
+  sku: { name: 'Standard' }
+  properties: { idleTimeoutInMinutes: 10, publicIpAddresses: [{ id: builderIp!.id }] }
+}
+
+resource builderNsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = if (enablePrivateBuilder) {
+  name: 'nsg-builder-${resourceToken}'
+  location: location
+  tags: tags
+  properties: {
+    securityRules: [{
+      name: 'deny-inbound'
+      properties: {
+        priority: 100
+        direction: 'Inbound'
+        access: 'Deny'
+        protocol: '*'
+        sourcePortRange: '*'
+        destinationPortRange: '*'
+        sourceAddressPrefix: '*'
+        destinationAddressPrefix: '*'
+      }
+    }]
+  }
+}
 
 resource network 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: 'vnet-${resourceToken}'

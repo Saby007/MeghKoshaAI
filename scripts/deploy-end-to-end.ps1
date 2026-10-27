@@ -109,7 +109,7 @@ if ($PSVersionTable.PSVersion -lt [version]'7.0') {
     throw 'PowerShell 7 or later is required. Run this script with `pwsh`, not Windows PowerShell 5.1.'
 }
 if (-not $PlanOnly -and $AssessmentMode -eq 'postgres') {
-    throw 'PostgreSQL/private-ACR rollout is manual and staged. Follow docs/manual-scalable-deployment.md. No Azure action was performed. Use -AssessmentMode blob only for an explicitly reviewed legacy compatibility deployment.'
+    throw 'PostgreSQL/private-ACR rollout is staged. Use scripts/deploy-staged.ps1 and docs/manual-staged-deployment.md for the private build VM, or docs/manual-scalable-deployment.md for an existing private builder. No Azure action was performed. Use -AssessmentMode blob only for reviewed legacy compatibility.'
 }
 
 $modelRouter = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]'

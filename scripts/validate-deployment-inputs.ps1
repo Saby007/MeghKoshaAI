@@ -79,6 +79,16 @@ if ($assessmentMode -eq 'postgres' -and -not $privateRegistry) {
 }
 $buildMode = Get-Setting 'APP_REGISTRY_BUILD_MODE' $(if ($assessmentMode -eq 'postgres') { 'private-runner' } else { 'managed-pool' })
 if ($buildMode -cnotin @('private-runner', 'managed-pool')) { throw 'APP_REGISTRY_BUILD_MODE must be private-runner or managed-pool.' }
+$privateBuilder = Get-BooleanSetting 'APP_ENABLE_PRIVATE_BUILDER'
+if ($privateBuilder) {
+    if (-not $privateRegistry -or $buildMode -ne 'private-runner') { throw 'Private builder requires private ACR and private-runner mode.' }
+    if ((Get-Setting 'APP_PRIVATE_BUILDER_SSH_PUBLIC_KEY') -cnotmatch '^(ssh-ed25519|ssh-rsa) [A-Za-z0-9+/=]+(?: [^\r\n]+)?$') {
+        throw 'Private builder requires an OpenSSH public key, not password or private-key credentials.'
+    }
+    if ((Get-Setting 'APP_PRIVATE_BUILDER_IMAGE_VERSION') -cnotmatch '^\d+\.\d+\.\d+$') {
+        throw 'Resolve and pin the private builder Ubuntu image version before provisioning.'
+    }
+}
 $assessmentFoundationOnly = Get-BooleanSetting 'APP_ASSESSMENT_FOUNDATION_ONLY'
 if ($assessmentFoundationOnly -and $assessmentMode -ne 'postgres') {
     throw 'The assessment foundation/bootstrap stage requires PostgreSQL mode.'

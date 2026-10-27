@@ -88,6 +88,8 @@ Each profile is a superset of the previous one. Application containers only depl
 
 **Operator-run deployment:** use the
 [private-ACR/private-PostgreSQL manual rollout](docs/manual-scalable-deployment.md).
+For Central India without an existing private Docker host, use
+[the explicit staged script with a private build VM](docs/manual-staged-deployment.md).
 The assistant does not execute provisioning, deployment, bootstrap, permission
 changes or workflow runs. Review the published feature branch and exact commit
 before following the operator-run rollout.

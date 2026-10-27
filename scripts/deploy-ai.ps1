@@ -15,7 +15,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if (-not $PlanOnly -and $AssessmentMode -eq 'postgres') {
-    throw 'PostgreSQL/private-ACR rollout must follow docs/manual-scalable-deployment.md. This legacy helper will not execute it. Use -AssessmentMode blob only for an explicitly reviewed compatibility deployment.'
+    throw 'PostgreSQL/private-ACR rollout must use scripts/deploy-staged.ps1 (docs/manual-staged-deployment.md) or docs/manual-scalable-deployment.md. This legacy helper will not execute it. Use -AssessmentMode blob only for reviewed compatibility.'
 }
 
 $modelRouter = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]'

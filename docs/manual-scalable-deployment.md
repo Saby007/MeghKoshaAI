@@ -4,6 +4,11 @@ These are **operator-run steps**, not an automatic deployment workflow. The assi
 does not execute them. Review the cost, network, identity and policy changes first.
 No step enables public ACR access or uses registry/database passwords.
 
+If you do not already have private Docker/VPN connectivity, use the
+[staged script with a private build VM](manual-staged-deployment.md) instead.
+That script provisions the private builder/NAT explicitly and runs builds through
+Azure Run Command; it does not require opening inbound VM or registry access.
+
 The implementation branch is `feature/private-postgres-assessments`, based on `Dev`.
 Review the published branch and exact commit before using this guide. Provisioning,
 image publication, database bootstrap, permissions and application release remain

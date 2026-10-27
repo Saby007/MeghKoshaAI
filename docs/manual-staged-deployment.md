@@ -1,0 +1,207 @@
+# Operator-run stages with a private build VM
+
+Use the published `feature/private-postgres-assessments` branch. This path prepares
+private ACR, private PostgreSQL and a private build VM in Central India, then builds
+images through the VM's managed identity. **You run every stage.** Nothing in this
+guide authorizes an assistant-run deployment.
+
+The old end-to-end/AI helpers intentionally refuse PostgreSQL mode. Use
+`scripts\deploy-staged.ps1`, not `azd up` or `azd deploy`.
+
+## Requirements, cost and boundaries
+
+- PowerShell 7.4+, Git, Azure CLI with Container Apps support, AZD 1.35+, and an
+  OpenSSH public key. No Docker or VPN is needed on your management laptop.
+- An approved **new parallel** environment, default `meghkoshaai-scalable-dev`.
+  The existing `meghkoshaai-dev` layout hold is not bypassed.
+- Hosting permissions to create resources/assign scoped roles and run Azure VM
+  commands. Entra app registration and target-subscription grants require their
+  own permissions and explicit stage approvals. No client secrets are created.
+- The private builder defaults to `Standard_D2s_v5`, pinned regional Ubuntu 24.04,
+  a 128-GB disk, Trusted Launch and SSH-key-only authentication. It has **no public
+  IP and no inbound access**. Management uses Azure Run Command, not SSH.
+- A dedicated builder-subnet NAT gateway/public egress IP provides explicit outbound
+  connectivity to GitHub, signed package feeds and pinned base-image registries.
+  The public IP belongs to **NAT**, not the VM; it does not expose inbound access.
+  The NAT gateway, public IP, disk, ACR Premium, PostgreSQL and private endpoints
+  all add ongoing cost. `StopBuilder` deallocates VM compute only.
+- Azure Policy must permit this reviewed topology. If public NAT egress is not
+  permitted, use an approved existing private build host/firewall path instead;
+  see [the existing-builder guide](manual-scalable-deployment.md).
+- Source must be a **public** GitHub repository and an exact published commit.
+  The script never copies your GitHub tokens, Azure CLI cache or Docker login state
+  to the VM. Do not use the builder for untrusted PRs or arbitrary source.
+- VM SKU/image/quota checks run in **your selected subscription** before provisioning.
+  Availability was not checked against a live subscription during code preparation.
+  PostgreSQL/ACA quota, policy, identity, network and live workload acceptance
+  remain deployment-time checks. Local tests do not guarantee Azure success.
+
+## 1. Clone the feature branch and sign in
+
+Run these commands in PowerShell. Enter your own tenant and subscription UUIDs:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+git clone --branch feature/private-postgres-assessments --single-branch https://github.com/Saby007/MeghKoshaAI.git MeghKoshaAI-scalable-dev
+Set-Location .\MeghKoshaAI-scalable-dev
+git branch --show-current
+git rev-parse HEAD
+
+$TenantId = Read-Host 'Hosting tenant UUID'
+$SubscriptionId = Read-Host 'Hosting subscription UUID'
+az login --tenant $TenantId
+azd auth login
+az account show --subscription $SubscriptionId --query '{subscription:id,tenant:tenantId,name:name}' --output table
+```
+
+Use an existing OpenSSH **public** `.pub` file. If you need a dedicated key:
+
+```powershell
+$Key = Join-Path $HOME '.ssh\meghkosha-builder'
+if (Test-Path -LiteralPath $Key) { throw 'Key already exists. Use the existing .pub file; do not overwrite it.' }
+New-Item -ItemType Directory -Force -Path (Split-Path $Key -Parent) | Out-Null
+ssh-keygen -t ed25519 -N '' -f $Key
+$PublicKey = "$Key.pub"
+```
+
+Only the public key enters the VM template. The private key remains on your machine;
+the script does not use it to connect to the builder.
+
+## 2. Review the plan; initialize the local environment
+
+Without `-Apply`, every stage is **plan-only** and makes no Azure calls:
+
+```powershell
+$EnvName = 'meghkoshaai-scalable-dev'
+.\scripts\deploy-staged.ps1 -Stage Foundation -EnvironmentName $EnvName
+```
+
+Initialize checks the selected subscription and regional VM SKU/image/quota, then
+stores local AZD settings. It does not provision resources:
+
+```powershell
+.\scripts\deploy-staged.ps1 -Stage Initialize -EnvironmentName $EnvName `
+    -SubscriptionId $SubscriptionId -Location centralindia `
+    -BuilderSshPublicKeyPath $PublicKey -Apply -ApproveAzureChanges
+```
+
+If native FOCUS exports require the trusted-service ingress exception on Blob
+Storage, review that separate policy/network change and pass
+`-AllowNativeExportTrustedServices` to **Initialize**, or set
+`APP_EXPORT_TRUSTED_SERVICES=true` explicitly before Foundation. This leaves storage
+default-deny with the trusted-service bypass; it never enables public ACR or
+PostgreSQL access. Do not bypass an organizational policy denial.
+
+## 3. Provision the private foundation and builder
+
+First run the real Azure preview without provisioning:
+
+```powershell
+.\scripts\deploy-staged.ps1 -Stage Foundation -EnvironmentName $EnvName `
+    -Apply -ApproveAzureChanges -PreviewOnly
+```
+
+Review that output and costs. The approved stage repeats the preview and then
+provisions only because you explicitly pass the cost/change approvals:
+
+```powershell
+.\scripts\deploy-staged.ps1 -Stage Foundation -EnvironmentName $EnvName `
+    -Apply -ApproveAzureChanges -ApproveCosts
+```
+
+Use `-PreviewOnly` for a separate approval window. The
+`-Apply` invocation executes the preview and then the approved stage; it is not
+a dry run. Application images remain unset, so no application release occurs here.
+
+## 4. Build and push private images
+
+Start from the reviewed clean Git checkout. This invokes Azure Run Command on the
+private builder, installs signed packages, logs in with the builder MI, fetches the
+exact public Git commit, builds Linux/amd64 API/web images, and pushes through ACR's
+private endpoint:
+
+```powershell
+.\scripts\deploy-staged.ps1 -Stage Build -EnvironmentName $EnvName `
+    -Apply -ApproveAzureChanges -ApproveImagePublication
+```
+
+The script requires a nonce/commit/registry/digest attestation from this execution.
+Missing or mismatched output is a failure, never an assumed successful build.
+Build output is limited by Azure Run Command; failures report a bounded log tail.
+An interrupted/timeout build must be inspected before retrying; Run Command supports
+only one concurrent invocation per VM and a maximum 90-minute execution.
+
+## 5. Bootstrap the private database
+
+This stage provisions the **manual** bootstrap job with the reviewed API digest,
+runs it inside ACA, and waits for that exact execution to succeed:
+
+```powershell
+.\scripts\deploy-staged.ps1 -Stage Bootstrap -EnvironmentName $EnvName `
+    -Apply -ApproveAzureChanges -ApproveDatabaseBootstrap
+```
+
+The bootstrap administrator identity is never attached to the API/worker. SQL schema,
+indexes, extension allowlist and non-admin runtime grants must succeed before release.
+No database public firewall exception is required.
+
+## 6. Configure sign-in and subscription grants
+
+This calls the existing reviewed identity helper. Add
+`-ServiceManagementReference '<service-tree-uuid>'` if your tenant requires it:
+
+```powershell
+.\scripts\deploy-staged.ps1 -Stage Identity -EnvironmentName $EnvName `
+    -Apply -ApproveAzureChanges -ApproveIdentityChanges
+
+$Targets = (Read-Host 'Approved assessed subscription UUIDs, comma-separated').Split(',') |
+    ForEach-Object { [guid]$_.Trim() }
+.\scripts\deploy-staged.ps1 -Stage Permissions -EnvironmentName $EnvName `
+    -TargetSubscriptionId $Targets -Apply -ApproveAzureChanges -ApproveRoleAssignments
+```
+
+The shared assessment/export worker and API receive Reader and Cost Management
+Contributor on those explicitly selected targets. Review those scopes before
+running. The script cannot grant permissions your operator identity does not hold.
+Allow RBAC propagation; app sign-in/consent policies still apply.
+
+## 7. Release and verify
+
+Release refuses unverified bootstrap, mismatched image digests, absent sign-in
+registrations, or missing target-subscription attestation:
+
+```powershell
+.\scripts\deploy-staged.ps1 -Stage Release -EnvironmentName $EnvName `
+    -Apply -ApproveAzureChanges -PreviewOnly
+# Review the preview before running the approved release.
+.\scripts\deploy-staged.ps1 -Stage Release -EnvironmentName $EnvName `
+    -Apply -ApproveAzureChanges -ApproveRelease
+
+.\scripts\deploy-staged.ps1 -Stage Verify -EnvironmentName $EnvName `
+    -Apply -ApproveAzureChanges
+```
+
+Release uses the existing Bicep provisioning flow with immutable API/web/worker
+digests; it does **not** call `azd deploy`, enable public ACR, or substitute a
+placeholder image. Verify checks provisioned/running apps and health/readiness.
+
+Sign in at the printed web origin, configure/complete native FOCUS exports, queue
+one assessment and verify the exact authorized report scope. Run the representative
+retained-history/concurrent-read and restart checks from the
+[manual rollout guide](manual-scalable-deployment.md#9-verify-before-accepting-the-release).
+These user-level/load checks are not replaced by a healthy readiness endpoint.
+
+## 8. Deallocate the builder
+
+After image publication/release verification:
+
+```powershell
+.\scripts\deploy-staged.ps1 -Stage StopBuilder -EnvironmentName $EnvName `
+    -Apply -ApproveAzureChanges
+```
+
+This stops VM compute billing, **not** disk/NAT/public IP/registry/database charges.
+No resource is automatically deleted. A later Build explicitly starts the VM again.
+Review all compatible image digests and schema changes before any rollback; do not
+automatically switch an existing PostgreSQL deployment to Blob mode.
