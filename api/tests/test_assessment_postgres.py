@@ -90,6 +90,19 @@ def test_real_postgres_queue_fencing_pagination_and_concurrent_summary_reads(mon
             stored = await assessment_store.get_job(TENANT, job["job_id"])
             assert stored["status"] == "succeeded"
             view = await assessment_store.snapshot_view(TENANT, snapshot_id=snapshot.snapshot_id)
+            assert view["chatAvailable"]
+            evidence = await assessment_store.chat_evidence(TENANT, snapshot.snapshot_id, [SUB])
+            assert len(evidence.cost_hierarchy) == 25
+            assert evidence.completeness.complete
+            assert await assessment_store.chat_evidence("other-tenant", snapshot.snapshot_id, [SUB]) is None
+            assert await assessment_store.chat_evidence(TENANT, snapshot.snapshot_id, ["other-subscription"]) is None
+            monkeypatch.setenv("FOUNDRY_CHAT_ENABLED", "false")
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
+                response = await client.post("/api/chat", json={
+                    "snapshotId": snapshot.snapshot_id, "question": "List top 5 resources by cost.",
+                })
+                assert response.status_code == 200
+                assert len(response.json()["resources"]) == 5
             assert view["report"]["executiveSummary"]["currentMonthlySpend"] == 15000
             assert view["report"]["costHierarchy"] == []
             assert {"path": "costHierarchy", "total": 15000} in view["collections"]

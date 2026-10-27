@@ -7,6 +7,7 @@ param(
     [string] $EnvironmentName = 'meghkoshaai-scalable-dev',
     [string] $SubscriptionId = '',
     [string] $Location = 'centralindia',
+    [string] $FoundryLocation = 'eastus2',
     [string] $BuilderVmSize = 'Standard_D2s_v5',
     [string] $BuilderSshPublicKeyPath = '',
     [ValidatePattern('^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git$')]
@@ -39,6 +40,7 @@ if (-not $Apply -or $WhatIfPreference) {
     [ordered]@{
         stage = $Stage; environment = $EnvironmentName; subscription = $SubscriptionId
         location = $Location; privateRegistry = $true; privateDatabase = $true
+        ai = @{ enabled = $true; foundryLocation = $FoundryLocation; model = 'model-router'; hostedNarratorEnabled = $false }
         privateBuilder = @{ vmSize = $BuilderVmSize; publicVmIp = $false; inboundAccess = $false; outboundNat = $true }
         source = @{ repository = $Repository; commit = $SourceCommit }
         stages = $(if ($Stage -eq 'All') { @('Initialize', 'Foundation', 'Build', 'Bootstrap', 'Identity', 'Permissions', 'Release', 'Verify', 'StopBuilder') } else { @($Stage) })
@@ -109,6 +111,24 @@ function Check-Compute {
     if (-not $image.name -or $image.name -notmatch '^\d+\.\d+\.\d+$') { throw 'Ubuntu image version could not be resolved.' }
     Save 'APP_PRIVATE_BUILDER_IMAGE_VERSION' $image.name
 }
+function Chat-Configuration {
+    return "$(Value 'FOUNDRY_LOCATION' -Required)|$(Value 'APP_MODEL_DEPLOYMENTS' -Required)|$(Value 'MODEL_ROUTER_DEPLOYMENT_NAME' -Required)"
+}
+function Check-Foundry {
+    $region = Value 'FOUNDRY_LOCATION' -Required
+    $models = @(ConvertFrom-Json -InputObject (Value 'APP_MODEL_DEPLOYMENTS' -Required))
+    if (-not $models.Count) { throw 'The AI deployment requires its approved Model Router configuration.' }
+    $catalog = @(Azure @('cognitiveservices', 'model', 'list', '--location', $region))
+    foreach ($model in $models) {
+        $offered = @($catalog | Where-Object {
+            $_.model.name -eq $model.modelName -and $_.model.format -eq $model.modelFormat -and
+            $_.model.version -eq $model.modelVersion -and @($_.model.skus | Where-Object { $_.name -eq $model.sku }).Count
+        })
+        if (-not $offered.Count) {
+            throw "$($model.modelName) $($model.modelVersion)/$($model.sku) is not offered in $region. No provisioning started; choose an approved supported Foundry region."
+        }
+    }
+}
 function Provision {
     foreach ($entry in $script:values.GetEnumerator()) {
         [Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value, 'Process')
@@ -133,6 +153,12 @@ function Check-Private {
     if ($database.network.publicNetworkAccess -ne 'Disabled' -or
         $database.authConfig.passwordAuth -ne 'Disabled' -or $database.authConfig.activeDirectoryAuth -ne 'Enabled') {
         throw 'PostgreSQL must remain private and Entra-only.'
+    }
+    if ((Value 'APP_ENABLE_CHAT_RUNTIME') -eq 'true') {
+        $ai = Azure @('cognitiveservices', 'account', 'show', '--resource-group', (Value 'AZURE_RESOURCE_GROUP' -Required),
+                     '--name', (Value 'APP_FOUNDRY_ACCOUNT_NAME' -Required))
+        if ($ai.location -ne (Value 'FOUNDRY_LOCATION') -or $ai.properties.publicNetworkAccess -ne 'Disabled' -or
+            -not $ai.properties.disableLocalAuth) { throw 'Foundry must use the selected region, private access and managed-identity authentication.' }
     }
 }
 function Check-Build {
@@ -201,6 +227,9 @@ function Invoke-AllStages {
         throw 'Environment belongs to another subscription.'
     }
     if ($existing -and (Value 'AZURE_LOCATION' -Required) -ne $Location) { throw 'Existing environment region differs from -Location.' }
+    if ($existing -and (Value 'FOUNDRY_LOCATION') -and (Value 'FOUNDRY_LOCATION') -ne $FoundryLocation) {
+        throw 'Existing Foundry region differs from -FoundryLocation. Moving an AI account requires a reviewed migration.'
+    }
     $account = Azure @('account', 'show')
     if ($account.state -ne 'Enabled') { throw 'The selected subscription is not enabled.' }
     $targets = $TargetSubscriptionId
@@ -216,9 +245,10 @@ function Invoke-AllStages {
     }
     Write-Host "`nEnd-to-end private deployment: $EnvironmentName"
     Write-Host "Hosting subscription: $script:subscription; tenant: $($account.tenantId); region: $Location"
+    Write-Host "Private Foundry/Model Router region: $FoundryLocation. Chat is included; the hosted-agent narrator remains separate and opt-in."
     Write-Host "Assessed subscriptions: $($targets -join ', ')"
     Write-Host "Source commit: $commit"
-    Write-Host 'Includes private ACR Premium, PostgreSQL, VM/disk/NAT costs, image publication, sign-in registration, and Reader/Cost Management Contributor grants.'
+    Write-Host 'Includes private ACR Premium, PostgreSQL, private Foundry/model usage, VM/disk/NAT costs, image publication, sign-in registration, and Reader/Cost Management Contributor grants.'
     Write-Host "Blob trusted-service export exception: $($AllowNativeExportTrustedServices.IsPresent). No public ACR/PostgreSQL access or inbound VM access."
     Write-Host 'The builder is deallocated on completion/failure; disk, NAT, registry and database charges remain.'
     if (-not $ApproveAll -and (Read-Host 'Approve this complete rollout? Type YES').Trim() -cne 'YES') {
@@ -239,7 +269,7 @@ function Invoke-AllStages {
     }
     $common = @{
         EnvironmentName = $EnvironmentName; SubscriptionId = $script:subscription
-        Location = $Location; BuilderVmSize = $BuilderVmSize; BuilderSshPublicKeyPath = $keyPath
+        Location = $Location; FoundryLocation = $FoundryLocation; BuilderVmSize = $BuilderVmSize; BuilderSshPublicKeyPath = $keyPath
         Repository = $Repository; SourceCommit = $commit; Apply = $true; ApproveAzureChanges = $true
         Confirm = $false; AllowNativeExportTrustedServices = $AllowNativeExportTrustedServices
         BlobDataProtection = $BlobDataProtection; IncludeLocalhostRedirects = $IncludeLocalhostRedirects
@@ -257,7 +287,8 @@ function Invoke-AllStages {
     try {
         Run-Stage 'Initialize'
         $cleanup = $true
-        if ((Value 'APP_STAGED_FOUNDATION_READY') -eq 'true' -or $deployed) {
+        if (((Value 'APP_STAGED_FOUNDATION_READY') -eq 'true' -or $deployed) -and
+            (Value 'APP_STAGED_FOUNDATION_CHAT_CONFIG') -eq (Chat-Configuration)) {
             $null = Value 'APP_PRIVATE_BUILDER_VM_NAME' -Required
             Check-Private
             Write-Host 'Reusing the private foundation.'
@@ -344,7 +375,10 @@ try {
         }
         $defaults = [ordered]@{
             AZURE_SUBSCRIPTION_ID = $script:subscription; AZURE_TENANT_ID = $account.tenantId
-            AZURE_LOCATION = $Location; APP_PROFILE = 'data'; APP_ASSESSMENT_MODE = 'postgres'
+            AZURE_LOCATION = $Location; APP_PROFILE = 'ai'; APP_ASSESSMENT_MODE = 'postgres'
+            FOUNDRY_LOCATION = $FoundryLocation; APP_ENABLE_CHAT_RUNTIME = 'true'
+            MODEL_ROUTER_DEPLOYMENT_NAME = 'model-router'; APP_ENABLE_AI_RUNTIME = 'false'; APP_AI_VALIDATED = 'true'
+            APP_MODEL_DEPLOYMENTS = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]'
             APP_PRIVATE_REGISTRY = 'true'; APP_REGISTRY_BUILD_MODE = 'private-runner'
             APP_ENABLE_PRIVATE_BUILDER = 'true'; APP_PRIVATE_BUILDER_VM_SIZE = $BuilderVmSize
             APP_ASSESSMENT_FOUNDATION_ONLY = 'true'; APP_ASSESSMENT_DB_BOOTSTRAPPED = 'false'
@@ -353,6 +387,12 @@ try {
         foreach ($entry in $defaults.GetEnumerator()) {
             if (-not (Value $entry.Key)) { Save $entry.Key ([string]$entry.Value) }
         }
+        if ((Value 'APP_PROFILE') -ne 'ai') {
+            if ((Value 'APP_APPLICATIONS_DEPLOYED') -eq 'true') { throw 'Promoting a released data-only environment to AI requires a reviewed migration.' }
+            Save 'APP_PROFILE' 'ai'
+        }
+        if ((Value 'APP_ENABLE_CHAT_RUNTIME') -ne 'true') { Save 'APP_ENABLE_CHAT_RUNTIME' 'true' }
+        if ((Value 'APP_MODEL_DEPLOYMENTS') -eq '[]') { Save 'APP_MODEL_DEPLOYMENTS' $defaults.APP_MODEL_DEPLOYMENTS }
         if (-not (Value 'APP_PRIVATE_BUILDER_SSH_PUBLIC_KEY')) {
             if (-not $BuilderSshPublicKeyPath) { throw 'Initialize requires -BuilderSshPublicKeyPath (public .pub file only).' }
             $key = (Get-Content -LiteralPath $BuilderSshPublicKeyPath -Raw).Trim()
@@ -360,6 +400,7 @@ try {
             Save 'APP_PRIVATE_BUILDER_SSH_PUBLIC_KEY' $key
         }
         Check-Compute
+        Check-Foundry
         if ($AllowNativeExportTrustedServices) { Save 'APP_EXPORT_TRUSTED_SERVICES' 'true' }
         if ($BlobDataProtection) { Save 'APP_BLOB_DATA_PROTECTION' 'true' }
     } else {
@@ -377,10 +418,13 @@ try {
             'Foundation' {
                 if ((Value 'APP_APPLICATIONS_DEPLOYED') -eq 'true') { throw 'Foundation is not an implicit migration of deployed apps.' }
                 Check-Compute
+                Check-Foundry
                 Provision
                 if ($PreviewOnly) { break }
                 Check-Private
                 Save 'APP_STAGED_FOUNDATION_READY' 'true'
+                Save 'APP_STAGED_FOUNDATION_CHAT_CONFIG' (Chat-Configuration)
+                Save 'APP_REUSE_AI_ACCOUNT' 'true'
             }
             'Build' {
                 Check-Private

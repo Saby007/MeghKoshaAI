@@ -117,7 +117,7 @@ if ($PSVersionTable.PSVersion -lt [version]'7.0') {
     throw 'PowerShell 7 or later is required. Run this script with `pwsh`, not Windows PowerShell 5.1.'
 }
 if ($AssessmentMode -eq 'postgres') {
-    if ($SkipProcessor -or $SkipIdentityBootstrap -or $SkipRoleAssignments -or $SkipPreview -or $GrantAdminConsent) {
+    if ($SkipProcessor -or $SkipIdentityBootstrap -or $SkipRoleAssignments -or $SkipPreview -or $GrantAdminConsent -or $SkipModelAvailabilityCheck) {
         throw 'The private end-to-end rollout cannot skip its required stages or add administrator consent. Use docs/manual-staged-deployment.md for separately governed stages.'
     }
     $targetIds = [guid[]]@(
@@ -137,7 +137,7 @@ if ($AssessmentMode -eq 'postgres') {
     }
     $arguments = @{
         Stage = 'All'; EnvironmentName = $EnvironmentName; SubscriptionId = $SubscriptionId
-        Location = $Location; Repository = $RepoUrl; TargetSubscriptionId = $targetIds
+        Location = $Location; FoundryLocation = $FoundryLocation; Repository = $RepoUrl; TargetSubscriptionId = $targetIds
         ServiceManagementReference = $ServiceManagementReference
         BuilderVmSize = $BuilderVmSize; BuilderSshPublicKeyPath = $BuilderSshPublicKeyPath
         SkipLogin = $SkipLogin; ApproveAll = $ApproveAll; IncludeLocalhostRedirects = $IncludeLocalhostRedirects

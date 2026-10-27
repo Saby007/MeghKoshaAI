@@ -117,6 +117,14 @@ azd env set APP_VNET_PREFIX '10.42.0.0/23'
 azd env set APP_ASSESSMENT_LIMITS '{"readPoolSize":3,"workConcurrency":4,"graphIntervalMs":400,"metricsIntervalMs":500,"detailRows":50000,"detailPoints":5000000}'
 ```
 
+The commands above intentionally show the **data-only manual alternative**. To retain
+the existing AI chatbot, prefer the [one-command rollout](manual-staged-deployment.md),
+which provisions private Foundry/Model Router and enables Chat. For a manually
+governed AI rollout, select `APP_PROFILE=ai`, `FOUNDRY_LOCATION`, the approved
+`APP_MODEL_DEPLOYMENTS`, `MODEL_ROUTER_DEPLOYMENT_NAME`, `APP_ENABLE_CHAT_RUNTIME=true`
+and the existing model-approval gates before provisioning. Merely adding a region
+does not enable the model when using this data-only manual sequence.
+
 Check PostgreSQL SKU/region capacity and ACA CPU/memory quota before continuing.
 The API read pool (3) and operation pool (2) share the total connection budget (5);
 also budget every API replica and worker process against the database connection limit.

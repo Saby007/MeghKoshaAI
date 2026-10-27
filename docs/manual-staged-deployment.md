@@ -4,6 +4,9 @@ Use the published `feature/private-postgres-assessments` branch. This path prepa
 private ACR, private PostgreSQL and a private build VM in Central India, then builds
 images through the VM's managed identity. **You run one command; the script runs
 the stages in order.** Nothing in this guide authorizes an assistant-run deployment.
+The same rollout includes the existing **Model Router-backed chatbot**, with private
+Foundry resources in East US 2 by default; `-FoundryLocation` selects the Foundry
+region separately from the Central India application/database region.
 
 ## Recommended: run the existing end-to-end entry point
 
@@ -14,6 +17,7 @@ git pull --ff-only
 .\scripts\deploy-end-to-end.ps1 `
     -EnvironmentName meghkoshaai-scalable-dev `
     -SubscriptionId '<hosting-subscription-uuid>' `
+    -FoundryLocation eastus2 `
     -Location centralindia
 ```
 
@@ -28,9 +32,9 @@ The script handles:
 2. One approval showing the hosting scope, target subscriptions, private
    infrastructure/NAT costs, image publication, app registrations and role grants.
 3. A dedicated local SSH key under ignored `.azure\builder-keys` when needed.
-4. Private foundation and builder VM provisioning, then private image build/push.
+4. Private foundation, Foundry/Model Router and builder VM provisioning, then private image build/push.
 5. Database bootstrap, sign-in registration, target grants, immutable-image release
-   and verification of the deployed images and readiness.
+   and verification of the deployed images, private AI configuration and readiness.
 6. Builder VM deallocation after success or failure.
 
 The default PostgreSQL flow includes Blob Storage's trusted-service ingress exception
@@ -44,6 +48,26 @@ run. A tenant-mandated Service Tree ID is requested only if needed; you can supp
 `-ServiceManagementReference '<uuid>'` upfront. `-SkipLogin` reuses existing verified
 sign-in. For a reviewed unattended run, `-ApproveAll` supplies the upfront approval
 explicitly; without it the script requires you to type `YES`.
+
+The one-command flow sets the `ai` profile and `APP_ENABLE_CHAT_RUNTIME=true`,
+deploying the approved `model-router` version/SKU/capacity from the existing
+application contract. It checks the Foundry region/model catalog before provisioning;
+quota and policy failures still stop the run. Foundry token usage adds cost.
+The separate hosted-agent narrator remains opt-in: the chatbot does not require
+creating or enabling a hosted/prompt narrator agent.
+
+Chat is bound to the selected completed PostgreSQL snapshot. The worker stores a
+bounded evidence record with complete financial totals and exact top-resource
+rankings; at most 25 resource details are displayed. Chat never downloads the full
+Blob report or asks a model to generate SQL. Model calls use the API managed identity
+through private Foundry networking. A model outage returns a clearly labeled
+deterministic answer without inventing costs.
+
+After upgrading an existing schema, bootstrap must add the new Chat evidence column,
+and **Update report** must create a new completed assessment. Older snapshots with
+no Chat evidence return an explicit rebuild message; they do not fall back to loading
+the whole report. An already released data-only environment requires a reviewed
+AI/schema/image migration, not an automatic incompatible upgrade.
 
 Use the same command after resolving a failure. Verified foundation, exact-commit
 images and successful bootstrap are reused; the same completed release is reverified.
@@ -146,6 +170,7 @@ stores local AZD settings. It does not provision resources:
 ```powershell
 .\scripts\deploy-staged.ps1 -Stage Initialize -EnvironmentName $EnvName `
     -SubscriptionId $SubscriptionId -Location centralindia `
+    -FoundryLocation eastus2 `
     -BuilderSshPublicKeyPath $PublicKey -Apply -ApproveAzureChanges
 ```
 
@@ -250,7 +275,10 @@ digests; it does **not** call `azd deploy`, enable public ACR, or substitute a
 placeholder image. Verify checks provisioned/running apps and health/readiness.
 
 Sign in at the printed web origin, configure/complete native FOCUS exports, queue
-one assessment and verify the exact authorized report scope. Run the representative
+one assessment and verify the exact authorized report scope. Open **Chat** without
+opening classic tabs and check a response labeled **Model Router** (not only the
+verified fallback). Runtime private connectivity, Entra/RBAC propagation, model
+quota and token usage must be verified by the operator. Run the representative
 retained-history/concurrent-read and restart checks from the
 [manual rollout guide](manual-scalable-deployment.md#9-verify-before-accepting-the-release).
 These user-level/load checks are not replaced by a healthy readiness endpoint.

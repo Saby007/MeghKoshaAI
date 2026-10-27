@@ -16,6 +16,7 @@ from services.assessment_limits import AssessmentLimitError
 from services.assessment_settings import settings
 from services.assessment_request_context import dashboard_read
 from reports.models import ReportSnapshot
+from reports.chat_evidence import ChatEvidence, CHAT_EVIDENCE_BYTES, build_chat_evidence
 
 logger = logging.getLogger(__name__)
 _pool: asyncpg.Pool | None = None
@@ -327,16 +328,22 @@ async def publish(snapshot: ReportSnapshot, job: asyncpg.Record, blob_name: str)
             or not snapshot.report.completeness.complete):
         raise ValueError("Completed assessment does not match its leased job scope.")
     summary, collections = split_report(snapshot.report.model_dump(by_alias=True, mode="json"))
+    chat = _json(build_chat_evidence(snapshot.report).model_dump(by_alias=True, mode="json"))
+    if len(chat.encode()) > CHAT_EVIDENCE_BYTES:
+        logger.warning("Chat evidence exceeds its bounded payload budget for snapshot %s; report publication remains complete",
+                       snapshot.snapshot_id)
+        chat = None
     tenant = job["tenant_id"]
     db = await pool()
     async with db.acquire(timeout=10) as connection, connection.transaction():
         await connection.execute(
             "INSERT INTO assessments.snapshots "
-            "(tenant_id,snapshot_id,scope_hash,subscription_ids,stale_days,created_at,summary,blob_name,period_start) "
-            "VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7::jsonb,$8,$9)",
+            "(tenant_id,snapshot_id,scope_hash,subscription_ids,stale_days,created_at,summary,blob_name,period_start,chat_evidence) "
+            "VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7::jsonb,$8,$9,$10::jsonb)",
             tenant, snapshot.snapshot_id, snapshot.scope_hash, _json(snapshot.subscription_ids),
             snapshot.stale_days, datetime.fromisoformat(snapshot.created_at), _json(summary), blob_name,
             snapshot.report.report_metadata.period_start,
+            chat,
         )
         for path, records in collections:
             await connection.execute(
@@ -380,7 +387,8 @@ async def snapshot_view(tenant: str, *, scope: str | None = None, snapshot_id: s
     if before_period is not None:
         arguments.append(before_period)
     row = await db.fetchrow(
-        "SELECT * FROM assessments.snapshots WHERE tenant_id=$1 AND published "
+        "SELECT snapshot_id,scope_hash,subscription_ids,stale_days,created_at,summary,"
+        "chat_evidence IS NOT NULL AS chat_available FROM assessments.snapshots WHERE tenant_id=$1 AND published "
         f"AND {selector} {period_clause}ORDER BY created_at DESC LIMIT 1", *arguments,
     )
     if not row:
@@ -393,11 +401,29 @@ async def snapshot_view(tenant: str, *, scope: str | None = None, snapshot_id: s
         "snapshotId": row["snapshot_id"], "scopeHash": row["scope_hash"],
         "subscriptionIds": json.loads(row["subscription_ids"]), "staleDays": row["stale_days"],
         "createdAt": row["created_at"].isoformat(), "report": json.loads(row["summary"]),
+        "chatAvailable": row["chat_available"],
         "collections": [{"path": item["path"], "total": item["record_count"]} for item in collections],
     }
     if len(_json(view).encode()) > settings().response_bytes:
         raise AssessmentLimitError("Stored dashboard exceeds its response budget; ask the operator to rebuild it.")
     return view
+
+
+async def chat_evidence(tenant: str, snapshot_id: str, subscription_ids: list[str]) -> ChatEvidence | None:
+    payload = await (await pool()).fetchval(
+        "SELECT CASE WHEN octet_length(chat_evidence::text)<=$4 THEN chat_evidence END "
+        "FROM assessments.snapshots WHERE tenant_id=$1 AND snapshot_id=$2 AND published "
+        "AND subscription_ids=$3::jsonb",
+        tenant, snapshot_id, _json(report_snapshots.normalize_subscription_ids(subscription_ids)), CHAT_EVIDENCE_BYTES * 2,
+    )
+    if payload is None:
+        return None
+    evidence = ChatEvidence.model_validate_json(payload)
+    if not evidence.completeness.complete or sorted(row.subscription_id.lower() for row in evidence.subscription_breakdown) != sorted(
+        value.lower() for value in subscription_ids
+    ):
+        raise ValueError("Stored Chat evidence does not match the authorized completed assessment scope.")
+    return evidence
 
 
 async def page(tenant: str, snapshot_id: str, path: str, after: int, limit: int,

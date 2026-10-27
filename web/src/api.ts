@@ -196,6 +196,7 @@ export type ScalableSnapshot = {
   createdAt: string;
   report: Pick<FullReport, 'executiveSummary' | 'reportMetadata' | 'completeness'> & Record<string, unknown>;
   collections: { path: string; total: number }[];
+  chatAvailable?: boolean;
 };
 export type AssessmentPage = { path: string; total: number; items: unknown[]; nextCursor: number | null; filtered: boolean };
 const assessmentSignal = (signal?: AbortSignal) =>

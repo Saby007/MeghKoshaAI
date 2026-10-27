@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from reports.models import FullReport
+from reports.chat_evidence import ChatEvidence, ChatReport
 from services import runtime_identity
 
 if TYPE_CHECKING:
@@ -58,12 +58,14 @@ def _qualitative_only(value):
     return value
 
 
-def _evidence_catalog(report: FullReport, verified: ChatAnswer) -> dict[str, object]:
+def _evidence_catalog(report: ChatReport, verified: ChatAnswer) -> dict[str, object]:
     catalog: dict[str, object] = {}
     metadata = report.report_metadata
     _add(catalog, "snapshot.period", metadata.period)
     _add(catalog, "snapshot.cost_basis", metadata.cost_basis)
     _add(catalog, "verified.answer", verified.answer)
+    if isinstance(report, ChatEvidence):
+        _add(catalog, "snapshot.evidence_coverage", report.coverage_note)
     for index, metric in enumerate(verified.metrics):
         _add(catalog, f"verified.metric.{index}", metric.model_dump(mode="json"))
     for index, resource in enumerate(verified.resources[:25]):
@@ -115,9 +117,10 @@ def _selected_model(result) -> str | None:
     return None
 
 
-def _fallback(verified: ChatAnswer) -> ChatAnswer:
+def _fallback(verified: ChatAnswer, coverage_note: str = "") -> ChatAnswer:
     return verified.model_copy(update={
-        "disclaimer": "Verified from the completed report snapshot. Model Router was unavailable for this response.",
+        "disclaimer": "Verified from the completed report snapshot. Model Router was unavailable for this response."
+        + (" " + coverage_note if coverage_note else ""),
         "response_mode": "deterministic_fallback",
         "selected_model": None,
         "usage": None,
@@ -140,16 +143,17 @@ def _chat_enabled() -> bool:
 
 async def narrate_with_model_router(
     question: str,
-    report: FullReport,
+    report: ChatReport,
     verified: ChatAnswer,
     history: list[ChatTurn],
 ) -> ChatAnswer:
+    coverage = report.coverage_note if isinstance(report, ChatEvidence) else ""
     if not _chat_enabled():
-        return _fallback(verified)
+        return _fallback(verified, coverage)
     endpoint = os.environ.get("AI_SERVICES_ENDPOINT", "").strip()
     deployment = os.environ.get("MODEL_ROUTER_DEPLOYMENT_NAME", "").strip()
     if not endpoint or not deployment:
-        return _fallback(verified)
+        return _fallback(verified, coverage)
 
     catalog = _evidence_catalog(report, verified)
     conversation = _qualitative_only([turn.model_dump(mode="json") for turn in history[-6:]])
@@ -183,7 +187,8 @@ async def narrate_with_model_router(
             raise ValueError("Model Router cited evidence outside the supplied catalog")
         return verified.model_copy(update={
             "answer": narrative.answer,
-            "disclaimer": "Qualitative response by Model Router; all displayed facts are verified from the completed report snapshot.",
+            "disclaimer": "Qualitative response by Model Router; all displayed facts are verified from the completed report snapshot."
+            + (" " + report.coverage_note if isinstance(report, ChatEvidence) else ""),
             "response_mode": "model_router",
             "selected_model": _selected_model(result),
             "usage": _usage(result),
@@ -191,4 +196,4 @@ async def narrate_with_model_router(
         })
     except Exception:
         logger.warning("Model Router chat narration failed; returning deterministic answer", exc_info=True)
-        return _fallback(verified)
+        return _fallback(verified, coverage)

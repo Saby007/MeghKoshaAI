@@ -866,6 +866,7 @@ class ScalableReportSnapshot(BaseModel):
     created_at: str = Field(alias="createdAt")
     report: ScalableReportSummary
     collections: list[ReportCollection]
+    chat_available: bool = Field(default=False, alias="chatAvailable")
 
 
 class BackgroundAssessmentJob(BaseModel):

@@ -18,7 +18,7 @@ $global:stagedState = @{
     assignments = [Collections.Generic.List[object]]::new()
     responses = [Collections.Generic.Queue[string]]::new()
     prompts = [Collections.Generic.List[string]]::new()
-    environmentExists = $true; cleanupFailed = $false; imageDrift = $false; keyCreates = 0
+    environmentExists = $true; cleanupFailed = $false; imageDrift = $false; keyCreates = 0; foundryUnavailable = $false
     values = @{
         AZURE_ENV_NAME = 'staged-test'; AZURE_SUBSCRIPTION_ID = '11111111-1111-1111-1111-111111111111'
         AZURE_TENANT_ID = '22222222-2222-2222-2222-222222222222'; AZURE_LOCATION = 'centralindia'
@@ -32,6 +32,8 @@ $global:stagedState = @{
         APP_ASSESSMENT_FOUNDATION_ONLY = 'true'; APP_ASSESSMENT_DB_BOOTSTRAPPED = 'false'
         ASSESSMENT_BOOTSTRAP_JOB = 'job-db-bootstrap-test'; APP_WEB_ORIGIN = 'https://web.example.test'
         ASSESSMENT_DB_HOST = 'pg-test.postgres.database.azure.com'
+        APP_FOUNDRY_ACCOUNT_NAME = 'ai-test'
+        AI_SERVICES_ENDPOINT = 'https://ai-test.cognitiveservices.azure.com/'
         SERVICE_API_RESOURCE_NAME = 'ca-api-test'; SERVICE_ASSESSMENT_RESOURCE_NAME = 'ca-assessment-test'
         SERVICE_WEB_RESOURCE_NAME = 'ca-web-test'
         MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-staged-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-obo-test'
@@ -73,6 +75,13 @@ function az {
     if ($a[0] -eq 'account' -and $a[1] -eq 'show') {
         if ($a -contains 'none') { return }
         return '{"state":"Enabled","tenantId":"22222222-2222-2222-2222-222222222222"}'
+    }
+    if ($command -eq 'cognitiveservices model list') {
+        if ($global:stagedState.foundryUnavailable) { return '[]' }
+        return '[{"model":{"name":"model-router","format":"OpenAI","version":"2025-11-18","skus":[{"name":"GlobalStandard"}]}}]'
+    }
+    if ($command -eq 'cognitiveservices account show') {
+        return '{"location":"eastus2","properties":{"publicNetworkAccess":"Disabled","disableLocalAuth":true}}'
     }
     if ($command -eq 'postgres flexible-server show') {
         return '{"network":{"publicNetworkAccess":"Disabled"},"authConfig":{"passwordAuth":"Disabled","activeDirectoryAuth":"Enabled"}}'
@@ -190,6 +199,14 @@ try {
     if ($global:stagedState.provisions) { throw 'Insufficient quota must stop before provisioning.' }
     $global:stagedState.quotaInsufficient = $false
     & $script -Stage Initialize @common -SubscriptionId '11111111-1111-1111-1111-111111111111' | Out-Null
+    if ($global:stagedState.values.APP_PROFILE -ne 'ai' -or
+        $global:stagedState.values.FOUNDRY_LOCATION -ne 'eastus2' -or
+        $global:stagedState.values.APP_ENABLE_CHAT_RUNTIME -ne 'true' -or
+        $global:stagedState.values.APP_ENABLE_AI_RUNTIME -ne 'false') { throw 'Private rollout did not restore Model Router chat with the narrator kept separate.' }
+    $global:stagedState.foundryUnavailable=$true
+    Assert-Refused { & $script -Stage Foundation @common -ApproveCosts } 'not offered'
+    if ($global:stagedState.provisions) { throw 'Unavailable model must block provisioning.' }
+    $global:stagedState.foundryUnavailable=$false
     $preview = & $script -Stage Foundation @common -PreviewOnly | ConvertFrom-Json
     if ($preview.status -ne 'preview_completed' -or $global:stagedState.provisions) { throw 'Preview-only stage executed provisioning.' }
     & $script -Stage Build @common -ApproveImagePublication | Out-Null
@@ -216,6 +233,8 @@ try {
     $driver=Join-Path $testRoot 'scripts\deploy-end-to-end.ps1'
     $plan=& $driver -EnvironmentName staged-test -PlanOnly | ConvertFrom-Json
     if ($plan.stage -ne 'All' -or $plan.appliesChanges) { throw 'End-to-end default must describe every private stage without execution.' }
+    $regionalPlan=& $driver -EnvironmentName staged-test -FoundryLocation northeurope -PlanOnly | ConvertFrom-Json
+    if ($regionalPlan.ai.foundryLocation -ne 'northeurope' -or -not $regionalPlan.ai.enabled) { throw 'FoundryLocation was not forwarded through the PostgreSQL end-to-end entry point.' }
     function Reset-Rollout {
         $global:stagedState.values=$initialValues.Clone()
         $global:stagedState.calls.Clear()

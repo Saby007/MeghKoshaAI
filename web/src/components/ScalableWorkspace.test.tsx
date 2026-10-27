@@ -66,6 +66,21 @@ it('opens a bounded summary without queuing an assessment or loading detail coll
   expect(getInteractiveAssessment).not.toHaveBeenCalled();
 });
 
+it('provides large-data Chat context without requesting a full interactive snapshot', async () => {
+  const onSnapshotChange = vi.fn();
+  await act(async () => root.render(
+    <ScalableWorkspace subscriptionIds={['sub-1']} staleDays={90} refreshToken={0}
+      handledRefresh={handled} onBusyChange={busy} onSnapshotChange={onSnapshotChange} />,
+  ));
+  expect(onSnapshotChange).toHaveBeenLastCalledWith(snapshot);
+  expect(getInteractiveAssessment).not.toHaveBeenCalled();
+  await act(async () => root.render(
+    <ScalableWorkspace subscriptionIds={[]} staleDays={90} refreshToken={0}
+      handledRefresh={handled} onBusyChange={busy} onSnapshotChange={onSnapshotChange} />,
+  ));
+  expect(onSnapshotChange).toHaveBeenLastCalledWith(null);
+});
+
 it('opens original tabs only after an explicit bounded full-snapshot request', async () => {
   vi.mocked(getInteractiveAssessment).mockResolvedValue({
     snapshotId: snapshot.snapshotId, scopeHash: snapshot.scopeHash,

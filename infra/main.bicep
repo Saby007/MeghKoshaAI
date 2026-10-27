@@ -419,6 +419,8 @@ output COST_EXPORT_NAME string = exportName
 output COST_EXPORT_DAILY_NAME string = dailyExportName
 output COST_EXPORT_STORAGE_RESOURCE_ID string = dataEnabled ? data!.outputs.storageResourceId : ''
 output AI_PROJECT_ENDPOINT string = aiProjectEndpoint
+output AI_SERVICES_ENDPOINT string = aiEndpoint
+output APP_FOUNDRY_ACCOUNT_NAME string = aiEnabled ? 'ai-${resourceToken}' : ''
 output APP_DEPLOYMENT_STATE object = {
   profile: profile
   applicationsDeployed: deployApplications

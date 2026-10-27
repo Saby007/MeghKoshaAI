@@ -568,6 +568,22 @@ def test_compiled_postgres_is_private_passwordless_and_separates_runtime_from_bo
     assert bootstrap["properties"]["template"]["containers"][0]["command"][-1] == "jobs.assessment_bootstrap"
 
 
+def test_chat_foundry_access_is_private_and_scoped_to_api_managed_identity(compiled_profiles):
+    _, template = compiled_profiles["ai"]
+    modules = resource_map(template)
+    resources = list(resource_map(modules["ai"]["properties"]["template"]).values())
+    caller = next(item for item in resources if item["type"] == "Microsoft.Authorization/roleAssignments"
+                  and "5e0bd9bd-7b93-4f28-af87-19fc36ad61bd" in item["properties"]["roleDefinitionId"])
+    assert caller["properties"]["principalId"] == "[parameters('apiPrincipalId')]"
+    assert "Microsoft.CognitiveServices/accounts" in caller["scope"]
+    account = next(item for item in resources if item["type"] == "Microsoft.CognitiveServices/accounts")
+    assert account["properties"]["publicNetworkAccess"] == "Disabled"
+    assert account["properties"]["disableLocalAuth"]
+    outputs = template["outputs"]
+    assert "AI_SERVICES_ENDPOINT" in outputs
+    assert "APP_FOUNDRY_ACCOUNT_NAME" in outputs
+
+
 def test_scalable_template_forces_private_acr_without_forcing_preview_build_pools(compiled_profiles):
     parameters, template = compiled_profiles["data"]
     values = {name: item["value"] for name, item in parameters["parameters"].items()}

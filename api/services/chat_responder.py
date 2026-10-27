@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from reports.models import FullReport
+from reports.chat_evidence import ChatEvidence, ChatReport
 from services.chat_model import ChatTurn, narrate_with_model_router
 
 
@@ -115,7 +115,7 @@ def _forecast_metrics(months, currency: str) -> list[ChatMetric]:
     ]
 
 
-def _score_metric(report: FullReport) -> ChatMetric:
+def _score_metric(report: ChatReport) -> ChatMetric:
     score = report.advisor_score.cost_score
     if score is None:
         score = report.advisor_score.score
@@ -136,7 +136,7 @@ def _resource_limit(question: str) -> int:
     return max(1, min(value, 25))
 
 
-def _subscription_answer(question: str, report: FullReport, currency: str) -> ChatAnswer | None:
+def _subscription_answer(question: str, report: ChatReport, currency: str) -> ChatAnswer | None:
     normalized = question.casefold()
     candidates = [
         row for row in report.subscription_breakdown
@@ -184,12 +184,14 @@ def _subscription_answer(question: str, report: FullReport, currency: str) -> Ch
     )
 
 
-def answer_question(question: str, report: FullReport) -> ChatAnswer:
+def answer_question(question: str, report: ChatReport) -> ChatAnswer:
     normalized = " ".join(question.casefold().split())
     currency = report.report_metadata.currency
     months = report.spend_history.months
     data_as_of = report.report_metadata.period
     deterministic = "Calculated from the completed report snapshot; no Foundry model call was used."
+    if isinstance(report, ChatEvidence):
+        deterministic += " " + report.coverage_note
 
     if "unattached" in normalized and "disk" in normalized:
         category = next((item for item in report.tier_a_categories if item.category == "unattached_disks"), None)
@@ -205,11 +207,13 @@ def answer_question(question: str, report: FullReport) -> ChatAnswer:
             )
             for line in lines
         ]
-        total = sum(line.monthly_cost or 0 for line in lines)
+        count = report.unattached_disk_count if isinstance(report, ChatEvidence) else len(lines)
+        total = report.unattached_disk_monthly_cost if isinstance(report, ChatEvidence) else sum(line.monthly_cost or 0 for line in lines)
+        listing = f" Showing {len(lines)} of {count}; open the paginated report for all findings." if count > len(lines) else ""
         return ChatAnswer(
             intent="unattached_disks",
-            answer=f"Found {len(lines)} unattached managed disk(s) with {_money(total, currency)} in matched monthly cost.",
-            metrics=[ChatMetric(label="Unattached disks", value=str(len(lines)), detail=f"Matched monthly cost {_money(total, currency)}")],
+            answer=f"Found {count} unattached managed disk(s) with {_money(total, currency)} in matched monthly cost.{listing}",
+            metrics=[ChatMetric(label="Unattached disks", value=str(count), detail=f"Matched monthly cost {_money(total, currency)}")],
             resources=resources,
             suggestions=_SUGGESTIONS,
             dataAsOf=data_as_of,
@@ -293,7 +297,7 @@ def answer_question(question: str, report: FullReport) -> ChatAnswer:
 
 async def respond_to_question(
     question: str,
-    report: FullReport,
+    report: ChatReport,
     history: list[ChatTurn] | None = None,
 ) -> ChatAnswer:
     verified = answer_question(question, report)

@@ -24,7 +24,7 @@ You deploy it once into a subscription of your choice, grant it three read/cost-
 - **Reads, never writes billing data.** All cost figures come from Azure's own native FOCUS 1.2-preview cost export — the same export format used by FinOps toolkit customers — so the numbers reconcile with your Azure invoice.
 - **Sets itself up.** Once the required roles are visible to its managed identity, the app creates the native exports (closed months plus a daily month-to-date export) and a rolling schedule of 3–6 months; you do not hand-configure Cost Management exports yourself.
 - **Assesses resources, not just spend.** It cross-references billed cost with resource inventory, Azure Advisor, Azure Monitor metrics, and SQL/compute/storage/network signals to flag idle and overprovisioned resources.
-- **Explains itself.** An optional Microsoft Foundry-backed agent turns the reconciled findings into a written executive summary and answers follow-up questions in a chat panel — this stays off until you explicitly enable it.
+- **Explains itself.** The one-command AI rollout includes the Microsoft Foundry Model Router-backed chatbot, grounded in deterministic report evidence. The separate hosted-agent executive-summary narrator remains optional and disabled by default.
 - **Stays inside your tenant.** Authentication is delegated Microsoft Entra ID sign-in; the API validates a bearer token issued for itself. The browser never receives an Azure Resource Manager token, and the app never requests Entra admin consent.
 
 ## Architecture
@@ -98,6 +98,10 @@ For Central India without an existing private Docker host, use
 It handles sign-in, one upfront scope/cost approval, local builder-key creation,
 private provisioning/build/bootstrap, identity/grants, release, verification and
 builder deallocation. Individual stage commands are optional, not required.
+It also retains the **Model Router chatbot**: the AI profile is provisioned with
+`-FoundryLocation eastus2` by default, private endpoints and managed-identity model
+access. Foundry region/model availability is checked before provisioning. The
+separate hosted-agent narrator remains opt-in and disabled by default.
 The assistant does not execute provisioning, deployment, bootstrap, permission
 changes or workflow runs. Review the published feature branch and exact commit
 before following the operator-run rollout.
@@ -202,8 +206,9 @@ success or a fallback to synchronous assessment generation.
 - In PostgreSQL mode the UI intentionally uses a **summary/detail explorer**
   rather than the legacy whole-report tab renderer. All stored report sections and
   deferred collections remain inspectable. **Open classic tabs** preserves the
-  original views and enables Chat only when the complete snapshot fits the
-  interactive size budget. It never renders charts from truncated detail data.
+  original views only when the complete snapshot fits the interactive size budget.
+  Chat is independent of that limit: it uses the completed PostgreSQL snapshot's
+  bounded evidence, not the full Blob report. It never renders charts from truncated detail data.
   On-demand FOCUS reprocessing is worker-only. Keep `blob` mode for the unchanged
   synchronous tab/Chat workflow.
 - Classic tabs require at most 1,000 combined inline/deferred rows by default.
@@ -214,6 +219,15 @@ success or a fallback to synchronous assessment generation.
 - Native FOCUS files and immutable snapshots remain in Blob Storage. PostgreSQL
   publication does not advance Blob compatibility pointers for cancelled/unfinished
   jobs.
+- The worker precomputes compact Chat evidence with complete score/history/
+  subscription facts, exact top-25 positive-cost resources and complete unattached-
+  disk totals plus at most 25 details. The API checks the snapshot's tenant/scope
+  before retrieving that bounded SQL payload. The model never generates SQL or
+  calculates financial amounts. Chat labels limited resource listings and explicit
+  deterministic fallback if the model is unavailable.
+- Schema upgrades require private bootstrap plus a new background assessment for
+  the new Chat evidence. Old snapshots return an explicit rebuild message rather
+  than loading all data into the API.
 
 The initial acceptance workload is **15,000 resources and 1,000,000 FOCUS rows per
 subscription, 10 concurrent readers, warm summary p95 <= 2 seconds**. Local synthetic
@@ -246,6 +260,12 @@ To run the isolated SQL/scale gates, set `ASSESSMENT_TEST_DSN` to a **dedicated
 loopback database named `meghkosha_test`**, set `ASSESSMENT_RUN_SCALE_TESTS=1`, and run
 `python -m pytest tests\test_assessment_postgres.py -q -s` from the API directory.
 These tests reset their fixture tables; never point them at customer data.
+
+The subsequent Chat-restoration regression cycle passed 855 backend tests and
+272 available frontend tests. The focused real-PostgreSQL checks also verified
+15,000-resource bounded Chat evidence, tenant/scope isolation and no Blob download.
+Actual Foundry inference/private connectivity remains an operator-run check;
+the model tests used fake responses and no Azure deployment was executed.
 
 ## System design
 

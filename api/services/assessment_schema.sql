@@ -18,6 +18,7 @@ CREATE INDEX IF NOT EXISTS snapshots_latest
     ON assessments.snapshots (tenant_id, scope_hash, created_at DESC)
     WHERE published;
 ALTER TABLE assessments.snapshots ADD COLUMN IF NOT EXISTS period_start text NOT NULL DEFAULT '';
+ALTER TABLE assessments.snapshots ADD COLUMN IF NOT EXISTS chat_evidence jsonb;
 UPDATE assessments.snapshots SET period_start=summary#>>'{reportMetadata,periodStart}'
     WHERE period_start='' AND summary#>>'{reportMetadata,periodStart}' IS NOT NULL;
 CREATE INDEX IF NOT EXISTS snapshots_period

@@ -894,6 +894,21 @@ class ChatRequest(BaseModel):
 @app.post("/api/chat", response_model=chat_responder.ChatAnswer, response_model_by_alias=True)
 async def chat(request: Request, body: ChatRequest):
     principal = _control_principal(request)
+    if scalable_mode():
+        if not body.snapshot_id:
+            raise HTTPException(status_code=422, detail="Choose a completed assessment snapshot before using Chat")
+        view = await _scalable_snapshot(request, body.snapshot_id)
+        try:
+            evidence = await assessment_store.chat_evidence(principal.tenant_id, body.snapshot_id, view["subscriptionIds"])
+        except ValueError as error:
+            logger.exception("Stored Chat evidence failed scope/schema validation")
+            raise HTTPException(status_code=503, detail="Completed Chat evidence failed integrity validation") from error
+        if evidence is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Bounded Chat evidence is unavailable for this snapshot. Run a new background assessment after upgrading; if its scope exceeds the Chat budget, select fewer subscriptions.",
+            )
+        return await chat_responder.respond_to_question(body.question, evidence, body.history)
     try:
         if body.snapshot_id:
             snapshot = await report_snapshots.load_snapshot(body.snapshot_id)

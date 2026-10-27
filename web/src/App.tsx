@@ -5,7 +5,7 @@ import { SubscriptionPicker, type Subscription } from './components/Subscription
 import { CostRangeControls } from './components/CostRangeControls';
 import { defaultCostWindow, monthCostWindow, monthToDateWindow, type CostWindow } from './report/costDetails';
 import { runCostAssessment, type StaleDays } from './collectors/costAssessment';
-import { getLatestReport, narrate, type CostAgentOutput } from './api';
+import { getLatestReport, narrate, type CostAgentOutput, type ScalableSnapshot } from './api';
 import { apiFetch, ApiIdentityRequiredError, initializeApiIdentity, redirectApiIdentity, signOutApiIdentity, IDENTITY_REQUIRED_EVENT, type VerifiedIdentity } from './apiIdentity';
 import type { FullReport, ReportSnapshot } from './report/models';
 import { BRAND_NAME } from './brand';
@@ -248,6 +248,7 @@ export default function App() {
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [report, setReport] = useState<FullReport | null>(null);
   const [loadedSnapshot, setLoadedSnapshot] = useState<ReportSnapshot | null>(null);
+  const [scalableSnapshot, setScalableSnapshot] = useState<ScalableSnapshot | null>(null);
   const [narration, setNarration] = useState<CostAgentOutput>(null);
   const [running, setRunning] = useState(false);
   const [scalableRefresh, setScalableRefresh] = useState(0);
@@ -257,6 +258,11 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const chatSnapshot = scalable
+    ? scalableSnapshot && [...selectedIds].map((id) => id.toLowerCase()).sort().join(',')
+      === scalableSnapshot.subscriptionIds.map((id) => id.toLowerCase()).sort().join(',')
+      ? scalableSnapshot : null
+    : loadedSnapshot;
   const [loadingSubscriptions, setLoadingSubscriptions] = useState(false);
   const [loadingSnapshot, setLoadingSnapshot] = useState(false);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
@@ -346,6 +352,7 @@ export default function App() {
       setView('report');
       setReport(null);
       setLoadedSnapshot(null);
+      setScalableSnapshot(null);
       setNarration(null);
       setAssessmentPhase(null);
       setLoadingSnapshot(false);
@@ -664,6 +671,7 @@ export default function App() {
                 subscriptionIds={[...selectedIds]} staleDays={STALE_DAYS}
                 refreshToken={scalableRefresh} handledRefresh={scalableHandledRefresh} onBusyChange={setRunning}
                 onInteractiveSnapshot={setLoadedSnapshot}
+                onSnapshotChange={setScalableSnapshot}
               />
             </Suspense>
           </ReportErrorBoundary>}
@@ -671,13 +679,13 @@ export default function App() {
         {visitedViews.has('chat') && (
           <div className="view-panel" hidden={view !== 'chat'}>
             <Suspense fallback={<WorkspaceLoading label="chat" />}>
-              {scalable && !loadedSnapshot ? <section className="saved-report-status"><p>Use the paginated assessment explorer for large-data evidence. Open classic tabs on a report within the interactive size budget to enable full-snapshot Chat. Large reports are never silently loaded or truncated into Chat.</p><button className="ghost-button" type="button" onClick={() => changeView('report')}>Open assessment dashboard</button></section> : <ChatWindow
-                snapshotId={loadedSnapshot?.snapshotId ?? null}
-                period={report?.reportMetadata.period ?? loadedSnapshot?.report.reportMetadata.period ?? null}
-                currency={report?.reportMetadata.currency ?? loadedSnapshot?.report.reportMetadata.currency ?? null}
-                subscriptionCount={loadedSnapshot?.subscriptionIds.length ?? 0}
+              <ChatWindow
+                snapshotId={chatSnapshot?.snapshotId ?? null}
+                period={chatSnapshot?.report.reportMetadata.period ?? null}
+                currency={chatSnapshot?.report.reportMetadata.currency ?? null}
+                subscriptionCount={chatSnapshot?.subscriptionIds.length ?? 0}
                 onOpenReport={() => changeView('report')}
-              />}
+              />
             </Suspense>
           </div>
         )}

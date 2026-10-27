@@ -112,11 +112,12 @@ function RecordBrowser({ snapshot, section }: { snapshot: ScalableSnapshot; sect
 }
 
 export default function ScalableWorkspace({
-  subscriptionIds, staleDays, refreshToken, handledRefresh, onBusyChange, onInteractiveSnapshot,
+  subscriptionIds, staleDays, refreshToken, handledRefresh, onBusyChange, onInteractiveSnapshot, onSnapshotChange,
 }: {
   subscriptionIds: string[]; staleDays: number; refreshToken: number;
   handledRefresh: MutableRefObject<number>; onBusyChange: (busy: boolean) => void;
   onInteractiveSnapshot?: (snapshot: ReportSnapshot | null) => void;
+  onSnapshotChange?: (snapshot: ScalableSnapshot | null) => void;
 }) {
   const scope = [...subscriptionIds].map((id) => id.toLowerCase()).sort().join(',');
   const [snapshot, setSnapshot] = useState<ScalableSnapshot | null>(null);
@@ -130,6 +131,12 @@ export default function ScalableWorkspace({
   const [classicWindow, setClassicWindow] = useState<CostWindow>({ startDate: '', endDate: '' });
   const pendingClassic = useRef<AbortController | null>(null);
   const generation = useRef(0);
+
+  useEffect(() => {
+    const matchesScope = snapshot?.subscriptionIds.map((id) => id.toLowerCase()).sort().join(',') === scope
+      && snapshot.staleDays === staleDays;
+    onSnapshotChange?.(matchesScope ? snapshot : null);
+  }, [scope, staleDays, snapshot, onSnapshotChange]);
 
   useEffect(() => {
     pendingClassic.current?.abort();
@@ -231,7 +238,7 @@ export default function ScalableWorkspace({
         <button type="button" className="ghost-button" disabled={classicLoading} onClick={() => {
           if (classic) setClassic(null); else void openClassic();
         }}>{classicLoading ? 'Checking interactive report budget...' : classic ? 'Back to paginated explorer' : 'Open classic tabs'}</button>
-        <span>Classic tabs and Chat require a complete snapshot within the API's interactive size budget. Large reports stay in the paginated explorer.</span>
+        <span>Classic tabs require a complete snapshot within the interactive size budget. Chat uses bounded PostgreSQL evidence and remains available for large reports.</span>
       </div>
       {classic ? <section aria-label="Bounded classic report">
         <CostRangeControls
