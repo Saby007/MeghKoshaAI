@@ -8,11 +8,15 @@ and disabled by default; this core does not depend on a Static Web Apps session.
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 import httpx
+import asyncpg
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, StrictBool
@@ -34,6 +38,9 @@ from reports.models import (
     ReportMetadata,
     ReportSnapshot,
     ReportSnapshotSummary,
+    ScalableReportSnapshot,
+    BackgroundAssessmentJob,
+    AssessmentRecordPage,
 )
 from services import arm_client
 from services import user_arm_client
@@ -53,6 +60,10 @@ from services.auth import ClientPrincipal, require_tenant_principal
 from services import sql_metrics
 from services import resource_uptime
 from services import service_retirements
+from services import assessment_store
+from services.assessment_http import AssessmentHTTPBudget
+from services.assessment_settings import scalable_mode, settings as assessment_settings
+from services.assessment_limits import AssessmentLimitError
 from azure.core.exceptions import AzureError
 from services.focus_cost_reader import (
     FocusCostDataError,
@@ -62,12 +73,21 @@ from services.focus_cost_reader import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    try:
+        yield
+    finally:
+        await assessment_store.close()
+
+
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(AssessmentHTTPBudget)
 
 
 @app.middleware("http")
 async def verify_api_identity(request: Request, call_next):
-    public_paths = {"/api/health", "/api/auth/config", "/api/storage-onboarding/template"}
+    public_paths = {"/api/health", "/api/ready", "/api/auth/config", "/api/storage-onboarding/template"}
     if request.url.path.startswith("/api/") and request.url.path not in public_paths:
         try:
             request.state.verified_principal = await asyncio.to_thread(
@@ -101,7 +121,8 @@ def get_verified_identity(request: Request):
     principal = _control_principal(request)
     return JSONResponse({"userId": principal.user_id, "userDetails": principal.user_details,
                          "tenantId": principal.tenant_id,
-                         "features": {"aiNarration": narration_status() == "configured"}},
+                         "features": {"aiNarration": narration_status() == "configured",
+                                      **({"assessmentMode": "postgres"} if scalable_mode() else {})}},
                         headers={"Cache-Control": "no-store"})
 
 
@@ -371,6 +392,12 @@ async def _previous_report_snapshot(
     stale_days: int,
     period_start: str,
 ):
+    if scalable_mode():
+        view = await assessment_store.snapshot_view(
+            _expected_tenant_id(), scope=report_snapshots.scope_hash(subscription_ids, stale_days),
+            before_period=period_start,
+        )
+        return ReportSnapshot(**view, reportSchemaVersion=report_snapshots.REPORT_SCHEMA_VERSION) if view else None
     try:
         catalog = await report_snapshots.list_snapshots(subscription_ids, limit=50)
         previous = next(
@@ -816,7 +843,7 @@ async def get_schedule_runs(request: Request, subscription_id: str):
         raise HTTPException(status_code=503, detail="Execution history is unavailable. Retry later.") from error
 
 
-@app.get("/api/report/latest", response_model=ReportSnapshot, response_model_by_alias=True)
+@app.get("/api/report/latest", response_model=ReportSnapshot | ScalableReportSnapshot, response_model_by_alias=True)
 async def get_latest_report(
     request: Request,
     subscription_ids: list[str] | None = Query(default=None, alias="subscriptionId"),
@@ -826,12 +853,26 @@ async def get_latest_report(
     stale_days = stale_days if isinstance(stale_days, int) else 90
     if stale_days not in {7, 14, 30, 60, 90, 180, 365}:
         raise HTTPException(status_code=422, detail="staleDays must be one of 7, 14, 30, 60, 90, 180, or 365")
+    if scalable_mode() and isinstance(subscription_ids, list):
+        await access_control.require_all_subscription_access(principal.entra_object_id, subscription_ids)
     subscription_ids = await _authorized_scope(principal, subscription_ids)
     if not subscription_ids:
         raise HTTPException(
             status_code=404,
             detail="No completed report snapshot is available for this scope",
         )
+    if scalable_mode():
+        view = await assessment_store.snapshot_view(
+            principal.tenant_id, scope=report_snapshots.scope_hash(subscription_ids, stale_days),
+        )
+        if view is None:
+            raise HTTPException(status_code=404, detail="No completed report is available for this scope")
+        if (view["subscriptionIds"] != report_snapshots.normalize_subscription_ids(subscription_ids)
+                or view["staleDays"] != stale_days
+                or view["report"]["reportMetadata"]["staleDays"] != stale_days):
+            logger.error("Stored assessment scope does not match its lookup key")
+            raise HTTPException(status_code=503, detail="Stored assessment failed scope integrity validation")
+        return JSONResponse(view)
     try:
         return await report_snapshots.load_latest_snapshot(subscription_ids, stale_days)
     except report_snapshots.ReportSnapshotNotFoundError as error:
@@ -1232,9 +1273,17 @@ async def export_custom_report(request: Request, body: CustomReportRequest):
     )
 
 
-@app.post("/api/report", response_model=FullReport, response_model_by_alias=True)
+@app.post("/api/report", response_model=FullReport, response_model_by_alias=True,
+          responses={202: {"model": BackgroundAssessmentJob, "description": "Durable background assessment accepted"}})
 async def run_report(request: AssessmentRequest, http_request: Request):
     principal = _control_principal(http_request)
+    if scalable_mode():
+        await access_control.require_all_subscription_access(principal.entra_object_id, request.subscription_ids)
+        job = await assessment_store.enqueue(
+            principal.tenant_id, principal.entra_object_id, request.subscription_ids, request.stale_days,
+        )
+        return JSONResponse(job, status_code=202, headers={"Location": f"/api/assessments/jobs/{job['jobId']}",
+                                                         "Retry-After": "2", "Cache-Control": "no-store"})
     request.subscription_ids = await access_control.authorized_subscription_ids(
         principal.entra_object_id, request.subscription_ids
     )
@@ -1243,7 +1292,7 @@ async def run_report(request: AssessmentRequest, http_request: Request):
     return await _build_and_publish_report(request.subscription_ids, request.stale_days)
 
 
-async def _build_and_publish_report(subscription_ids: list[str], stale_days: int) -> FullReport:
+async def _build_and_publish_report(subscription_ids: list[str], stale_days: int, *, publish: bool = True) -> FullReport:
     try:
         focus_cost_data = await load_latest_complete_focus_costs(subscription_ids)
         all_subs = await arm_client.list_subscriptions()
@@ -1266,6 +1315,8 @@ async def _build_and_publish_report(subscription_ids: list[str], stale_days: int
                     subscription_ids,
                     max_periods=12,
                 )
+            except AssessmentLimitError:
+                raise
             except Exception:
                 logger.warning("Executive spend history unavailable", exc_info=True)
                 return None
@@ -1273,6 +1324,8 @@ async def _build_and_publish_report(subscription_ids: list[str], stale_days: int
         async def _collect_resource_graph_optional(query: str, label: str):
             try:
                 return await arm_client.query_resource_graph(query, subscription_ids)
+            except AssessmentLimitError:
+                raise
             except Exception:
                 logger.warning("%s unavailable", label, exc_info=True)
                 return []
@@ -1330,6 +1383,8 @@ async def _build_and_publish_report(subscription_ids: list[str], stale_days: int
             ),
             sql_metrics.enrich_sql_inventory(resource_graph_rows, subscription_ids),
         )
+    except AssessmentLimitError:
+        raise
     except FocusCostDataError as e:
         logger.warning("Complete FocusCost export unavailable", exc_info=True)
         raise HTTPException(
@@ -1378,6 +1433,9 @@ async def _build_and_publish_report(subscription_ids: list[str], stale_days: int
         ai_usage_data=ai_usage_data,
         policy_compliance_rows=policy_compliance_rows,
         focus_reconciliation=None,
+        include_all_resource_costs=scalable_mode(),
+        detail_max_rows=assessment_settings().detail_rows if scalable_mode() else 20000,
+        detail_max_points=assessment_settings().detail_points if scalable_mode() else 500000,
     )
     previous_snapshot = await _previous_report_snapshot(
         subscription_ids,
@@ -1385,6 +1443,8 @@ async def _build_and_publish_report(subscription_ids: list[str], stale_days: int
         report.report_metadata.period_start,
     )
     report = _apply_advisor_score_change(report, previous_snapshot)
+    if not publish:
+        return report
     try:
         snapshot = report_snapshots.build_snapshot(
             report,
@@ -1398,6 +1458,124 @@ async def _build_and_publish_report(subscription_ids: list[str], stale_days: int
         # "Open saved report" and Chat have nothing to load until the next successful run.
         logger.error("Completed report snapshot publication failed", exc_info=True)
     return report
+
+
+def _require_scalable_mode() -> None:
+    if not scalable_mode():
+        raise HTTPException(status_code=404, detail="Background assessments are not enabled")
+
+
+async def _scalable_snapshot(request: Request, snapshot_id: str) -> dict:
+    _require_scalable_mode()
+    principal = _control_principal(request)
+    snapshot = await assessment_store.snapshot_view(principal.tenant_id, snapshot_id=snapshot_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Completed assessment was not found")
+    await access_control.require_all_subscription_access(principal.entra_object_id, snapshot["subscriptionIds"])
+    return snapshot
+
+
+@app.get("/api/assessments/jobs", response_model=BackgroundAssessmentJob, response_model_by_alias=True)
+async def get_latest_assessment_job(
+    request: Request,
+    subscription_ids: list[str] = Query(alias="subscriptionId", min_length=1, max_length=100),
+    stale_days: int = Query(default=90, alias="staleDays"),
+):
+    _require_scalable_mode()
+    principal = _control_principal(request)
+    if stale_days not in {7, 14, 30, 60, 90, 180, 365}:
+        raise HTTPException(status_code=422, detail="Invalid staleDays")
+    await access_control.require_all_subscription_access(principal.entra_object_id, subscription_ids)
+    job = await assessment_store.latest_job(principal.tenant_id, subscription_ids, stale_days)
+    if job is None:
+        raise HTTPException(status_code=404, detail="No assessment job is available for this scope")
+    return JSONResponse(job, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/assessments/jobs/{job_id}", response_model=BackgroundAssessmentJob, response_model_by_alias=True)
+async def get_assessment_job(request: Request, job_id: UUID):
+    _require_scalable_mode()
+    principal = _control_principal(request)
+    job = await assessment_store.get_job(principal.tenant_id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Assessment job was not found")
+    await access_control.require_all_subscription_access(principal.entra_object_id, job["subscriptionIds"])
+    return JSONResponse(job, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/assessments/jobs/{job_id}/cancel")
+async def cancel_assessment_job(request: Request, job_id: UUID):
+    await get_assessment_job(request, job_id)
+    principal = _control_principal(request)
+    if not await assessment_store.cancel(principal.tenant_id, job_id, principal.entra_object_id):
+        raise HTTPException(status_code=409, detail="Only the requester can cancel an active assessment")
+    return Response(status_code=204)
+
+
+@app.get("/api/assessments/snapshots/{snapshot_id}", response_model=ScalableReportSnapshot, response_model_by_alias=True)
+async def get_assessment_snapshot(request: Request, snapshot_id: str):
+    return JSONResponse(await _scalable_snapshot(request, snapshot_id), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/assessments/snapshots/{snapshot_id}/records", response_model=AssessmentRecordPage, response_model_by_alias=True)
+async def get_assessment_records(
+    request: Request,
+    snapshot_id: str,
+    path: str = Query(min_length=1, max_length=240),
+    after: int = Query(default=-1, ge=-1),
+    limit: int = Query(default=50, ge=1, le=200),
+    subscription_id: str | None = Query(default=None, alias="subscriptionId", max_length=64),
+    search: str = Query(default="", max_length=100),
+):
+    search = search.strip()
+    if search and len(search) < 3:
+        raise HTTPException(status_code=422, detail="Use at least three characters for indexed detail search")
+    await _scalable_snapshot(request, snapshot_id)
+    principal = _control_principal(request)
+    result = await assessment_store.page(
+        principal.tenant_id, snapshot_id, path, after, min(limit, assessment_settings().page_size),
+        subscription_id.lower() if subscription_id else None, search,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Assessment detail collection was not found")
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/assessments/snapshots/{snapshot_id}/interactive", response_model=ReportSnapshot, response_model_by_alias=True)
+async def get_interactive_assessment(request: Request, snapshot_id: str):
+    expected = await _scalable_snapshot(request, snapshot_id)
+    if assessment_store.interactive_row_count(expected) > assessment_settings().interactive_rows:
+        raise AssessmentLimitError(
+            "This assessment exceeds the classic-view row budget. Use the paginated explorer "
+            "or select a smaller scope; complete totals remain available."
+        )
+    try:
+        snapshot = await report_snapshots.load_snapshot(snapshot_id)
+    except report_snapshots.ReportSnapshotNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Completed assessment archive was not found") from error
+    except report_snapshots.ReportSnapshotIntegrityError as error:
+        logger.exception("Interactive assessment archive failed integrity validation")
+        raise HTTPException(status_code=503, detail="Assessment archive failed integrity validation") from error
+    if snapshot.scope_hash != expected["scopeHash"] or snapshot.subscription_ids != expected["subscriptionIds"]:
+        logger.error("Interactive assessment archive does not match its published database scope")
+        raise HTTPException(status_code=503, detail="Assessment archive failed scope integrity validation")
+    return JSONResponse(snapshot.model_dump(by_alias=True, mode="json"), headers={"Cache-Control": "private, no-store"})
+
+
+@app.get("/api/assessments/snapshots/{snapshot_id}/archive")
+async def download_assessment_archive(request: Request, snapshot_id: str):
+    snapshot = await _scalable_snapshot(request, snapshot_id)
+    period = snapshot["report"]["reportMetadata"]["period"] or "unknown-period"
+    blob_name = f"scopes/{snapshot['scopeHash']}/snapshots/{period}/{snapshot_id}.json"
+
+    def chunks():
+        yield from report_snapshots.get_container_client().download_blob(blob_name).chunks()
+
+    return StreamingResponse(
+        chunks(), media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="assessment-{snapshot_id}.json"',
+                 "Cache-Control": "private, no-store"},
+    )
 
 
 
@@ -1424,3 +1602,19 @@ async def narrate_findings(request: Request):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "features": {"aiNarration": narration_status()}}
+
+
+@app.get("/api/ready")
+async def readiness():
+    if scalable_mode():
+        try:
+            await asyncio.wait_for((await assessment_store.pool(for_read=True)).fetchval(
+                "SELECT 1 FROM assessments.jobs LIMIT 0"
+            ), timeout=3)
+        except (assessment_store.DatabaseConfigurationError, TimeoutError, ConnectionError, AzureError) as error:
+            logger.warning("Assessment database readiness failed: %s", type(error).__name__)
+            return JSONResponse({"status": "unavailable"}, status_code=503)
+        except asyncpg.PostgresError:
+            logger.exception("Assessment database schema/connection readiness failed")
+            return JSONResponse({"status": "unavailable"}, status_code=503)
+    return {"status": "ready"}

@@ -5,12 +5,15 @@ import logging
 import math
 import os
 import re
+import random
 import time
 from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 from services import runtime_identity
+from services import azure_request_pacing
+from services.assessment_settings import settings as assessment_settings
 
 logger = logging.getLogger(__name__)
 
@@ -101,16 +104,27 @@ async def _token() -> str:
 
 
 async def _arm_request(method: str, path: str, json: dict | None = None, timeout: float = 30.0) -> dict:
-    token = await _token()
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        res = await client.request(
-            method,
-            f"{ARM_BASE}{path}",
-            json=json,
-            headers={"Authorization": f"Bearer {token}"},
-        )
-    res.raise_for_status()
-    return res.json() if res.content else {}
+    paced = azure_request_pacing.enabled()
+    retries = assessment_settings().azure_get_retries if paced and method == "GET" else 0
+    for attempt in range(retries + 1):
+        if paced:
+            await azure_request_pacing.wait(path)
+        token = await _token()
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            res = await client.request(
+                method, f"{ARM_BASE}{path}", json=json,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if paced and res.status_code in {429, 500, 502, 503, 504}:
+            delay = azure_request_pacing.retry_delay(res.headers, attempt)
+            await azure_request_pacing.defer(path, delay)
+            logger.warning("Azure collection returned %s; shared worker cooldown %.2fs", res.status_code, delay)
+            if attempt < retries:
+                await asyncio.sleep(delay + random.uniform(0, min(delay * 0.2, 1.0)))
+                continue
+        res.raise_for_status()
+        return res.json() if res.content else {}
+    raise RuntimeError("Azure request retry loop did not produce a response")
 
 
 async def _list_arm_collection(path: str, timeout: float = 30.0) -> list[dict]:
@@ -276,6 +290,8 @@ async def query_resource_graph(query: str, subscription_ids: list[str]) -> list[
                 except ValueError:
                     delay = min(2**attempt, 8.0)
                 await asyncio.sleep(max(delay, 0.0))
+        from services.assessment_limits import consume
+        consume("inventory_rows", len(data.get("data") or []))
         rows.extend(data.get("data") or [])
         skip_token = data.get("$skipToken") or data.get("skipToken")
         if not skip_token:

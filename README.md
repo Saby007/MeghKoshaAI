@@ -10,6 +10,7 @@ You deploy it once into a subscription of your choice, grant it three read/cost-
 
 - [What it does](#what-it-does)
 - [Architecture](#architecture)
+- [Scalable assessments](#scalable-assessments)
 - [System design](#system-design)
 - [Dashboards and tabs](#dashboards-and-tabs)
 - [Prerequisites](#prerequisites)
@@ -27,6 +28,9 @@ You deploy it once into a subscription of your choice, grant it three read/cost-
 - **Stays inside your tenant.** Authentication is delegated Microsoft Entra ID sign-in; the API validates a bearer token issued for itself. The browser never receives an Azure Resource Manager token, and the app never requests Entra admin consent.
 
 ## Architecture
+
+The diagram below describes the Blob compatibility path. New infrastructure
+configurations default to the private PostgreSQL/background path described next.
 
 ```mermaid
 flowchart TB
@@ -79,6 +83,159 @@ flowchart TB
 | `ai` | A private Foundry account/project and model deployments | You want the executive-summary narrative and the Chat tab |
 
 Each profile is a superset of the previous one. Application containers only deploy once you supply built image references (see [Deploying to Azure](#deploying-to-azure)); the AI runtime and processor stay disabled until you explicitly enable them, even after the underlying infrastructure exists.
+
+## Scalable assessments
+
+**Operator-run deployment:** use the
+[private-ACR/private-PostgreSQL manual rollout](docs/manual-scalable-deployment.md).
+The assistant does not execute provisioning, deployment, bootstrap, permission
+changes or workflow runs. Review the published feature branch and exact commit
+before following the operator-run rollout.
+
+**Deployment hold:** this feature is prepared on
+`feature/private-postgres-assessments`. It does not lift the existing Dev
+environment-layout hold or authorize provisioning, identity changes, or deployment.
+
+The new path is **Blob exports -> isolated assessment worker -> private PostgreSQL
+summaries and indexed detail records -> bounded API/dashboard reads**. PostgreSQL
+is also the durable job queue; no assessment uses FastAPI in-process background
+tasks. Existing completed results remain available while their replacement runs.
+
+| AZD environment setting | Default | Purpose |
+| --- | --- | --- |
+| `APP_ASSESSMENT_MODE` | `postgres` | `postgres` or explicit `blob` compatibility mode |
+| `APP_PRIVATE_REGISTRY` | `true` in PostgreSQL mode | Private ACR is enforced for scalable deployments; admin access and public network access stay disabled |
+| `APP_REGISTRY_BUILD_MODE` | `private-runner` in PostgreSQL mode | Private Docker build host, or explicitly selected `managed-pool` in a supported region |
+| `APP_POSTGRES_SKU` / `APP_POSTGRES_TIER` | `Standard_D2ds_v5` / `GeneralPurpose` | Database sizing; validate regional SKU capacity before deployment |
+| `APP_POSTGRES_VERSION` / `APP_POSTGRES_STORAGE_GB` | `16` / `128` | Database version and storage |
+| `APP_ASSESSMENT_WORKER_CPU` | `4.0` | `1.0`, `2.0`, or `4.0`; paired with 2, 4, or 8 GiB |
+| `APP_ASSESSMENT_WORKER_REPLICAS` | `1` | Fixed bounded concurrency, 1-4 isolated replicas |
+| `APP_ASSESSMENT_POOL_SIZE` / `APP_ASSESSMENT_QUEUE_CAPACITY` | `5` / `50` | Total API connection budget (read 3/work 2 by default), per-worker-process pool limit, and total active-job admission limit |
+| `APP_ASSESSMENT_LIMITS` | `{}` | Numeric overrides: `inputBytes`, `spoolBytes`, `expandedBytes`, `csvRows`, `historyRows`, `inventoryRows`, `timeoutSeconds`, `leaseSeconds`, `maxAttempts`, `pageSize`, `responseBytes`, `recordBytes`, `inlineRows`, `apiConcurrency`, `interactiveRows`, `workConcurrency`, `readPoolSize`, `armIntervalMs`, `graphIntervalMs`, `metricsIntervalMs`, `costIntervalMs`, `azureGetRetries`, `detailRows`, `detailPoints` |
+| `SERVICE_ASSESSMENT_IMAGE_NAME` | API image | Reviewed immutable image used by worker and bootstrap job |
+| `APP_ASSESSMENT_FOUNDATION_ONLY` | `false` | Stage database/bootstrap without changing application resources |
+| `APP_ASSESSMENT_DB_BOOTSTRAPPED` | `false` | Explicit operator attestation required before application release |
+
+Enabling PostgreSQL adds data infrastructure even with the `core` profile; use
+`APP_ASSESSMENT_MODE=blob` for the original foundation-only footprint. Unconfigured
+existing API runtimes continue in Blob mode until deliberately redeployed with
+`ASSESSMENT_MODE=postgres`; no existing AZD environment is modified automatically.
+
+### Private networking and passwordless bootstrap
+
+PostgreSQL public network access and password authentication are disabled.
+Its private endpoint and private DNS zone are linked to the Container Apps VNet.
+Connections validate TLS hostname/certificates and request an Entra token through
+the selected managed identity for every new pooled connection.
+
+The dedicated bootstrap identity is the Entra database administrator and is attached
+only to a **manual** bootstrap job, never to the API or assessment worker. The API
+uses `meghkosha_api`; the worker/scheduler uses `meghkosha_worker`. Bootstrap verifies
+principal object IDs and creates schema/least-privilege database grants.
+
+After separate deployment approval:
+
+1. Preview and provision the private foundation with
+   `APP_ASSESSMENT_FOUNDATION_ONLY=true`, leaving application images unset for a new
+   environment. ACR Premium/private endpoint and PostgreSQL are created first.
+2. From the approved private build path, publish reviewed images containing this
+   branch's source and dependencies. Set the immutable assessment image digest and
+   provision the manual bootstrap job, still in foundation-only mode.
+3. Explicitly start the `ASSESSMENT_BOOTSTRAP_JOB` from inside the existing ACA
+   environment. Verify completion, private DNS resolution, TLS, and both runtime
+   identity permissions. No public database firewall exception is required.
+4. Grant the worker identity Reader and the required cost-read permissions on each
+   assessed subscription through the existing governed onboarding process. The
+   shared export processor additionally retains its existing cost-export grants.
+5. Only after verification set `APP_ASSESSMENT_DB_BOOTSTRAPPED=true`, clear the
+   foundation-only flag, and release the reviewed API/web/worker images through
+   the Bicep provisioning flow. Direct `azd deploy` remains disabled by existing
+   preflight policy. Re-run manual bootstrap for reviewed schema migrations.
+
+The API readiness probe checks the database schema independently of liveness.
+Database unavailability produces a retryable service error, never a zero-cost
+success or a fallback to synchronous assessment generation.
+
+### Large-data behavior and compatibility
+
+- `POST /api/report` returns **202** with a durable job ID. Same-scope requests
+  coalesce; full queues return **429** with `Retry-After`.
+- Jobs use atomic claims, expiring leases, fenced publication, bounded retries,
+  cancellation, and a supervised subprocess per worker. Only complete assessments
+  become visible. Browser reconnects resume job-status observation.
+- Worker CSV downloads are chunked to temporary files. CSV decompression is
+  streamed and the two-pass tag-attribution buffer is disk-spooled. Row, byte,
+  history, inventory, elapsed-time, and worker-memory safety budgets fail explicitly.
+  The supervisor owns and cleans each job workspace, including after child
+  termination. Cumulative spooling is capped at 2/4/6 GiB for 1/2/4 CPU workers.
+- Retained history uses bounded JSONL segments per billing period and replayable
+  sequences, not a raw-row list spanning all months. Commitment calculations
+  replay closed periods instead of retaining another full copy. PostgreSQL detail
+  defaults allow 50,000 output series/5,000,000 daily points; beyond configured
+  output capacity, detail availability is explicit and headline totals stay complete.
+- Fast summary/job metadata reads have separate admission from new work and
+  expensive operations. The API reserves three of its five database connections
+  for those reads by default; work cannot consume that reserved pool.
+- Worker Azure calls share PostgreSQL pacing/cooldown state across replicas:
+  Resource Graph is identity-scoped, metrics and other ARM classes are
+  conservatively subscription-scoped. Safe GET retries honor provider Retry-After
+  headers with jitter; mutating POSTs are not blindly replayed. These cadences
+  are configurable safeguards, not guarantees of Azure quota availability.
+- Detail search uses `pg_trgm`/GIN with literal substring matching and requires
+  three characters. Scope/ID lookups use explicit indexed predicates instead of
+  generic nullable-filter plans; history catalogs bound candidates per scope.
+- Dashboard startup reads a bounded complete summary, not raw FOCUS or a full
+  snapshot. Detail collections use stable cursor pagination and bounded responses.
+  Complete totals are never recomputed from only the visible page.
+  PostgreSQL reports retain all positive-cost resource rows for pagination rather
+  than inheriting the Blob renderer's historical top-200 cost-hierarchy limit.
+- In PostgreSQL mode the UI intentionally uses a **summary/detail explorer**
+  rather than the legacy whole-report tab renderer. All stored report sections and
+  deferred collections remain inspectable. **Open classic tabs** preserves the
+  original views and enables Chat only when the complete snapshot fits the
+  interactive size budget. It never renders charts from truncated detail data.
+  On-demand FOCUS reprocessing is worker-only. Keep `blob` mode for the unchanged
+  synchronous tab/Chat workflow.
+- Classic tabs require at most 1,000 combined inline/deferred rows by default.
+  Legacy full-snapshot interactive operations are limited to 4 MiB reads and
+  bounded concurrency. Larger reports use paginated evidence or the authenticated,
+  streamed JSON archive endpoint
+  `/api/assessments/snapshots/{snapshotId}/archive`; they are not silently truncated.
+- Native FOCUS files and immutable snapshots remain in Blob Storage. PostgreSQL
+  publication does not advance Blob compatibility pointers for cancelled/unfinished
+  jobs.
+
+The initial acceptance workload is **15,000 resources and 1,000,000 FOCUS rows per
+subscription, 10 concurrent readers, warm summary p95 <= 2 seconds**. Local synthetic
+tests are not evidence of Azure end-to-end latency or deployed crash freedom.
+Regional quota/SKU availability, private connectivity, real Entra token renewal,
+worker restart recovery, and container restart counts require a separately approved
+Dev deployment/load test. There is no unlimited-load guarantee.
+
+Local validation on 2026-10-27 passed that single-subscription synthetic profile
+through CSV parsing, report construction, PostgreSQL publication, and concurrent
+API reads: summary p95 approximately **0.20 seconds**, pipeline process peak
+approximately **206 MiB**, with all 15,000 positive-cost resource records retained.
+Azure authorization/ARM calls were mocked. The local database was PostgreSQL 18.4;
+the Azure template targets PostgreSQL 16/17 and still requires live verification.
+
+The backend regression suite passed 826 tests; the two opt-in PostgreSQL/scale
+tests passed separately. All 270 available frontend tests and the production
+build passed. One pre-existing unavailable untracked sidebar test was excluded
+only in temporary local validation configuration, not removed from the project.
+
+The private-ACR/throttling follow-up passed **837 backend tests**, **271 available
+frontend tests**, template/type/production-build checks, and **four separately
+enabled PostgreSQL/scale gates**. A retained-history fixture with one million rows
+over 61 days kept all 15,000 resource series and 915,000 daily points; local read
+p95 during publication was about 0.07 seconds, with a pipeline working-set peak
+around 425 MiB. Azure authorization/ARM were mocked. These results do not replace
+the operator-run private-network and ACA load/restart checks in the manual guide.
+
+To run the isolated SQL/scale gates, set `ASSESSMENT_TEST_DSN` to a **dedicated
+loopback database named `meghkosha_test`**, set `ASSESSMENT_RUN_SCALE_TESTS=1`, and run
+`python -m pytest tests\test_assessment_postgres.py -q -s` from the API directory.
+These tests reset their fixture tables; never point them at customer data.
 
 ## System design
 
@@ -139,6 +296,11 @@ az provider show --namespace Microsoft.CostManagementExports --subscription <sub
 > Creating an export in the Azure portal registers this provider for you automatically, but MeghKoshaAI creates its export through the [Cost Management REST API](https://learn.microsoft.com/rest/api/cost-management/exports/create-or-update), which does not. If the provider is missing, Azure rejects the export-creation call with `400 Bad Request`, the **Schedules** tab shows **Export status unavailable** with *"FOCUS export configuration could not be confirmed"*, and no export is ever created — regardless of how correct your role assignments and storage firewall settings are. Registering the provider and then using **Refresh schedules** resolves it; nothing needs redeploying.
 
 ## Deploying to Azure
+
+**New PostgreSQL deployments require private ACR and the staged
+[manual rollout guide](docs/manual-scalable-deployment.md).** Do not run `azd up`
+or the legacy one-command helpers for that path. The sections below describe the
+Blob compatibility workflow; its helpers require explicit `-AssessmentMode blob`.
 
 There are three ways to deploy: one command that does the whole thing, the step-by-step Azure Developer CLI workflow, or a portal-button path (ARM/Bicep templates can only reference already-built container images — they cannot build code from a repository by themselves).
 

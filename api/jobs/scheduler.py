@@ -11,6 +11,7 @@ import logging
 from fastapi import HTTPException
 
 from services import focus_schedules
+from services.assessment_settings import scalable_mode
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,13 @@ async def _refresh_report_for_active_schedules() -> None:
     try:
         subscription_ids = await focus_schedules.active_scheduled_subscription_ids()
         if not subscription_ids:
+            return
+        if scalable_mode():
+            import os
+            from services import assessment_store
+            await assessment_store.enqueue(
+                os.environ["AZURE_TENANT_ID"].lower(), "scheduler", subscription_ids, _REPORT_REFRESH_STALE_DAYS,
+            )
             return
         from main import _build_and_publish_report
 

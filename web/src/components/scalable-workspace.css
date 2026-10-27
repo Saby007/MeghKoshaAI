@@ -1,0 +1,14 @@
+.scalable-workspace { display: grid; gap: 1.25rem; padding: 1.25rem; }
+.scalable-workspace section { min-width: 0; }
+.scalable-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }
+.scalable-metrics > section { border: 1px solid currentColor; border-radius: 8px; padding: 1rem; }
+.scalable-metrics strong { font-size: 1.5rem; }
+.scalable-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; margin-block: 1rem; }
+.scalable-workspace label { display: grid; gap: .4rem; max-width: 100%; }
+.scalable-workspace :is(select, input) { padding: .55rem; max-width: 100%; color: inherit; background: inherit; border: 1px solid currentColor; border-radius: 4px; }
+.scalable-summary dl { display: grid; gap: .7rem; }
+.scalable-summary dl > div { border-inline-start: 2px solid currentColor; padding-inline-start: .8rem; }
+.scalable-summary dt { font-weight: 600; }
+.scalable-summary dd { margin-inline-start: 0; overflow-wrap: anywhere; }
+.scalable-workspace .table-scroll { overflow: auto; max-height: 65vh; }
+.scalable-workspace pre { max-width: 60ch; max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

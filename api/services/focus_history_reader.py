@@ -7,6 +7,7 @@ import calendar
 import logging
 import time
 from dataclasses import dataclass
+from collections.abc import Sequence
 from datetime import date, timedelta
 
 import httpx
@@ -14,6 +15,9 @@ import httpx
 from anomalies.models import DailyCostRecord
 from services import arm_client, focus_cost_reader
 from services.focus_export_control import normalize_subscription_id
+from services.assessment_limits import consume, active_budget, AssessmentLimitError
+from services.assessment_settings import scalable_mode
+from services.history_records import HistoryRecords, HistorySegment
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,7 @@ class FocusHistoryData:
     periods: list[str]
     subscription_ids: list[str]
     subscription_names: dict[str, str]
-    records: list[DailyCostRecord]
+    records: Sequence[DailyCostRecord]
     # The month Azure hasn't closed yet (data runs through history_end); month totals must skip it.
     partial_period: str | None = None
 
@@ -157,7 +161,7 @@ def _parse_history_files(
     currencies: set[str] = set()
     subscription_names: dict[str, str] = {}
     observed_days: dict[str, set[str]] = {value: set() for value in subscription_ids}
-    parsed: list[tuple[str, list[DailyCostRecord], date, date]] = []
+    parsed: list[tuple[str, Sequence[DailyCostRecord], date, date]] = []
     seen_periods: set[str] = set()
 
     # Newest first, so history can end cleanly where storage retention removed older files.
@@ -186,7 +190,8 @@ def _parse_history_files(
             if parsed:
                 break
             continue
-        period_records: list[DailyCostRecord] = []
+        budget = active_budget.get()
+        period_records: list[DailyCostRecord] | HistorySegment = HistorySegment(budget) if budget else []
         for blob_name, content in sorted(files.items()):
             for row in focus_cost_reader._csv_reader(content, blob_name):
                 subscription_id = focus_cost_reader._subscription_id(row["SubAccountId"])
@@ -215,6 +220,7 @@ def _parse_history_files(
                 group_tags = resource_group_tags.get((subscription_id, str(row.get("x_ResourceGroupName") or "").strip().lower()), {})
                 inherited = {key: value for key, value in group_tags.items() if not resource_tags.get(key)}
                 tags = {**resource_tags, **inherited}
+                consume("history_rows")
                 period_records.append(
                     DailyCostRecord(
                         date=charge_date,
@@ -241,7 +247,11 @@ def _parse_history_files(
         parsed.append((period, period_records, month_start, period_end))
 
     parsed.reverse()
-    records = [record for _, period_records, _, _ in parsed for record in period_records]
+    records: Sequence[DailyCostRecord] = (
+        HistoryRecords([period_records for _, period_records, _, _ in parsed])
+        if active_budget.get() is not None
+        else [record for _, period_records, _, _ in parsed for record in period_records]
+    )
 
     if len(currencies) != 1:
         raise focus_cost_reader.FocusCostDataError(
@@ -291,6 +301,8 @@ async def load_complete_focus_history(
     *,
     required_days: int = 60,
 ) -> FocusHistoryData:
+    if scalable_mode() and active_budget.get() is None:
+        raise AssessmentLimitError("Historical FOCUS parsing is worker-only. Use a completed background assessment.")
     normalized = [normalize_subscription_id(value) for value in subscription_ids]
     cache_key = tuple(sorted(normalized)) + (str(required_days),)
     now = time.monotonic()
@@ -315,6 +327,8 @@ async def load_available_focus_history(
     *,
     max_periods: int = 12,
 ) -> FocusHistoryData:
+    if scalable_mode() and active_budget.get() is None:
+        raise AssessmentLimitError("Historical FOCUS parsing is worker-only. Use a completed background assessment.")
     normalized = [normalize_subscription_id(value) for value in subscription_ids]
     cache_key = tuple(sorted(normalized)) + ("dashboard", str(max_periods))
     now = time.monotonic()

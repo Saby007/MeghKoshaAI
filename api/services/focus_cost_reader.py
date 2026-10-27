@@ -11,14 +11,21 @@ import json
 import os
 import re
 import time
+import uuid
+from pathlib import Path
 from dataclasses import dataclass, field
+from contextlib import nullcontext
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from tempfile import TemporaryFile
+from typing import IO
 
 import httpx
 
 from services import arm_client, focus_export_download
 from services.focus_export_control import normalize_subscription_id
+from services.assessment_limits import active_budget, consume, AssessmentLimitError
+from services.assessment_settings import scalable_mode
 
 FOCUS_DATA_VERSION = "1.2-preview"
 _PERIOD_PATTERN = re.compile(r"/(\d{8})-(\d{8})/")
@@ -248,7 +255,36 @@ def _period(blob_names: list[str]) -> tuple[str, str, str]:
     return start[:7], start, end
 
 
-def _csv_reader(content: bytes, blob_name: str) -> csv.DictReader:
+def _stream_csv(content: Path, blob_name: str):
+    with content.open("rb") as raw:
+        compressed = raw.read(2) == b"\x1f\x8b"
+        raw.seek(0)
+        source = gzip.GzipFile(fileobj=raw) if compressed else raw
+        try:
+            with io.TextIOWrapper(source, encoding="utf-8-sig", newline="") as stream:
+                def lines():
+                    while True:
+                        line = stream.readline(1048577)
+                        if not line:
+                            return
+                        if len(line) > 1048576:
+                            raise FocusCostDataError(f"FocusCost CSV line is too large: {blob_name}")
+                        consume("expanded_bytes", len(line.encode("utf-8")))
+                        yield line
+                reader = csv.DictReader(lines())
+                missing = _REQUIRED_COLUMNS - set(reader.fieldnames or [])
+                if missing:
+                    raise FocusCostDataError(f"FocusCost file is missing columns: {', '.join(sorted(missing))}")
+                for row in reader:
+                    consume("csv_rows")
+                    yield row
+        except (gzip.BadGzipFile, UnicodeDecodeError, csv.Error) as error:
+            raise FocusCostDataError(f"Invalid FocusCost CSV file {blob_name}") from error
+
+
+def _csv_reader(content: bytes | Path, blob_name: str):
+    if isinstance(content, Path):
+        return _stream_csv(content, blob_name)
     if content[:2] == b"\x1f\x8b":
         try:
             content = gzip.decompress(content)
@@ -265,13 +301,54 @@ def _csv_reader(content: bytes, blob_name: str) -> csv.DictReader:
     return reader
 
 
+class _TagRows:
+    def __init__(self, stream: IO[str] | None):
+        self.stream = stream
+        self.rows: list[tuple[str, str, dict[str, str], Decimal]] = []
+
+    def append(self, row: tuple[str, str, dict[str, str], Decimal]) -> None:
+        if self.stream is None:
+            self.rows.append(row)
+        else:
+            line = json.dumps([*row[:3], str(row[3])], separators=(",", ":")) + "\n"
+            consume("spool_bytes", len(line.encode("utf-8")))
+            self.stream.write(line)
+
+    def __iter__(self):
+        if self.stream is None:
+            yield from self.rows
+        else:
+            self.stream.seek(0)
+            for line in self.stream:
+                subscription_id, group, tags, cost = json.loads(line)
+                yield subscription_id, group, tags, Decimal(cost)
+
+
 def build_focus_cost_data(
-    files: dict[str, bytes],
+    files: dict[str, bytes | Path],
     requested_subscription_ids: list[str],
     *,
     data_version: str = FOCUS_DATA_VERSION,
     generated_at: str = "",
     resource_group_tags: dict[tuple[str, str], dict[str, str]] | None = None,
+) -> FocusCostData:
+    budget = active_budget.get()
+    context = TemporaryFile(mode="w+t", encoding="utf-8", dir=budget.spool_directory) if budget else nullcontext(None)
+    with context as stream:
+        return _build_focus_cost_data(
+            files, requested_subscription_ids, _TagRows(stream), data_version=data_version,
+            generated_at=generated_at, resource_group_tags=resource_group_tags,
+        )
+
+
+def _build_focus_cost_data(
+    files: dict[str, bytes | Path],
+    requested_subscription_ids: list[str],
+    tag_rows: _TagRows,
+    *,
+    data_version: str,
+    generated_at: str,
+    resource_group_tags: dict[tuple[str, str], dict[str, str]] | None,
 ) -> FocusCostData:
     if data_version != FOCUS_DATA_VERSION:
         raise FocusCostDataError(f"Unsupported FOCUS data version {data_version!r}")
@@ -307,7 +384,6 @@ def build_focus_cost_data(
     # (subscription_id, resource_group_name_lower, resource's own lowercase tags, cost) -
     # buffered so tag dimensions discovered later in the file still get a correct
     # "Unallocated" bucket for every row that lacks them (see the pass below the loop).
-    tag_rows: list[tuple[str, str, dict[str, str], Decimal]] = []
     evidence: dict[str, dict[tuple[str, ...], dict[str, str | Decimal]]] = {}
     commitment_totals = {
         "reservation": {"rows": 0, "used": Decimal(), "unused": Decimal(), "benefit": Decimal()},
@@ -643,9 +719,9 @@ def _download_run_files(
     subscription_ids: list[str],
     selected_runs: dict[str, dict],
     period_path: str,
-) -> dict[str, bytes]:
+) -> dict[str, bytes | Path]:
     container = focus_export_download.get_container_client()
-    files: dict[str, bytes] = {}
+    files: dict[str, bytes | Path] = {}
     for subscription_id in subscription_ids:
         run = selected_runs[subscription_id]
         run_id = str(run.get("name") or "")
@@ -660,6 +736,20 @@ def _download_run_files(
         if not blobs:
             raise FocusCostFilesMissingError(f"Completed FocusCost run has no CSV files for {subscription_id}")
         for blob in blobs:
+            budget = active_budget.get()
+            if budget is not None:
+                target = budget.spool_directory / f"{uuid.uuid4().hex}.csv"
+                size = 0
+                with target.open("wb") as stream:
+                    for chunk in container.download_blob(blob.name).chunks():
+                        consume("input_bytes", len(chunk))
+                        consume("spool_bytes", len(chunk))
+                        size += len(chunk)
+                        stream.write(chunk)
+                if size != int(blob.size or 0):
+                    raise FocusCostDataError(f"FocusCost blob size check failed for {blob.name}")
+                files[blob.name] = target
+                continue
             content = container.download_blob(blob.name).readall()
             if len(content) != int(blob.size or 0):
                 raise FocusCostDataError(f"FocusCost blob size check failed for {blob.name}")
@@ -668,6 +758,8 @@ def _download_run_files(
 
 
 async def load_latest_complete_focus_costs(subscription_ids: list[str]) -> FocusCostData:
+    if scalable_mode() and active_budget.get() is None:
+        raise AssessmentLimitError("FOCUS parsing is worker-only in PostgreSQL mode. Queue a background assessment.")
     normalized = [normalize_subscription_id(value) for value in subscription_ids]
     cache_key = tuple(sorted(normalized))
     now = time.monotonic()

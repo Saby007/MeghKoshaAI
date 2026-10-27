@@ -2,6 +2,8 @@ param(
     [Parameter(Mandatory)]
     [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$')]
     [string] $EnvironmentName,
+    [ValidateSet('blob', 'postgres')]
+    [string] $AssessmentMode = 'postgres',
     [string] $Location = 'centralindia',
     [ValidateRange(1, 5)]
     [int] $MaxAttempts = 3,
@@ -12,11 +14,15 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if (-not $PlanOnly -and $AssessmentMode -eq 'postgres') {
+    throw 'PostgreSQL/private-ACR rollout must follow docs/manual-scalable-deployment.md. This legacy helper will not execute it. Use -AssessmentMode blob only for an explicitly reviewed compatibility deployment.'
+}
 
 $modelRouter = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]'
 $settings = [ordered]@{
     AZURE_LOCATION = $Location
     APP_PROFILE = 'ai'
+    APP_ASSESSMENT_MODE = $AssessmentMode
     APP_EXPORT_TRUSTED_SERVICES = 'true'
     APP_MODEL_DEPLOYMENTS = $modelRouter
     MODEL_ROUTER_DEPLOYMENT_NAME = 'model-router'

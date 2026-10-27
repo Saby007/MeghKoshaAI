@@ -15,6 +15,7 @@ param dailyExportName string
 @maxValue(6)
 param exportParallelMonths int = 1
 param schedule string = '*/5 * * * *'
+param assessmentEnvironment array = []
 
 resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: registryName
@@ -59,7 +60,7 @@ resource processor 'Microsoft.App/jobs@2024-03-01' = {
           image: processorImage
           command: ['/usr/bin/python', '-m', 'jobs.scheduler']
           resources: { cpu: json('1.0'), memory: '2Gi' }
-          env: [
+          env: concat([
             { name: 'AZURE_CLIENT_ID', value: processorIdentity.clientId }
             { name: 'AZURE_TENANT_ID', value: tenant().tenantId }
             { name: 'APP_SCHEDULER_ENABLED', value: 'true' }
@@ -71,7 +72,7 @@ resource processor 'Microsoft.App/jobs@2024-03-01' = {
             { name: 'COST_EXPORT_CONTAINER', value: 'cost-exports' }
             { name: 'CONTROL_STATE_CONTAINER', value: 'control-state' }
             { name: 'MEGHKOSHA_AI_ENABLED', value: 'false' }
-          ]
+          ], assessmentEnvironment)
         }
       ]
     }

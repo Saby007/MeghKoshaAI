@@ -340,6 +340,7 @@ if (`$global:deployTestState.requireServiceTree -and -not `$ServiceManagementRef
     $script = Join-Path $PSScriptRoot '../deploy-end-to-end.ps1'
     $parameters = @{
         EnvironmentName = $environmentName
+        AssessmentMode = 'blob'
         RepoDirectory = $repoRoot
         TargetSubscriptionId = "$targetOne, $targetTwo"
         SettleSeconds = 0
@@ -455,6 +456,7 @@ if (`$global:deployTestState.requireServiceTree -and -not `$ServiceManagementRef
     # Bicep creates the Container Apps from those images. azd up must never run, because it would
     # try to build into a registry that denies public access.
     $private = @{
+        AssessmentMode = 'blob'
         EnvironmentName = 'app-private'
         RepoDirectory = $repoRoot
         TargetSubscriptionId = $targetOne

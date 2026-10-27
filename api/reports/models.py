@@ -6,7 +6,7 @@ Governance & Risk, Action Plan. Field aliases are camelCase for the frontend.
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from findings.models import FindingCategorySummary
 
@@ -843,6 +843,56 @@ class ReportSnapshot(BaseModel):
     report: FullReport
 
 
+class ScalableReportSummary(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    executive_summary: ExecutiveSummary = Field(alias="executiveSummary")
+    report_metadata: ReportMetadata = Field(alias="reportMetadata")
+    completeness: DataCompleteness
+
+
+class ReportCollection(BaseModel):
+    path: str
+    total: int
+
+
+class ScalableReportSnapshot(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    snapshot_id: str = Field(alias="snapshotId")
+    scope_hash: str = Field(alias="scopeHash")
+    subscription_ids: list[str] = Field(alias="subscriptionIds")
+    stale_days: int = Field(alias="staleDays")
+    created_at: str = Field(alias="createdAt")
+    report: ScalableReportSummary
+    collections: list[ReportCollection]
+
+
+class BackgroundAssessmentJob(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    job_id: str = Field(alias="jobId")
+    subscription_ids: list[str] = Field(alias="subscriptionIds")
+    stale_days: int = Field(alias="staleDays")
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    phase: str
+    created_at: str = Field(alias="createdAt")
+    attempts: int
+    snapshot_id: str | None = Field(alias="snapshotId")
+    error_code: str | None = Field(alias="errorCode")
+    error: str | None
+
+
+class AssessmentRecordPage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    path: str
+    total: int
+    items: list[JsonValue]
+    next_cursor: int | None = Field(alias="nextCursor")
+    filtered: bool
+
+
 class ReportSnapshotSummary(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -896,4 +946,3 @@ class NativeBudgetSummary(BaseModel):
     filter: dict = Field(default_factory=dict)
     observed_at: str = Field(default="", alias="observedAt")
     cost_basis: str = Field(default="ActualCost", alias="costBasis")
-

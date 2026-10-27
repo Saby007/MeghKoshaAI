@@ -14,6 +14,8 @@ from azure.storage.blob import BlobServiceClient, ContainerClient, ContentSettin
 
 from reports.models import FullReport, ReportSnapshot, ReportSnapshotSummary
 from services import runtime_identity
+from services.assessment_settings import scalable_mode, settings
+from services.assessment_limits import AssessmentLimitError
 
 REPORT_SCHEMA_VERSION = "1.0"
 _GLOBAL_POINTER = "latest.json"
@@ -99,7 +101,11 @@ def build_snapshot(
     )
 
 
-def _publish_snapshot(snapshot: ReportSnapshot) -> None:
+def snapshot_blob_name(snapshot: ReportSnapshot) -> str:
+    return _snapshot_blob(snapshot)
+
+
+def _publish_snapshot(snapshot: ReportSnapshot, update_pointers: bool = True) -> None:
     container = get_container_client()
     payload = _json_bytes(snapshot.model_dump(by_alias=True, mode="json"))
     blob_name = _snapshot_blob(snapshot)
@@ -139,15 +145,32 @@ def _publish_snapshot(snapshot: ReportSnapshot) -> None:
         )
     except ResourceExistsError:
         pass
-    container.upload_blob(_scope_pointer(snapshot.scope_hash), pointer, overwrite=True, content_settings=settings)
-    container.upload_blob(_GLOBAL_POINTER, pointer, overwrite=True, content_settings=settings)
+    if update_pointers:
+        container.upload_blob(_scope_pointer(snapshot.scope_hash), pointer, overwrite=True, content_settings=settings)
+        container.upload_blob(_GLOBAL_POINTER, pointer, overwrite=True, content_settings=settings)
 
 
-async def publish_snapshot(snapshot: ReportSnapshot) -> None:
-    await asyncio.to_thread(_publish_snapshot, snapshot)
+async def publish_snapshot(snapshot: ReportSnapshot, *, update_pointers: bool = True) -> None:
+    if update_pointers:
+        await asyncio.to_thread(_publish_snapshot, snapshot)
+    else:
+        await asyncio.to_thread(_publish_snapshot, snapshot, False)
 
 
 def _download_bytes(container: ContainerClient, blob_name: str) -> bytes:
+    if scalable_mode() and os.environ.get("ASSESSMENT_WORKER_PROCESS") != "true":
+        limit = settings().snapshot_read_bytes
+        blob = container.get_blob_client(blob_name)
+        if blob.get_blob_properties().size > limit:
+            raise AssessmentLimitError(
+                "This full report exceeds the interactive read budget. Use the scalable summary/detail API."
+            )
+        parts = bytearray()
+        for chunk in blob.download_blob().chunks():
+            if len(parts) + len(chunk) > limit:
+                raise AssessmentLimitError("Report grew beyond the interactive read budget. Use paginated details.")
+            parts.extend(chunk)
+        return bytes(parts)
     return container.download_blob(blob_name).readall()
 
 
@@ -179,6 +202,16 @@ async def load_latest_snapshot(
     subscription_ids: list[str] | None = None,
     stale_days: int = 90,
 ) -> ReportSnapshot:
+    if scalable_mode():
+        from services import assessment_store
+        if not subscription_ids:
+            raise ReportSnapshotNotFoundError("An exact authorized subscription scope is required")
+        metadata = await assessment_store.archive_metadata(
+            os.environ["AZURE_TENANT_ID"].lower(), scope=scope_hash(subscription_ids, stale_days),
+        )
+        if metadata is None:
+            raise ReportSnapshotNotFoundError("No completed PostgreSQL report exists for this scope")
+        return await asyncio.to_thread(_load_snapshot, metadata["snapshot_id"], f'{metadata["blob_name"]}.manifest.json')
     return await asyncio.to_thread(_load_latest, subscription_ids, stale_days)
 
 
@@ -211,19 +244,26 @@ async def list_snapshots(
     *,
     limit: int = 50,
 ) -> list[ReportSnapshotSummary]:
+    if scalable_mode():
+        from services import assessment_store
+        if not subscription_ids:
+            raise ValueError("An exact authorized subscription scope is required")
+        return [ReportSnapshotSummary.model_validate(item) for item in
+                await assessment_store.snapshot_catalog(os.environ["AZURE_TENANT_ID"].lower(), subscription_ids, limit)]
     return await asyncio.to_thread(_list_snapshots, subscription_ids, limit)
 
 
-def _load_snapshot(snapshot_id: str) -> ReportSnapshot:
+def _load_snapshot(snapshot_id: str, manifest_name: str | None = None) -> ReportSnapshot:
     if not snapshot_id or len(snapshot_id) > 64 or not snapshot_id.replace("-", "").isalnum():
         raise ReportSnapshotNotFoundError(snapshot_id)
     container = get_container_client()
-    matching_manifest = None
-    for blob in container.list_blobs(name_starts_with="scopes/"):
-        name = str(getattr(blob, "name", ""))
-        if name.endswith(f"/{snapshot_id}.json.manifest.json"):
-            matching_manifest = name
-            break
+    matching_manifest = manifest_name
+    if matching_manifest is None:
+        for blob in container.list_blobs(name_starts_with="scopes/"):
+            name = str(getattr(blob, "name", ""))
+            if name.endswith(f"/{snapshot_id}.json.manifest.json"):
+                matching_manifest = name
+                break
     if not matching_manifest:
         raise ReportSnapshotNotFoundError(snapshot_id)
     try:
@@ -245,4 +285,12 @@ def _load_snapshot(snapshot_id: str) -> ReportSnapshot:
 
 
 async def load_snapshot(snapshot_id: str) -> ReportSnapshot:
+    if scalable_mode():
+        from services import assessment_store
+        metadata = await assessment_store.archive_metadata(
+            os.environ["AZURE_TENANT_ID"].lower(), snapshot_id=snapshot_id,
+        )
+        if metadata is None:
+            raise ReportSnapshotNotFoundError(snapshot_id)
+        return await asyncio.to_thread(_load_snapshot, snapshot_id, f'{metadata["blob_name"]}.manifest.json')
     return await asyncio.to_thread(_load_snapshot, snapshot_id)

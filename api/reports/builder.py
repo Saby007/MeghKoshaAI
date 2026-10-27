@@ -467,10 +467,10 @@ def _tag_daily_cost_trend(
     )
 
 
-def _cost_hierarchy(focus_data: FocusCostData | None, total_spend: float) -> list[CostHierarchyItem]:
+def _cost_hierarchy(focus_data: FocusCostData | None, total_spend: float, include_all: bool = False) -> list[CostHierarchyItem]:
     if not focus_data:
         return []
-    return [
+    rows = [
         CostHierarchyItem(
             subscription_id=item.subscription_id,
             subscription_name=item.subscription_name,
@@ -483,7 +483,8 @@ def _cost_hierarchy(focus_data: FocusCostData | None, total_spend: float) -> lis
         )
         for item in focus_data.resource_costs
         if item.effective_cost > 0
-    ][:200]
+    ]
+    return rows if include_all else rows[:200]
 
 
 def _region_spend(focus_data: FocusCostData | None, total_spend: float) -> list[RegionSpendSummary]:
@@ -1351,8 +1352,10 @@ def _commitment_insights(history: FocusHistoryData | None) -> CommitmentInsights
 
     buckets: dict[str, dict] = {}
     # The open month is incomplete, so it isn't reported as a month alongside closed ones.
-    closed_records = [record for record in history.records if record.date[:7] != history.partial_period]
-    for record in closed_records:
+    def closed_records():
+        return (record for record in history.records if record.date[:7] != history.partial_period)
+
+    for record in closed_records():
         bucket = buckets.setdefault(record.date[:7], _empty_bucket())
         is_usage = record.charge_category.lower() == "usage"
         status = record.commitment_discount_status.lower()
@@ -1394,7 +1397,7 @@ def _commitment_insights(history: FocusHistoryData | None) -> CommitmentInsights
     # Second pass: PAYG-eligible usage cost for resource types that had at least one
     # reservation-covered row in the same month - the denominator for org-level coverage.
     payg_eligible: dict[str, float] = {month: 0.0 for month in buckets}
-    for record in closed_records:
+    for record in closed_records():
         month = record.date[:7]
         bucket = buckets[month]
         if not bucket["reservation_eligible_types"]:
@@ -1543,6 +1546,10 @@ def build_full_report(
     policy_compliance_rows: list[dict] | None = None,
     focus_reconciliation: FocusReconciliation | None = None,
     focus_unavailable_reason: str = "A complete reconciled FocusCost period is not available.",
+    *,
+    include_all_resource_costs: bool = False,
+    detail_max_rows: int = 20000,
+    detail_max_points: int = 500000,
 ) -> FullReport:
     total_monthly_spend = sum(per_sub_spend.values())
     base = build_report(
@@ -1702,8 +1709,8 @@ def build_full_report(
         spend_history=spend_history,
         daily_cost_trend=daily_cost_trend,
         tag_daily_cost_trend=tag_daily_cost_trend,
-        cost_details=build_cost_details(focus_history),
-        cost_hierarchy=_cost_hierarchy(focus_cost_data, base.total_monthly_spend),
+        cost_details=build_cost_details(focus_history, max_rows=detail_max_rows, max_points=detail_max_points),
+        cost_hierarchy=_cost_hierarchy(focus_cost_data, base.total_monthly_spend, include_all_resource_costs),
         region_spend=_region_spend(focus_cost_data, base.total_monthly_spend),
         advisor_score=_advisor_score(advisor_score_rows or []),
         storage_optimization=_storage_optimization(

@@ -14,8 +14,8 @@ function Get-Setting([string] $Name, [string] $Default = '') {
     return $value.Trim()
 }
 
-function Get-BooleanSetting([string] $Name) {
-    $value = Get-Setting $Name 'false'
+function Get-BooleanSetting([string] $Name, [bool] $Default = $false) {
+    $value = Get-Setting $Name ($Default.ToString())
     $parsed = $false
     if (-not [bool]::TryParse($value, [ref]$parsed)) { throw "$Name must be true or false." }
     return $parsed
@@ -71,6 +71,61 @@ $apiImage = Get-Setting 'SERVICE_API_IMAGE_NAME'
 $webImage = Get-Setting 'SERVICE_WEB_IMAGE_NAME'
 if ([string]::IsNullOrEmpty($apiImage) -xor [string]::IsNullOrEmpty($webImage)) { throw 'Provide both application images, or leave both empty for the foundation stage.' }
 $applications = -not [string]::IsNullOrEmpty($apiImage)
+$assessmentMode = Get-Setting 'APP_ASSESSMENT_MODE' 'postgres'
+if ($assessmentMode -cnotin @('blob', 'postgres')) { throw 'APP_ASSESSMENT_MODE must be blob or postgres.' }
+$privateRegistry = Get-BooleanSetting 'APP_PRIVATE_REGISTRY' ($assessmentMode -eq 'postgres')
+if ($assessmentMode -eq 'postgres' -and -not $privateRegistry) {
+    throw 'PostgreSQL/scalable deployments require private ACR. Public registry access must not be enabled.'
+}
+$buildMode = Get-Setting 'APP_REGISTRY_BUILD_MODE' $(if ($assessmentMode -eq 'postgres') { 'private-runner' } else { 'managed-pool' })
+if ($buildMode -cnotin @('private-runner', 'managed-pool')) { throw 'APP_REGISTRY_BUILD_MODE must be private-runner or managed-pool.' }
+$assessmentFoundationOnly = Get-BooleanSetting 'APP_ASSESSMENT_FOUNDATION_ONLY'
+if ($assessmentFoundationOnly -and $assessmentMode -ne 'postgres') {
+    throw 'The assessment foundation/bootstrap stage requires PostgreSQL mode.'
+}
+if ($Operation -ne 'Down' -and (Get-Setting 'ASSESSMENT_MODE') -eq 'postgres' -and $assessmentMode -eq 'blob') {
+    throw 'Switching a provisioned PostgreSQL environment to Blob mode requires a separately approved migration; incremental deployment does not stop its worker or remove its database.'
+}
+if ($applications -and $assessmentMode -eq 'postgres' -and -not $assessmentFoundationOnly -and
+    -not (Get-BooleanSetting 'APP_ASSESSMENT_DB_BOOTSTRAPPED')) {
+    throw 'Private database bootstrap is not verified. Set APP_ASSESSMENT_FOUNDATION_ONLY=true, provision the database/manual bootstrap job with the reviewed assessment image, run and verify bootstrap, then explicitly approve application release.'
+}
+$assessmentImage = Get-Setting 'SERVICE_ASSESSMENT_IMAGE_NAME'
+if ($assessmentImage) {
+    $registry = Get-Setting 'AZURE_CONTAINER_REGISTRY_ENDPOINT'
+    if ($assessmentImage -cnotmatch '^[a-z0-9]+\.azurecr\.io/[a-z0-9][a-z0-9/_.-]*@sha256:[a-f0-9]{64}$' -or
+        -not $registry -or -not $assessmentImage.StartsWith("$registry/", [StringComparison]::Ordinal)) {
+        throw 'The assessment/bootstrap image must be an immutable digest in this environment registry.'
+    }
+}
+$assessmentLimits = ConvertFrom-Json -InputObject (Get-Setting 'APP_ASSESSMENT_LIMITS' '{}') -AsHashtable
+if ($assessmentLimits -isnot [System.Collections.IDictionary]) { throw 'APP_ASSESSMENT_LIMITS must be a JSON object.' }
+$allowedAssessmentLimits = @{
+    inputBytes = @(1048576L, 68719476736L); spoolBytes = @(1048576L, 68719476736L); expandedBytes = @(1048576L, 137438953472L)
+    csvRows = @(1L, 100000000L); inventoryRows = @(1L, 5000000L); historyRows = @(1L, 10000000L)
+    timeoutSeconds = @(60L, 86400L); leaseSeconds = @(30L, 600L); maxAttempts = @(1L, 5L)
+    pageSize = @(1L, 200L); responseBytes = @(65536L, 2097152L); recordBytes = @(1024L, 524288L)
+    inlineRows = @(1L, 100L); apiConcurrency = @(1L, 50L); interactiveRows = @(1L, 5000L)
+    workConcurrency = @(1L, 20L); readPoolSize = @(1L, 49L)
+    armIntervalMs = @(10L, 60000L); graphIntervalMs = @(10L, 60000L); metricsIntervalMs = @(10L, 60000L); costIntervalMs = @(10L, 60000L)
+    azureGetRetries = @(0L, 5L); detailRows = @(1L, 250000L); detailPoints = @(1L, 20000000L)
+}
+foreach ($key in $assessmentLimits.Keys) {
+    $value = $assessmentLimits[$key]
+    if (-not $allowedAssessmentLimits.ContainsKey($key) -or $value -isnot [long] -and $value -isnot [int]) {
+        throw "Unsupported or non-integer assessment safety budget: $key"
+    }
+    if ($value -lt $allowedAssessmentLimits[$key][0] -or $value -gt $allowedAssessmentLimits[$key][1]) {
+        throw "Assessment safety budget outside its supported range: $key"
+    }
+}
+$responseBytes = if ($assessmentLimits.Contains('responseBytes')) { $assessmentLimits.responseBytes } else { 1048576L }
+$recordBytes = if ($assessmentLimits.Contains('recordBytes')) { $assessmentLimits.recordBytes } else { 262144L }
+if ($recordBytes + 4096 -gt $responseBytes) { throw 'The detail-record budget must leave 4096 bytes within the response budget.' }
+$poolSize = [int](Get-Setting 'APP_ASSESSMENT_POOL_SIZE' '5')
+if ($poolSize -lt 2 -or $poolSize -gt 50) { throw 'APP_ASSESSMENT_POOL_SIZE must be between 2 and 50.' }
+$readPoolSize = if ($assessmentLimits.Contains('readPoolSize')) { $assessmentLimits.readPoolSize } else { [Math]::Min(3, $poolSize - 1) }
+if ($readPoolSize -ge $poolSize) { throw 'readPoolSize must leave at least one connection for work operations.' }
 if ($Operation -ne 'Down' -and (Get-BooleanSetting 'APP_APPLICATIONS_DEPLOYED') -and -not $applications) {
     throw 'Do not clear deployed application image settings; incremental provisioning would leave the existing apps running.'
 }

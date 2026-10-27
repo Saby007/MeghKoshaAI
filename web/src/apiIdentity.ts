@@ -3,7 +3,7 @@ import { BrowserCacheLocation, InteractionRequiredAuthError, PublicClientApplica
 export const IDENTITY_REQUIRED_EVENT = 'mkai-identity-required';
 type IdentityConfiguration = { tenantId: string; apiClientId: string; webClientId: string; scope: string };
 type IdentityClient = { client: PublicClientApplication; configuration: IdentityConfiguration };
-export type VerifiedIdentity = { userId: string; userDetails: string; tenantId: string; features?: { aiNarration: boolean } };
+export type VerifiedIdentity = { userId: string; userDetails: string; tenantId: string; features?: { aiNarration: boolean; assessmentMode?: 'blob' | 'postgres' } };
 let clientPromise: Promise<IdentityClient> | null = null;
 let profileInitialization: { hint: string; promise: Promise<VerifiedIdentity> } | null = null;
 let pendingChallenge: { accountId: string; claims?: string } | null = null;

@@ -13,6 +13,8 @@ param buildAgentSubnetPrefix string = '10.42.1.32/27'
 param logRetentionDays int = 30
 @description('Put the registry behind a private endpoint and deny public network access. Requires the Premium tier, and azd remote builds can no longer reach the registry.')
 param privateRegistry bool = false
+@allowed(['private-runner', 'managed-pool'])
+param registryBuildMode string = 'managed-pool'
 @allowed(['S1', 'S2', 'S3'])
 @description('Build agent size. S1 is 2 CPU/3 GB, S2 is 4 CPU/8 GB, S3 is 8 CPU/16 GB.')
 param buildAgentTier string = 'S2'
@@ -137,7 +139,7 @@ resource registryZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGro
 // az acr build cannot reach a registry that denies public access, because the shared task fleet
 // runs from public IPs. A dedicated pool runs inside this VNet instead, resolving the registry
 // through the private endpoint above.
-resource buildAgents 'Microsoft.ContainerRegistry/registries/agentPools@2019-06-01-preview' = if (privateRegistry) {
+resource buildAgents 'Microsoft.ContainerRegistry/registries/agentPools@2019-06-01-preview' = if (privateRegistry && registryBuildMode == 'managed-pool') {
   parent: registry
   name: 'build-agents'
   location: location
@@ -198,7 +200,8 @@ output environmentDomain string = containerEnvironment.properties.defaultDomain
 output registryName string = registry.name
 output registryId string = registry.id
 output registryServer string = registry.properties.loginServer
-output buildAgentPoolName string = privateRegistry ? 'build-agents' : ''
+output buildAgentPoolName string = privateRegistry && registryBuildMode == 'managed-pool' ? 'build-agents' : ''
+output buildAgentSubnetId string = privateRegistry ? resourceId('Microsoft.Network/virtualNetworks/subnets', network.name, 'build-agents') : ''
 output networkId string = network.id
 output privateEndpointSubnetId string = resourceId('Microsoft.Network/virtualNetworks/subnets', network.name, 'private-endpoints')
 output workspaceId string = workspace.id

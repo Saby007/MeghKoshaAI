@@ -185,6 +185,68 @@ export async function getLatestReport(signal?: AbortSignal, subscriptionIds?: st
   return response.json();
 }
 
+export type AssessmentJob = {
+  jobId: string; subscriptionIds: string[]; staleDays: number;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  phase: string; createdAt: string; attempts: number; snapshotId: string | null;
+  errorCode: string | null; error: string | null;
+};
+export type ScalableSnapshot = {
+  snapshotId: string; scopeHash: string; subscriptionIds: string[]; staleDays: number;
+  createdAt: string;
+  report: Pick<FullReport, 'executiveSummary' | 'reportMetadata' | 'completeness'> & Record<string, unknown>;
+  collections: { path: string; total: number }[];
+};
+export type AssessmentPage = { path: string; total: number; items: unknown[]; nextCursor: number | null; filtered: boolean };
+const assessmentSignal = (signal?: AbortSignal) =>
+  signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
+
+export function queueAssessment(subscriptionIds: string[], staleDays: number, signal?: AbortSignal): Promise<AssessmentJob> {
+  return apiRequest('/api/report', { method: 'POST', signal: assessmentSignal(signal), body: JSON.stringify({ subscriptionIds, staleDays }) });
+}
+export function getAssessmentJob(jobId: string, signal?: AbortSignal): Promise<AssessmentJob> {
+  return apiRequest(`/api/assessments/jobs/${encodeURIComponent(jobId)}`, { signal: assessmentSignal(signal) });
+}
+export async function getLatestAssessmentJob(subscriptionIds: string[], staleDays: number, signal?: AbortSignal): Promise<AssessmentJob | null> {
+  const query = new URLSearchParams({ staleDays: String(staleDays) });
+  subscriptionIds.forEach((id) => query.append('subscriptionId', id));
+  try {
+    return await apiRequest(`/api/assessments/jobs?${query}`, { signal: assessmentSignal(signal) });
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 404) return null;
+    throw error;
+  }
+}
+export function cancelAssessment(jobId: string): Promise<void> {
+  return apiRequest(`/api/assessments/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST', signal: assessmentSignal() });
+}
+export function getAssessmentSnapshot(snapshotId: string, signal?: AbortSignal): Promise<ScalableSnapshot> {
+  return apiRequest(`/api/assessments/snapshots/${encodeURIComponent(snapshotId)}`, { signal: assessmentSignal(signal) });
+}
+export function getInteractiveAssessment(snapshotId: string, signal?: AbortSignal): Promise<ReportSnapshot> {
+  return apiRequest(`/api/assessments/snapshots/${encodeURIComponent(snapshotId)}/interactive`, { signal: assessmentSignal(signal) });
+}
+export async function getScalableLatestReport(subscriptionIds: string[], staleDays: number, signal?: AbortSignal): Promise<ScalableSnapshot | null> {
+  const query = new URLSearchParams({ staleDays: String(staleDays) });
+  subscriptionIds.forEach((id) => query.append('subscriptionId', id));
+  try {
+    const snapshot = await apiRequest<ScalableSnapshot>(`/api/report/latest?${query}`, { signal: assessmentSignal(signal) });
+    if (snapshot.staleDays !== staleDays
+        || [...snapshot.subscriptionIds].map((id) => id.toLowerCase()).sort().join(',')
+          !== [...subscriptionIds].map((id) => id.toLowerCase()).sort().join(',')) {
+      throw new ApiRequestError('The saved assessment does not match the requested authorized scope. Reload subscriptions.', 409);
+    }
+    return snapshot;
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 404) return null;
+    throw error;
+  }
+}
+export function getAssessmentRecords(snapshotId: string, path: string, after: number, search: string, signal?: AbortSignal): Promise<AssessmentPage> {
+  const query = new URLSearchParams({ path, after: String(after), limit: '100', search });
+  return apiRequest(`/api/assessments/snapshots/${encodeURIComponent(snapshotId)}/records?${query}`, { signal: assessmentSignal(signal) });
+}
+
 export function askFinOpsChat(
   question: string,
   snapshotId: string,

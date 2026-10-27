@@ -17,6 +17,7 @@ vi.mock('./apiIdentity', () => ({
 }));
 vi.mock('./components/ChatWindow', () => ({ ChatWindow: () => <input aria-label="Chat draft" /> }));
 vi.mock('./components/ScheduleManager', () => ({ ScheduleManager: () => <input aria-label="Schedule filter" /> }));
+vi.mock('./components/ScalableWorkspace', () => ({ default: ({ refreshToken }: { refreshToken: number }) => <div data-testid="scalable-workspace" data-refresh={refreshToken}>Scalable assessment</div> }));
 vi.mock('./components/SubscriptionPicker', () => ({
   SubscriptionPicker: ({ onRun, error, children }: { onRun: () => void; error: string | null; children?: ReactNode }) => (
     <div className="scope-ribbon">Scope picker<button type="button" onClick={onRun}>Run Report</button>{error && <p role="alert">{error}</p>}{children && <div className="scope-range">{children}</div>}</div>
@@ -62,6 +63,21 @@ it('restores an authorized saved report on sign-in without starting an assessmen
   expect(getLatestReport).toHaveBeenCalledWith(expect.any(AbortSignal), ['subscription-1'], 90);
   expect(container.querySelector('[data-testid="loaded-report"]')).not.toBeNull();
   expect(container.querySelector('.report-awaiting')).toBeNull();
+  expect(runCostAssessment).not.toHaveBeenCalled();
+  expect(narrate).not.toHaveBeenCalled();
+});
+
+it('routes PostgreSQL mode to the lazy scalable workspace without full-report or narration calls', async () => {
+  vi.mocked(initializeApiIdentity).mockResolvedValue({
+    userId: 'verified-user', userDetails: 'verified@example.com', tenantId: 'tenant-1',
+    features: { aiNarration: true, assessmentMode: 'postgres' },
+  });
+  await act(async () => root.render(<App />));
+  expect(container.querySelector('[data-testid="scalable-workspace"]')).not.toBeNull();
+  expect(container.querySelector('.report-awaiting')).toBeNull();
+  expect(getLatestReport).not.toHaveBeenCalled();
+  await act(async () => button('Run Report').click());
+  expect(container.querySelector('[data-testid="scalable-workspace"]')?.getAttribute('data-refresh')).toBe('1');
   expect(runCostAssessment).not.toHaveBeenCalled();
   expect(narrate).not.toHaveBeenCalled();
 });

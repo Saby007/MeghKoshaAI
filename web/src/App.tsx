@@ -13,6 +13,7 @@ import { BRAND_NAME } from './brand';
 const ReportView = lazy(() => import('./components/ReportView').then((module) => ({ default: module.ReportView })));
 const ChatWindow = lazy(() => import('./components/ChatWindow').then((module) => ({ default: module.ChatWindow })));
 const ScheduleManager = lazy(() => import('./components/ScheduleManager').then((module) => ({ default: module.ScheduleManager })));
+const ScalableWorkspace = lazy(() => import('./components/ScalableWorkspace'));
 
 // Prevents a single bad field/render error anywhere in the (large) report tree from
 // unmounting the whole app to a blank screen - shows a reload prompt instead. This
@@ -249,6 +250,9 @@ export default function App() {
   const [loadedSnapshot, setLoadedSnapshot] = useState<ReportSnapshot | null>(null);
   const [narration, setNarration] = useState<CostAgentOutput>(null);
   const [running, setRunning] = useState(false);
+  const [scalableRefresh, setScalableRefresh] = useState(0);
+  const scalableHandledRefresh = useRef(0);
+  const scalable = verifiedIdentity?.features?.assessmentMode === 'postgres';
   const [assessmentPhase, setAssessmentPhase] = useState<AssessmentPhase>(null);
   const [error, setError] = useState<string | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -347,6 +351,8 @@ export default function App() {
       setLoadingSnapshot(false);
       setLoadingSubscriptions(false);
       setRunning(false);
+      setScalableRefresh(0);
+      scalableHandledRefresh.current = 0;
       setIdentityError('Your API session needs verification. Reconnect your Microsoft account.');
     };
     window.addEventListener(IDENTITY_REQUIRED_EVENT, requireConnection);
@@ -394,6 +400,7 @@ export default function App() {
         setSelectedIds(new Set(subscriptionIds));
         setLoadingSubscriptions(false);
         setError(null);
+        if (verifiedIdentity.features?.assessmentMode === 'postgres') return;
         if (!subscriptionIds.length) { setSnapshotMissing(true); return; }
         stage = 'snapshot';
         setLoadingSnapshot(true);
@@ -470,6 +477,11 @@ export default function App() {
 
   async function handleRun() {
     if (running || loadingSubscriptions || selectedIds.size === 0 || !verifiedIdentity || identityError) return;
+    if (scalable) {
+      rememberScope(verifiedIdentity, [...selectedIds].map((value) => value.toLowerCase()));
+      setScalableRefresh((value) => value + 1);
+      return;
+    }
     pendingStartup.current?.abort();
     setLoadingSnapshot(false);
     setSnapshotError(null);
@@ -617,7 +629,7 @@ export default function App() {
             <button type="button" className="ghost-button" onClick={() => setStartupVersion((value) => value + 1)} disabled={loadingSubscriptions || loadingSnapshot || running}><RefreshCw size={16} aria-hidden="true" /> Retry saved report</button>
           </section>}
           {running && assessmentPhase && <AssessmentProgress phase={assessmentPhase} updating={report !== null} />}
-          {!report && !running && !loadingSubscriptions && !loadingSnapshot && !error && !snapshotError && (
+          {!scalable && !report && !running && !loadingSubscriptions && !loadingSnapshot && !error && !snapshotError && (
             <section className="report-awaiting" aria-labelledby="report-ready-heading">
               <BarChart3 size={28} aria-hidden="true" />
               <h2 id="report-ready-heading">{selectedIds.size ? snapshotMissing ? 'No saved report for this scope' : 'Report workspace ready' : 'No subscriptions selected'}</h2>
@@ -646,17 +658,26 @@ export default function App() {
               </Suspense>
             </ReportErrorBoundary>
           )}
+          {scalable && !loadingSubscriptions && <ReportErrorBoundary>
+            <Suspense fallback={<WorkspaceLoading label="assessment dashboard" />}>
+              <ScalableWorkspace
+                subscriptionIds={[...selectedIds]} staleDays={STALE_DAYS}
+                refreshToken={scalableRefresh} handledRefresh={scalableHandledRefresh} onBusyChange={setRunning}
+                onInteractiveSnapshot={setLoadedSnapshot}
+              />
+            </Suspense>
+          </ReportErrorBoundary>}
         </div>
         {visitedViews.has('chat') && (
           <div className="view-panel" hidden={view !== 'chat'}>
             <Suspense fallback={<WorkspaceLoading label="chat" />}>
-              <ChatWindow
+              {scalable && !loadedSnapshot ? <section className="saved-report-status"><p>Use the paginated assessment explorer for large-data evidence. Open classic tabs on a report within the interactive size budget to enable full-snapshot Chat. Large reports are never silently loaded or truncated into Chat.</p><button className="ghost-button" type="button" onClick={() => changeView('report')}>Open assessment dashboard</button></section> : <ChatWindow
                 snapshotId={loadedSnapshot?.snapshotId ?? null}
-                period={report?.reportMetadata.period ?? null}
-                currency={report?.reportMetadata.currency ?? null}
+                period={report?.reportMetadata.period ?? loadedSnapshot?.report.reportMetadata.period ?? null}
+                currency={report?.reportMetadata.currency ?? loadedSnapshot?.report.reportMetadata.currency ?? null}
                 subscriptionCount={loadedSnapshot?.subscriptionIds.length ?? 0}
                 onOpenReport={() => changeView('report')}
-              />
+              />}
             </Suspense>
           </div>
         )}

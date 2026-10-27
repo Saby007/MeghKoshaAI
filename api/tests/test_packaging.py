@@ -222,6 +222,7 @@ def test_ai_deployment_helper_plans_previewed_ai_profile_with_processor():
     assert plan["settings"] == {
         "AZURE_LOCATION": "centralindia",
         "APP_PROFILE": "ai",
+        "APP_ASSESSMENT_MODE": "postgres",
         "APP_EXPORT_TRUSTED_SERVICES": "true",
         "APP_MODEL_DEPLOYMENTS": '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]',
         "MODEL_ROUTER_DEPLOYMENT_NAME": "model-router",
@@ -350,6 +351,15 @@ def resource_map(template):
     return resources if isinstance(resources, dict) else {str(index): resource for index, resource in enumerate(resources)}
 
 
+def assert_environment_binding(environment, name, expected):
+    if isinstance(environment, list):
+        assert next(item for item in environment if item["name"] == name)["value"] == expected
+    else:
+        assert isinstance(environment, str)
+        value = expected[1:-1] if expected.startswith("[") else repr(expected)
+        assert f"createObject('name', '{name}', 'value', {value})" in environment
+
+
 def test_export_access_template_limits_roles_without_mutating_application_or_storage():
     compiler = shutil.which("bicep") or str(Path.home() / ".azure" / "bin" / "bicep.exe")
     if not Path(compiler).is_file():
@@ -448,7 +458,8 @@ def test_compiled_stage_defaults_are_explicit_and_safe(compiled_profiles):
         assert modules["existingAi"]["condition"] == "[and(variables('aiEnabled'), parameters('reuseAiAccount'))]"
         assert modules["apps"]["condition"] == "[variables('deployApplications')]"
         assert modules["processor"]["condition"] == "[variables('deployProcessor')]"
-        assert template["variables"]["dataEnabled"] == "[contains(createArray('data', 'ai'), parameters('profile'))]"
+        assert values["assessmentMode"] == "postgres"
+        assert template["variables"]["dataEnabled"] == "[or(contains(createArray('data', 'ai'), parameters('profile')), equals(parameters('assessmentMode'), 'postgres'))]"
         assert template["variables"]["aiEnabled"] == "[equals(parameters('profile'), 'ai')]"
 
 
@@ -465,7 +476,7 @@ def test_compiled_core_and_apps_enforce_identity_and_ingress_boundaries(compiled
     assert "sharedKey" not in json.dumps(core)
     apps = list(resource_map(modules["apps"]["properties"]["template"]).values())
     api_environment = modules["apps"]["properties"]["parameters"]["apiEnvironment"]["value"]
-    assert next(item for item in api_environment if item["name"] == "FOUNDRY_CHAT_ENABLED")["value"] == "[string(and(and(variables('aiEnabled'), parameters('enableChatRuntime')), not(empty(parameters('modelRouterDeploymentName')))))]"
+    assert_environment_binding(api_environment, "FOUNDRY_CHAT_ENABLED", "[string(and(and(variables('aiEnabled'), parameters('enableChatRuntime')), not(empty(parameters('modelRouterDeploymentName')))))]")
     api = next(resource for resource in apps if "ca-api-" in resource["name"])
     web = next(resource for resource in apps if "ca-web-" in resource["name"])
     assert api["properties"]["configuration"]["ingress"]["external"] is False
@@ -523,14 +534,72 @@ def test_compiled_storage_expires_daily_snapshots_sooner_than_closed_months(comp
     assert rules["focus-closed-months"]["filters"]["prefixMatch"] == ["cost-exports/focus/"]
     assert "parameters('dailyExportRetentionDays')" in rules["focus-daily-snapshots"]["actions"]
     assert "parameters('closedMonthRetentionDays')" in rules["focus-closed-months"]["actions"]
-    api_environment = {item["name"]: item["value"] for item in modules["apps"]["properties"]["parameters"]["apiEnvironment"]["value"]}
-    assert api_environment["COST_EXPORT_DAILY_NAME"] == "[variables('dailyExportName')]"
-    assert api_environment["FOCUS_EXPORT_PARALLEL_MONTHS"] == "[string(parameters('exportParallelMonths'))]"
+    api_environment = modules["apps"]["properties"]["parameters"]["apiEnvironment"]["value"]
+    assert_environment_binding(api_environment, "COST_EXPORT_DAILY_NAME", "[variables('dailyExportName')]")
+    assert_environment_binding(api_environment, "FOCUS_EXPORT_PARALLEL_MONTHS", "[string(parameters('exportParallelMonths'))]")
     processor = list(resource_map(modules["processor"]["properties"]["template"]).values())
     job = next(resource for resource in processor if resource["type"] == "Microsoft.App/jobs")
-    environment = {item["name"]: item["value"] for item in job["properties"]["template"]["containers"][0]["env"]}
-    assert environment["COST_EXPORT_DAILY_NAME"] == "[parameters('dailyExportName')]"
-    assert environment["FOCUS_EXPORT_PARALLEL_MONTHS"] == "[string(parameters('exportParallelMonths'))]"
+    environment = job["properties"]["template"]["containers"][0]["env"]
+    assert_environment_binding(environment, "COST_EXPORT_DAILY_NAME", "[parameters('dailyExportName')]")
+    assert_environment_binding(environment, "FOCUS_EXPORT_PARALLEL_MONTHS", "[string(parameters('exportParallelMonths'))]")
+
+
+def test_compiled_postgres_is_private_passwordless_and_separates_runtime_from_bootstrap(compiled_profiles):
+    _, template = compiled_profiles["data"]
+    modules = resource_map(template)
+    assert modules["postgres"]["condition"] == "[variables('scalableEnabled')]"
+    resources = list(resource_map(modules["postgres"]["properties"]["template"]).values())
+    server = next(item for item in resources if item["type"] == "Microsoft.DBforPostgreSQL/flexibleServers")
+    assert server["properties"]["network"]["publicNetworkAccess"] == "Disabled"
+    assert server["properties"]["authConfig"]["activeDirectoryAuth"] == "Enabled"
+    assert server["properties"]["authConfig"]["passwordAuth"] == "Disabled"
+    assert "administratorLogin" not in json.dumps(resources)
+    assert any(item["name"] == "privatelink.postgres.database.azure.com" for item in resources)
+    endpoint = next(item for item in resources if item["type"] == "Microsoft.Network/privateEndpoints")
+    assert endpoint["properties"]["privateLinkServiceConnections"][0]["properties"]["groupIds"] == ["postgresqlServer"]
+    workers = list(resource_map(modules["assessmentWorker"]["properties"]["template"]).values())
+    worker = next(item for item in workers if item["type"] == "Microsoft.App/containerApps")
+    bootstrap = next(item for item in workers if item["type"] == "Microsoft.App/jobs")
+    assert "ingress" not in worker["properties"]["configuration"]
+    assert worker["identity"]["userAssignedIdentities"] == {"[format('{0}', parameters('workerIdentity').resourceId)]": {}}
+    assert bootstrap["identity"]["userAssignedIdentities"] == {"[format('{0}', parameters('bootstrapIdentity').resourceId)]": {}}
+    assert bootstrap["properties"]["configuration"]["triggerType"] == "Manual"
+    assert worker["properties"]["template"]["containers"][0]["command"][-1] == "jobs.assessments"
+    assert bootstrap["properties"]["template"]["containers"][0]["command"][-1] == "jobs.assessment_bootstrap"
+
+
+def test_scalable_template_forces_private_acr_without_forcing_preview_build_pools(compiled_profiles):
+    parameters, template = compiled_profiles["data"]
+    values = {name: item["value"] for name, item in parameters["parameters"].items()}
+    assert values["privateRegistry"] is True
+    assert values["registryBuildMode"] == "private-runner"
+    assert template["variables"]["privateRegistryEnabled"] == "[or(parameters('privateRegistry'), variables('scalableEnabled'))]"
+    modules = resource_map(template)
+    assert modules["core"]["properties"]["parameters"]["privateRegistry"]["value"] == "[variables('privateRegistryEnabled')]"
+    core = list(resource_map(modules["core"]["properties"]["template"]).values())
+    registry = next(item for item in core if item["type"] == "Microsoft.ContainerRegistry/registries")
+    assert registry["properties"]["publicNetworkAccess"] == "[if(parameters('privateRegistry'), 'Disabled', 'Enabled')]"
+    assert registry["properties"]["adminUserEnabled"] is False
+    pool = next(item for item in core if item["type"] == "Microsoft.ContainerRegistry/registries/agentPools")
+    assert pool["condition"] == "[and(parameters('privateRegistry'), equals(parameters('registryBuildMode'), 'managed-pool'))]"
+
+
+@pytest.mark.parametrize("foundation, bootstrapped, success", [(False, False, False), (True, False, True), (False, True, True)])
+def test_postgres_application_release_requires_explicit_verified_bootstrap(foundation, bootstrapped, success):
+    result = run_input_validation({
+        "APP_ASSESSMENT_MODE": "postgres",
+        "APP_ASSESSMENT_FOUNDATION_ONLY": str(foundation).lower(),
+        "APP_ASSESSMENT_DB_BOOTSTRAPPED": str(bootstrapped).lower(),
+        "AZURE_CONTAINER_REGISTRY_ENDPOINT": "testapp.azurecr.io",
+        "SERVICE_API_IMAGE_NAME": "testapp.azurecr.io/api@sha256:" + "a" * 64,
+        "SERVICE_WEB_IMAGE_NAME": "testapp.azurecr.io/web@sha256:" + "b" * 64,
+        "AZURE_TENANT_ID": "11111111-1111-1111-1111-111111111111",
+        "MEGHKOSHA_API_CLIENT_ID": "22222222-2222-2222-2222-222222222222",
+        "MEGHKOSHA_WEB_CLIENT_ID": "33333333-3333-3333-3333-333333333333",
+    })
+    assert (result.returncode == 0) is success, result.stderr
+    if not success:
+        assert "bootstrap is not verified" in result.stderr
 
 
 def test_operational_model_router_template_only_targets_the_existing_account_child():

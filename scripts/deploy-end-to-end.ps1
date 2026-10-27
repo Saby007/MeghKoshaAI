@@ -76,6 +76,8 @@ param(
     [Parameter(Mandatory)]
     [ValidatePattern('^[a-z0-9][a-z0-9-]{0,63}$')]
     [string] $EnvironmentName,
+    [ValidateSet('blob', 'postgres')]
+    [string] $AssessmentMode = 'postgres',
     [string] $Location = 'centralindia',
     [string] $FoundryLocation = 'eastus2',
     [string] $SubscriptionId = '',
@@ -106,19 +108,24 @@ $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion -lt [version]'7.0') {
     throw 'PowerShell 7 or later is required. Run this script with `pwsh`, not Windows PowerShell 5.1.'
 }
+if (-not $PlanOnly -and $AssessmentMode -eq 'postgres') {
+    throw 'PostgreSQL/private-ACR rollout is manual and staged. Follow docs/manual-scalable-deployment.md. No Azure action was performed. Use -AssessmentMode blob only for an explicitly reviewed legacy compatibility deployment.'
+}
 
 $modelRouter = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]'
 $settings = [ordered]@{
     AZURE_LOCATION = $Location
     FOUNDRY_LOCATION = $FoundryLocation
     APP_PROFILE = 'ai'
+    APP_ASSESSMENT_MODE = $AssessmentMode
+    APP_REGISTRY_BUILD_MODE = $(if ($AssessmentMode -eq 'postgres') { 'private-runner' } else { 'managed-pool' })
     APP_EXPORT_TRUSTED_SERVICES = 'true'
     APP_MODEL_DEPLOYMENTS = $modelRouter
     MODEL_ROUTER_DEPLOYMENT_NAME = 'model-router'
     APP_ENABLE_CHAT_RUNTIME = 'true'
     APP_AI_VALIDATED = 'true'
     APP_ENABLE_AI_RUNTIME = 'false'
-    APP_PRIVATE_REGISTRY = $PrivateRegistry.IsPresent.ToString().ToLowerInvariant()
+    APP_PRIVATE_REGISTRY = ($PrivateRegistry.IsPresent -or $AssessmentMode -eq 'postgres').ToString().ToLowerInvariant()
     APP_BLOB_DATA_PROTECTION = $BlobDataProtection.IsPresent.ToString().ToLowerInvariant()
 }
 # A registry that denies public access cannot be reached by azd's remote build, so those runs
