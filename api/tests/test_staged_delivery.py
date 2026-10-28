@@ -49,11 +49,25 @@ printf '%s\n' 'MEGHKOSHA_BUILD_RESULT {"offline":true}'
     assert result.stdout.strip() == 'MEGHKOSHA_BUILD_RESULT {"offline":true}'
 
 
-def test_guest_failure_trap_reports_outside_redirected_build_log(tmp_path):
+@pytest.mark.parametrize("existing_repository", [False, True])
+def test_guest_failure_trap_reports_outside_redirected_build_log(tmp_path, existing_repository):
     candidates = [Path(r"C:\Program Files\Git\bin\bash.exe"), Path(r"C:\Program Files\Git\usr\bin\bash.exe")]
     bash = next((str(path) for path in candidates if path.is_file()), shutil.which("bash"))
     if not bash:
         pytest.skip("Bash is required for the full guest-recipe failure regression.")
+    recipe = ROOT / "scripts" / "private-builder.sh"
+    repository_files = [
+        "/etc/apt/keyrings/microsoft.gpg",
+        "/etc/apt/sources.list.d/azure-cli.list",
+    ]
+    if existing_repository:
+        body = recipe.read_text()
+        for index, path in enumerate(repository_files):
+            fixture = tmp_path / f"repository-file-{index}"
+            fixture.write_text("Existing public repository configuration.")
+            body = body.replace(path, fixture.as_posix())
+        recipe = tmp_path / "recipe.sh"
+        recipe.write_text(body, encoding="utf-8")
     environment = dict(os.environ, OFFLINE_WORKSPACE=tmp_path.as_posix())
     stub = r"""
 mktemp() { printf '%s\n' "$OFFLINE_WORKSPACE"; }
@@ -63,17 +77,21 @@ python3() {
     fi
 }
 apt-get() { printf 'Synthetic package mirror failure\n' >&2; return 100; }
-export -f mktemp python3 apt-get
+chmod() { printf 'Public repository permissions: %s\n' "$*"; command chmod "$@"; }
+export -f mktemp python3 apt-get chmod
 exec /bin/bash "$1"
 """
     result = subprocess.run(
-        [bash, "-c", stub, "offline-recipe", str(ROOT / "scripts" / "private-builder.sh")],
+        [bash, "-c", stub, "offline-recipe", str(recipe)],
         stdin=subprocess.DEVNULL, env=environment, capture_output=True, text=True, timeout=15,
     )
     assert result.returncode == 100
     assert "Synthetic package mirror failure" in result.stderr
     assert 'MEGHKOSHA_BUILD_ERROR {"phase":"install-prerequisites","exitCode":100}' in result.stderr
     assert "MEGHKOSHA_BUILD_RESULT" not in result.stdout
+    if existing_repository:
+        for index in range(len(repository_files)):
+            assert f"Public repository permissions: 0644 {(tmp_path / f'repository-file-{index}').as_posix()}" in result.stderr
 
 
 def test_staged_rollout_has_offline_approval_and_attestation_regressions():

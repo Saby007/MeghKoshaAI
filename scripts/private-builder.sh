@@ -54,15 +54,21 @@ printf 'MEGHKOSHA_BUILD_STARTED %s\n' "$NONCE"
 {
     phase=install-prerequisites
     export DEBIAN_FRONTEND=noninteractive
+    # APT's sandbox must read public metadata despite the private auth umask.
+    for repository_file in /etc/apt/keyrings/microsoft.gpg /etc/apt/sources.list.d/azure-cli.list; do
+        if [ -f "$repository_file" ]; then chmod 0644 "$repository_file"; fi
+    done
     apt-get update
     apt-get install -y ca-certificates curl gnupg git docker.io python3
     phase=install-azure-cli
     install -d -m 0755 /etc/apt/keyrings
     curl --fail --silent --show-error https://packages.microsoft.com/keys/microsoft.asc |
         gpg --dearmor --yes -o /etc/apt/keyrings/microsoft.gpg
+    chmod 0644 /etc/apt/keyrings/microsoft.gpg
     . /etc/os-release
     printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ %s main\n' \
         "$VERSION_CODENAME" > /etc/apt/sources.list.d/azure-cli.list
+    chmod 0644 /etc/apt/sources.list.d/azure-cli.list
     apt-get update
     apt-get install -y azure-cli
     systemctl start docker

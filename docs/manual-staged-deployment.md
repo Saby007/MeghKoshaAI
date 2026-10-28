@@ -224,6 +224,8 @@ private endpoint:
 The script requires a nonce/commit/registry/digest attestation from this execution.
 Missing or mismatched output is a failure, never an assumed successful build.
 Build output is limited by Azure Run Command; failures report a bounded log tail.
+Error reporting retains the original stderr descriptor, so a failed redirected
+build step cannot hide its diagnostics in the temporary log that cleanup removes.
 The launcher executes the build from its script file with stdin disconnected, so
 dependency tools cannot consume later script lines or the success attestation.
 Build phases are identified in `MEGHKOSHA_BUILD_ERROR` messages. The complete bounded
@@ -234,6 +236,13 @@ not source files to commit or publish. A CLI-level success with empty guest outp
 is still rejected, as is a provider-reported failure even if a marker is present.
 An interrupted/timeout build must be inspected before retrying; Run Command supports
 only one concurrent invocation per VM and a maximum 90-minute execution.
+
+The build keeps managed-identity/Docker state private with `umask 077`, but explicitly
+sets the public APT signing key and repository list to mode `0644`. APT's `_apt`
+sandbox cannot read a root-only key; that appears as `NO_PUBKEY` even when the key
+is present. The recipe repairs these two existing public files before its first
+package update, so a failed older build can be resumed without opening network
+access or disabling signature verification.
 
 ## 5. Bootstrap the private database
 
