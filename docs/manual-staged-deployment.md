@@ -257,6 +257,9 @@ runs it inside ACA, and waits for that exact execution to succeed:
 The bootstrap administrator identity is never attached to the API/worker. SQL schema,
 indexes, extension allowlist and non-admin runtime grants must succeed before release.
 No database public firewall exception is required.
+Principal discovery uses Azure PostgreSQL's returned `rolname` column. A rerun
+reuses matching non-admin runtime principals, but refuses an existing role bound
+to a different identity, principal type or administrator privilege.
 
 ## 6. Configure sign-in and subscription grants
 

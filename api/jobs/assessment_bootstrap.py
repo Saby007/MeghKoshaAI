@@ -27,7 +27,7 @@ async def run() -> None:
     try:
         db = await assessment_store.pool()
         principals = await db.fetch("SELECT * FROM pg_catalog.pgaadauth_list_principals(false)")
-        existing = {row["rolename"]: {key.lower(): value for key, value in dict(row).items()}
+        existing = {row["rolname"]: {key.lower(): value for key, value in dict(row).items()}
                     for row in principals}
         for role, object_id in roles.items():
             if role in existing:
