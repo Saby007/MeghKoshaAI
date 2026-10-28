@@ -224,6 +224,14 @@ private endpoint:
 The script requires a nonce/commit/registry/digest attestation from this execution.
 Missing or mismatched output is a failure, never an assumed successful build.
 Build output is limited by Azure Run Command; failures report a bounded log tail.
+The launcher executes the build from its script file with stdin disconnected, so
+dependency tools cannot consume later script lines or the success attestation.
+Build phases are identified in `MEGHKOSHA_BUILD_ERROR` messages. The complete bounded
+Run Command response is retained locally under
+`.azure\<environment>\private-build-<nonce>.result.json`; the error includes that
+path and the available stdout/stderr. These diagnostics are local deployment state,
+not source files to commit or publish. A CLI-level success with empty guest output
+is still rejected, as is a provider-reported failure even if a marker is present.
 An interrupted/timeout build must be inspected before retrying; Run Command supports
 only one concurrent invocation per VM and a maximum 90-minute execution.
 

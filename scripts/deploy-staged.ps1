@@ -453,18 +453,29 @@ try {
                 } | ConvertTo-Json -Compress
                 $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($config))
                 $body = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'private-builder.sh') -Raw
-                $remote = "exec /bin/bash <<'MEGHKOSHA_PRIVATE_BUILD'`nexport MEGHKOSHA_BUILD_CONFIG='$encoded'`n$body`nMEGHKOSHA_PRIVATE_BUILD"
+                $remote = "#!/bin/sh`n" +
+                    'if [ -z "${BASH_VERSION:-}" ]; then exec /bin/bash "$0" "$@"; fi' +
+                    "`nexec </dev/null`nexport MEGHKOSHA_BUILD_CONFIG='$encoded'`n$body`n"
                 $commandPath = Join-Path $root ".azure\$EnvironmentName\private-build-$nonce.sh"
+                $responsePath = Join-Path $root ".azure\$EnvironmentName\private-build-$nonce.result.json"
                 try {
                     [IO.File]::WriteAllText($commandPath, $remote.Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false))
                     $response = Azure @('vm', 'run-command', 'invoke', '--resource-group', $group, '--name', $vm,
                                         '--command-id', 'RunShellScript', '--scripts', "@$commandPath")
+                    [IO.File]::WriteAllText($responsePath, ($response | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
                 } finally {
                     if (Test-Path -LiteralPath $commandPath) { Remove-Item -LiteralPath $commandPath -Force }
                 }
                 $text = ($response.value | ForEach-Object { $_.message }) -join "`n"
                 $matches = [regex]::Matches($text, '(?m)^MEGHKOSHA_BUILD_RESULT (\{[^\r\n]+\})\s*$')
-                if ($matches.Count -ne 1) { throw 'Private build did not return one success attestation. Inspect VM Run Command diagnostics.' }
+                $failed = @($response.value | Where-Object { $_.level -eq 'Error' -or $_.code -match '/failed$' })
+                if ($matches.Count -ne 1 -or $failed.Count -or $text -match '(?m)^MEGHKOSHA_BUILD_ERROR ') {
+                    $details = [regex]::Replace($text, '(?i)(Authorization:\s*Bearer\s+)\S+', '$1[redacted]')
+                    $details = [regex]::Replace($details, '\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b', '[redacted-token]')
+                    if ($details.Length -gt 3500) { $details = $details.Substring($details.Length - 3500) }
+                    if ([string]::IsNullOrWhiteSpace($details)) { $details = 'Run Command returned no stdout/stderr. The image build was not verified.' }
+                    throw "Private build did not return one successful, error-free attestation. Saved diagnostics: $responsePath`nRun Command output:`n$details"
+                }
                 $result = $matches[0].Groups[1].Value | ConvertFrom-Json -AsHashtable
                 if ($result.commit -ne $SourceCommit -or $result.nonce -ne $nonce -or $result.registry -ne (Value 'AZURE_CONTAINER_REGISTRY_ENDPOINT')) {
                     throw 'Private build attestation does not match this request.'

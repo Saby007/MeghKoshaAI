@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -6,6 +7,46 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parents[2]
+
+
+def test_build_launcher_does_not_let_child_stdin_consume_remaining_script(tmp_path):
+    powershell = shutil.which("pwsh")
+    candidates = [Path(r"C:\Program Files\Git\bin\bash.exe"), Path(r"C:\Program Files\Git\usr\bin\bash.exe")]
+    bash = next((str(path) for path in candidates if path.is_file()), shutil.which("bash"))
+    if not powershell or not bash:
+        pytest.skip("PowerShell and Bash are required for the exact build-launcher regression.")
+    payload = tmp_path / "build-launcher.sh"
+    environment = dict(os.environ, BUILDER_SOURCE=str(ROOT / "scripts" / "deploy-staged.ps1"),
+                       BUILDER_PAYLOAD=str(payload))
+    render = r"""
+$tokens=$null; $errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($env:BUILDER_SOURCE,[ref]$tokens,[ref]$errors)
+if($errors.Count) { throw ($errors | Out-String) }
+$assignment=$ast.Find({
+    param($node)
+    $node -is [Management.Automation.Language.AssignmentStatementAst] -and
+    $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+    $node.Left.VariablePath.UserPath -eq 'remote'
+},$true)
+if(-not $assignment) { throw 'Production build payload assignment was not found.' }
+$encoded='eyJvZmZsaW5lIjp0cnVlfQ=='
+$body=@'
+set -euo pipefail
+cat >/dev/null
+printf '%s\n' 'MEGHKOSHA_BUILD_RESULT {"offline":true}'
+'@
+. ([scriptblock]::Create($assignment.Extent.Text))
+[IO.File]::WriteAllText($env:BUILDER_PAYLOAD,$remote.Replace("`r`n","`n"),[Text.UTF8Encoding]::new($false))
+"""
+    rendered = subprocess.run([powershell, "-NoProfile", "-Command", render], env=environment,
+                              capture_output=True, text=True, timeout=15)
+    assert rendered.returncode == 0, rendered.stderr
+    result = subprocess.run(
+        [bash, "-c", 'exec /bin/sh "$1"', "offline-launcher", str(payload)],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == 'MEGHKOSHA_BUILD_RESULT {"offline":true}'
 
 
 def test_staged_rollout_has_offline_approval_and_attestation_regressions():
@@ -25,6 +66,7 @@ def test_staged_rollout_has_offline_approval_and_attestation_regressions():
     assert proof["checkpointResumeVerified"]
     assert proof["failureCleanupVerified"]
     assert proof["numericQuotaValidationVerified"]
+    assert proof["buildDiagnosticsVerified"]
 
 
 def test_private_builder_shell_syntax():

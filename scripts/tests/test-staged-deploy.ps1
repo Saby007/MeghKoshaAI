@@ -15,6 +15,7 @@ $global:stagedState.calls.Add('identity')
 $global:stagedState = @{
     calls = [Collections.Generic.List[string]]::new()
     provisions = 0; previews = 0; badBuild = $false; bootstrapFailed = $false; quotaInsufficient = $false
+    buildResponse = 'success'
     assignments = [Collections.Generic.List[object]]::new()
     responses = [Collections.Generic.Queue[string]]::new()
     prompts = [Collections.Generic.List[string]]::new()
@@ -116,6 +117,9 @@ function az {
         $argument = [string]$a[[array]::IndexOf($a, '--scripts') + 1]
         if (-not $argument.StartsWith('@')) { throw 'Run Command must read a local file, not shell-escaped inline code.' }
         $text = Get-Content -LiteralPath $argument.Substring(1) -Raw
+        if ($text -match "exec /bin/bash <<'MEGHKOSHA_PRIVATE_BUILD'") {
+            throw 'The build program must execute as a file, not through shared standard input.'
+        }
         $match = [regex]::Match($text, "MEGHKOSHA_BUILD_CONFIG='([^']+)'")
         $config = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($match.Groups[1].Value)) | ConvertFrom-Json
         $result = @{
@@ -124,7 +128,17 @@ function az {
             apiImage = "$($config.registry)/meghkoshaai-api@sha256:$('a'*64)"
             webImage = "$($config.registry)/meghkoshaai-web@sha256:$('b'*64)"
         } | ConvertTo-Json -Compress
-        return (@{ value = @(@{ message = "MEGHKOSHA_BUILD_RESULT $result`n" }) } | ConvertTo-Json -Depth 5)
+        $message = "Enable succeeded: `n[stdout]`nMEGHKOSHA_BUILD_STARTED $($config.nonce)`nMEGHKOSHA_BUILD_RESULT $result`n`n[stderr]`n"
+        $level = 'Info'
+        $code = 'ProvisioningState/succeeded'
+        switch ($global:stagedState.buildResponse) {
+            'guest-failure' {
+                $message = "Enable succeeded: `n[stdout]`nMEGHKOSHA_BUILD_STARTED $($config.nonce)`n`n[stderr]`nPrivate build failed (exit 100).`nCould not resolve package mirror.`nMEGHKOSHA_BUILD_ERROR {`"phase`":`"install-prerequisites`",`"exitCode`":100}`n"
+            }
+            'empty' { $message = "Enable succeeded: `n[stdout]`n`n[stderr]`n" }
+            'provider-failure' { $level = 'Error'; $code = 'ProvisioningState/failed' }
+        }
+        return (@{ value = @(@{ code = $code; level = $level; message = $message }) } | ConvertTo-Json -Depth 5)
     }
     if ($command -eq 'containerapp job start') { return '{"name":"bootstrap-execution"}' }
     if ($command -eq 'containerapp job execution') {
@@ -242,6 +256,17 @@ try {
     & $script -Stage Build @common -ApproveImagePublication | Out-Null
     if ($global:stagedState.values.APP_STAGED_BUILD_COMMIT -ne ('c' * 40)) { throw 'Verified build was not recorded.' }
     if ($global:stagedState.provisions) { throw 'Build stage must not provision or release apps.' }
+    $diagnostics = @(Get-ChildItem -LiteralPath (Join-Path $testRoot '.azure\staged-test') -Filter 'private-build-*.result.json' -File)
+    if (-not $diagnostics.Count) { throw 'Build must retain the actual Run Command response for diagnostics.' }
+    $verifiedImage = $global:stagedState.values.APP_STAGED_API_IMAGE
+    $global:stagedState.buildResponse = 'guest-failure'
+    Assert-Refused { & $script -Stage Build @common -ApproveImagePublication } 'Could not resolve package mirror'
+    $global:stagedState.buildResponse = 'empty'
+    Assert-Refused { & $script -Stage Build @common -ApproveImagePublication } 'Saved diagnostics:'
+    $global:stagedState.buildResponse = 'provider-failure'
+    Assert-Refused { & $script -Stage Build @common -ApproveImagePublication } 'error-free attestation'
+    if ($global:stagedState.values.APP_STAGED_API_IMAGE -ne $verifiedImage) { throw 'Failed/empty build result overwrote the verified images.' }
+    $global:stagedState.buildResponse = 'success'
     $global:stagedState.badBuild = $true
     Assert-Refused { & $script -Stage Build @common -ApproveImagePublication } 'does not match'
     $global:stagedState.badBuild = $false
@@ -274,6 +299,7 @@ try {
         $global:stagedState.provisions=0
         $global:stagedState.previews=0
         $global:stagedState.badBuild=$false
+        $global:stagedState.buildResponse='success'
         $global:stagedState.bootstrapFailed=$false
         $global:stagedState.cleanupFailed=$false
         $global:stagedState.imageDrift=$false
@@ -351,6 +377,7 @@ try {
         stagesAreExplicit = $true; provisioningCallsStubbed = $global:stagedState.provisions
         oneCommandCompletes = $true; checkpointResumeVerified = $true; failureCleanupVerified = $true
         numericQuotaValidationVerified = $true
+        buildDiagnosticsVerified = $true
     } | ConvertTo-Json -Compress
 } finally {
     Remove-Item -LiteralPath $testRoot -Recurse -Force

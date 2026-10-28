@@ -7,11 +7,14 @@ export AZURE_CONFIG_DIR="$work/azure"
 export DOCKER_CONFIG="$work/docker"
 mkdir -p "$AZURE_CONFIG_DIR" "$DOCKER_CONFIG"
 log="$work/build.log"
+phase=configuration
+: > "$log"
 finish() {
     status=$?
     if [ "$status" -ne 0 ]; then
         printf 'Private build failed (exit %s).\n' "$status" >&2
-        tail -n 20 "$log" >&2 || true
+        tail -c 2500 "$log" >&2 || true
+        printf '\nMEGHKOSHA_BUILD_ERROR {"phase":"%s","exitCode":%s}\n' "$phase" "$status" >&2
     fi
     python3 - "$work" <<'PY'
 import pathlib, shutil, sys
@@ -41,11 +44,14 @@ for key, pattern in patterns.items():
 PY
 )" || exit 1
 eval "$assignments"
+printf 'MEGHKOSHA_BUILD_STARTED %s\n' "$NONCE"
 
 {
+    phase=install-prerequisites
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y ca-certificates curl gnupg git docker.io python3
+    phase=install-azure-cli
     install -d -m 0755 /etc/apt/keyrings
     curl --fail --silent --show-error https://packages.microsoft.com/keys/microsoft.asc |
         gpg --dearmor --yes -o /etc/apt/keyrings/microsoft.gpg
@@ -55,13 +61,16 @@ eval "$assignments"
     apt-get update
     apt-get install -y azure-cli
     systemctl start docker
+    phase=private-registry-dns
     python3 - "$REGISTRY" <<'PY'
 import ipaddress, socket, sys
 addresses = {item[4][0] for item in socket.getaddrinfo(sys.argv[1], 443)}
 if not addresses or any(not ipaddress.ip_address(address).is_private for address in addresses):
     raise SystemExit("Private ACR DNS did not resolve exclusively to private addresses.")
 PY
+    phase=managed-identity-login
     az login --identity --client-id "$CLIENTID" --output none
+    phase=registry-login
     authenticated=false
     for attempt in 1 2 3 4 5; do
         if az acr login --name "${REGISTRY%%.*}"; then authenticated=true; break; fi
@@ -71,22 +80,30 @@ PY
         printf 'Managed-identity ACR login failed after bounded RBAC propagation retries.\n' >&2
         exit 1
     fi
+    phase=source-checkout
     git init --quiet "$work/source"
     git -C "$work/source" remote add origin "$REPOSITORY"
     GIT_TERMINAL_PROMPT=0 git -C "$work/source" fetch --quiet --depth=1 origin "$COMMIT"
     git -C "$work/source" checkout --quiet --detach FETCH_HEAD
     test "$(git -C "$work/source" rev-parse HEAD)" = "$COMMIT"
     for service in api web; do
+        phase="$service-build"
         docker build --platform linux/amd64 --label "org.opencontainers.image.revision=$COMMIT" \
             --file "$work/source/$service/Dockerfile" \
             --tag "$REGISTRY/meghkoshaai-$service:$COMMIT" "$work/source/$service"
+        phase="$service-push"
         docker push "$REGISTRY/meghkoshaai-$service:$COMMIT"
     done
 } >> "$log" 2>&1
 
 export BUILD_COMMIT="$COMMIT" BUILD_REGISTRY="$REGISTRY" BUILD_NONCE="$NONCE"
-export API_DIGEST="$(az acr repository show --name "${REGISTRY%%.*}" --image "meghkoshaai-api:$COMMIT" --query digest --output tsv)"
-export WEB_DIGEST="$(az acr repository show --name "${REGISTRY%%.*}" --image "meghkoshaai-web:$COMMIT" --query digest --output tsv)"
+phase=api-digest
+API_DIGEST="$(az acr repository show --name "${REGISTRY%%.*}" --image "meghkoshaai-api:$COMMIT" --query digest --output tsv 2>> "$log")"
+export API_DIGEST
+phase=web-digest
+WEB_DIGEST="$(az acr repository show --name "${REGISTRY%%.*}" --image "meghkoshaai-web:$COMMIT" --query digest --output tsv 2>> "$log")"
+export WEB_DIGEST
+phase=attestation
 python3 - <<'PY'
 import json, os, re
 for name in ("API_DIGEST", "WEB_DIGEST"):
