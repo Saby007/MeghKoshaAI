@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+exec 3>&1 4>&2
 
 work="$(mktemp -d /var/tmp/meghkosha-build.XXXXXXXX)"
 export AZURE_CONFIG_DIR="$work/azure"
@@ -12,17 +13,21 @@ phase=configuration
 finish() {
     status=$?
     if [ "$status" -ne 0 ]; then
-        printf 'Private build failed (exit %s).\n' "$status" >&2
-        tail -c 2500 "$log" >&2 || true
-        printf '\nMEGHKOSHA_BUILD_ERROR {"phase":"%s","exitCode":%s}\n' "$phase" "$status" >&2
+        printf 'Private build failed (exit %s).\n' "$status" >&4
+        tail -c 2500 "$log" >&4 || true
+        printf '\nMEGHKOSHA_BUILD_ERROR {"phase":"%s","exitCode":%s}\n' "$phase" "$status" >&4
     fi
-    python3 - "$work" <<'PY'
+    if ! python3 - "$work" 1>&3 2>&4 <<'PY'
 import pathlib, shutil, sys
 path = pathlib.Path(sys.argv[1])
 if path.parent != pathlib.Path("/var/tmp") or not path.name.startswith("meghkosha-build."):
     raise SystemExit("Unsafe build workspace cleanup refused.")
 shutil.rmtree(path)
 PY
+    then
+        printf 'MEGHKOSHA_BUILD_ERROR {"phase":"workspace-cleanup","exitCode":1}\n' >&4
+        if [ "$status" -eq 0 ]; then status=1; fi
+    fi
     exit "$status"
 }
 trap finish EXIT
