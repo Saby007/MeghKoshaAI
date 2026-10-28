@@ -1,6 +1,7 @@
 import { toNarratePayload } from './findings/models';
 import { apiFetch } from './apiIdentity';
 import { BRAND_NAME } from './brand';
+import { createReportDataReader, type CostQueryBody } from './report/postgresData';
 import type { CostFilter, CostWindow } from './report/costDetails';
 import type {
   AnomalySummary,
@@ -148,6 +149,43 @@ export class ApiRequestError extends Error {
   }
 }
 
+export type BackgroundAssessmentJob = {
+  jobId: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  snapshotId: string | null; error: string | null;
+};
+
+export function parseAssessmentJob(value: unknown): BackgroundAssessmentJob {
+  if (!value || typeof value !== 'object' || !('jobId' in value) || !('status' in value)) {
+    throw new ApiRequestError('Background processing returned an invalid job.', 502);
+  }
+  const { jobId, status } = value;
+  const snapshotId = 'snapshotId' in value ? value.snapshotId : null;
+  const error = 'error' in value ? value.error : null;
+  if (typeof jobId !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(jobId)
+    || (status !== 'queued' && status !== 'running' && status !== 'succeeded' && status !== 'failed' && status !== 'cancelled')
+    || (snapshotId !== null && (typeof snapshotId !== 'string' || !snapshotId))
+    || (error !== null && typeof error !== 'string')) {
+    throw new ApiRequestError('Background processing returned an invalid job.', 502);
+  }
+  return { jobId, status, snapshotId, error };
+}
+
+export function waitForBackgroundPoll(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      window.clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      reject(signal?.reason ?? new DOMException('Request cancelled.', 'AbortError'));
+    };
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await apiFetch(path, {
     credentials: 'same-origin',
@@ -182,70 +220,48 @@ export async function getLatestReport(signal?: AbortSignal, subscriptionIds?: st
     const payload = await response.json().catch(() => null);
     throw new ApiRequestError(typeof payload?.detail === 'string' ? payload.detail : payload?.detail?.message || `Latest report failed: ${response.status}`, response.status);
   }
-  return response.json();
+  return decorateSavedReport(await response.json());
 }
 
-export type AssessmentJob = {
-  jobId: string; subscriptionIds: string[]; staleDays: number;
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-  phase: string; createdAt: string; attempts: number; snapshotId: string | null;
-  errorCode: string | null; error: string | null;
-};
-export type ScalableSnapshot = {
-  snapshotId: string; scopeHash: string; subscriptionIds: string[]; staleDays: number;
-  createdAt: string;
-  report: Pick<FullReport, 'executiveSummary' | 'reportMetadata' | 'completeness'> & Record<string, unknown>;
-  collections: { path: string; total: number }[];
-  chatAvailable?: boolean;
-};
-export type AssessmentPage = { path: string; total: number; items: unknown[]; nextCursor: number | null; filtered: boolean };
-const assessmentSignal = (signal?: AbortSignal) =>
-  signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
-
-export function queueAssessment(subscriptionIds: string[], staleDays: number, signal?: AbortSignal): Promise<AssessmentJob> {
-  return apiRequest('/api/report', { method: 'POST', signal: assessmentSignal(signal), body: JSON.stringify({ subscriptionIds, staleDays }) });
-}
-export function getAssessmentJob(jobId: string, signal?: AbortSignal): Promise<AssessmentJob> {
-  return apiRequest(`/api/assessments/jobs/${encodeURIComponent(jobId)}`, { signal: assessmentSignal(signal) });
-}
-export async function getLatestAssessmentJob(subscriptionIds: string[], staleDays: number, signal?: AbortSignal): Promise<AssessmentJob | null> {
-  const query = new URLSearchParams({ staleDays: String(staleDays) });
-  subscriptionIds.forEach((id) => query.append('subscriptionId', id));
-  try {
-    return await apiRequest(`/api/assessments/jobs?${query}`, { signal: assessmentSignal(signal) });
-  } catch (error) {
-    if (error instanceof ApiRequestError && error.status === 404) return null;
-    throw error;
+function decorateSavedReport(snapshot: ReportSnapshot): ReportSnapshot {
+  if (snapshot.collections && snapshot.servingVersion !== 1) {
+    throw new ApiRequestError('This saved assessment predates SQL dashboard serving. Run a new background assessment.', 409);
   }
+  if (snapshot.servingVersion === 1 && snapshot.collections) {
+    const reader = createReportDataReader(snapshot.collections, <T>(body: CostQueryBody, requestSignal: AbortSignal) =>
+      querySavedCosts<T>(snapshot.snapshotId, body, requestSignal));
+    snapshot.report = {
+      ...snapshot.report,
+      remote: reader,
+      ...(snapshot.report.costDetails?.status === 'complete' ? { costDetails: {
+        ...snapshot.report.costDetails,
+        rows: [],
+        remote: reader,
+      } } : {}),
+    };
+  }
+  return snapshot;
 }
-export function cancelAssessment(jobId: string): Promise<void> {
-  return apiRequest(`/api/assessments/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST', signal: assessmentSignal() });
+
+export async function getSavedAssessment(snapshotId: string, signal?: AbortSignal): Promise<ReportSnapshot> {
+  return decorateSavedReport(await apiRequest<ReportSnapshot>(
+    `/api/assessments/snapshots/${encodeURIComponent(snapshotId)}`, { signal },
+  ));
 }
-export function getAssessmentSnapshot(snapshotId: string, signal?: AbortSignal): Promise<ScalableSnapshot> {
-  return apiRequest(`/api/assessments/snapshots/${encodeURIComponent(snapshotId)}`, { signal: assessmentSignal(signal) });
-}
-export function getInteractiveAssessment(snapshotId: string, signal?: AbortSignal): Promise<ReportSnapshot> {
-  return apiRequest(`/api/assessments/snapshots/${encodeURIComponent(snapshotId)}/interactive`, { signal: assessmentSignal(signal) });
-}
-export async function getScalableLatestReport(subscriptionIds: string[], staleDays: number, signal?: AbortSignal): Promise<ScalableSnapshot | null> {
-  const query = new URLSearchParams({ staleDays: String(staleDays) });
-  subscriptionIds.forEach((id) => query.append('subscriptionId', id));
-  try {
-    const snapshot = await apiRequest<ScalableSnapshot>(`/api/report/latest?${query}`, { signal: assessmentSignal(signal) });
-    if (snapshot.staleDays !== staleDays
-        || [...snapshot.subscriptionIds].map((id) => id.toLowerCase()).sort().join(',')
-          !== [...subscriptionIds].map((id) => id.toLowerCase()).sort().join(',')) {
-      throw new ApiRequestError('The saved assessment does not match the requested authorized scope. Reload subscriptions.', 409);
+
+async function querySavedCosts<T>(snapshotId: string, body: CostQueryBody, signal: AbortSignal): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    signal.throwIfAborted();
+    try {
+      const route = body.kind === 'records' ? 'records-query' : body.kind === 'hierarchy' ? 'hierarchy-query' : 'cost-query';
+      return await apiRequest<T>(`/api/report/${encodeURIComponent(snapshotId)}/${route}`, {
+        method: 'POST', signal, body: JSON.stringify(body),
+      });
+    } catch (error) {
+      if (!(error instanceof ApiRequestError) || error.status !== 429 || attempt >= 3 || (error.retryAfterSeconds ?? 2) > 30) throw error;
+      await waitForBackgroundPoll((error.retryAfterSeconds ?? 2) * 1000, signal);
     }
-    return snapshot;
-  } catch (error) {
-    if (error instanceof ApiRequestError && error.status === 404) return null;
-    throw error;
   }
-}
-export function getAssessmentRecords(snapshotId: string, path: string, after: number, search: string, signal?: AbortSignal): Promise<AssessmentPage> {
-  const query = new URLSearchParams({ path, after: String(after), limit: '100', search });
-  return apiRequest(`/api/assessments/snapshots/${encodeURIComponent(snapshotId)}/records?${query}`, { signal: assessmentSignal(signal) });
 }
 
 export function askFinOpsChat(
@@ -278,6 +294,24 @@ export function emailReportArtifact(snapshotId: string, reportType: ReportExport
   });
 }
 
+async function waitForReportArtifact(initial: Response): Promise<Response> {
+  let response = initial;
+  const deadline = Date.now() + 60 * 60 * 1000;
+  let jobId: string | undefined;
+  while (response.status === 202) {
+    const job = parseAssessmentJob(await response.json());
+    if (jobId && job.jobId !== jobId) throw new Error('Report processing returned a different download job.');
+    jobId = job.jobId;
+    if (Date.now() >= deadline) throw new Error('Report processing is still running. Retry the download later.');
+    const seconds = Number(response.headers.get('Retry-After')) || 2;
+    await waitForBackgroundPoll(Math.min(30, Math.max(1, seconds)) * 1000);
+    response = await apiFetch(`/api/report/artifacts/${encodeURIComponent(jobId)}`, {
+      credentials: 'same-origin', cache: 'no-store',
+    });
+  }
+  return response;
+}
+
 export async function downloadReportArtifact(
   snapshotId: string,
   reportType: ReportExportType,
@@ -286,9 +320,9 @@ export async function downloadReportArtifact(
   const startedAt = performance.now();
   const parameters = new URLSearchParams({ snapshotId, type: reportType });
   if (subscriptionId) parameters.set('subscriptionId', subscriptionId);
-  const response = await apiFetch(`/api/report/export?${parameters.toString()}`, {
+  const response = await waitForReportArtifact(await apiFetch(`/api/report/export?${parameters.toString()}`, {
     credentials: 'same-origin',
-  });
+  }));
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     throw new Error(payload?.detail || `Report export failed: ${response.status}`);
@@ -316,10 +350,10 @@ export function listReportSnapshots(
 }
 
 export async function downloadCostDetailReport(snapshotId: string, window: CostWindow, filters: CostFilter, previous?: CostWindow, selectedDates?: string[]): Promise<void> {
-  const response = await apiFetch('/api/report/cost-details/export', {
+  const response = await waitForReportArtifact(await apiFetch('/api/report/cost-details/export', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ snapshotId, ...window, filters, previousStart: previous?.startDate, previousEnd: previous?.endDate, selectedDates }),
-  });
+  }));
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     throw new Error(typeof payload?.detail === 'string' ? payload.detail : `Cost detail export failed: ${response.status}`);
@@ -370,12 +404,12 @@ export async function downloadCustomReport(
   modules: string[],
 ): Promise<{ elapsedMs: number; bytes: number }> {
   const startedAt = performance.now();
-  const response = await apiFetch('/api/report/export/custom', {
+  const response = await waitForReportArtifact(await apiFetch('/api/report/export/custom', {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ snapshotIds, modules }),
-  });
+  }));
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     throw new Error(payload?.detail || `Custom report failed: ${response.status}`);
@@ -614,11 +648,12 @@ export function getRateOptimization(
 export function getCostAnomalies(
   subscriptionIds: string[],
   signal?: AbortSignal,
+  snapshotId?: string,
 ): Promise<AnomalySummary> {
   return apiRequest('/api/anomalies', {
     method: 'POST',
     signal,
-    body: JSON.stringify({ subscriptionIds }),
+    body: JSON.stringify({ subscriptionIds, snapshotId }),
   });
 }
 

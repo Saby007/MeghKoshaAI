@@ -1,4 +1,5 @@
 import type { FindingCategorySummary } from '../findings/models';
+import type { CostDataReader, ReportDataReader } from './postgresData';
 
 /** Mirrors api/reports/models.py's FullReport - the 9-tab assessment matching the
  * original Excel workbook (Executive Summary, Savings Roadmap, Subscription
@@ -109,6 +110,7 @@ export type CostDetailSummary = {
   rows: CostDetailRow[];
   // The open month (YYYY-MM) the daily pull covers through yesterday; absent in older snapshots.
   partialPeriod?: string | null;
+  remote?: CostDataReader;
 };
 
 export type AdvisorScoreSummary = {
@@ -406,6 +408,7 @@ export type BudgetWriteRequest = {
   amount: number;
   timeGrain: BudgetTimeGrain;
   startDate: string;
+  endDate?: string | null;
   alertThresholdPercent?: number | null;
   alertEmail?: string | null;
 };
@@ -643,6 +646,7 @@ export type AnomalySummary = {
 };
 
 export type FullReport = {
+  remote?: ReportDataReader;
   executiveSummary: ExecutiveSummary;
   reportMetadata: ReportMetadata;
   completeness: DataCompleteness;
@@ -684,6 +688,8 @@ export type ReportSnapshot = {
   createdAt: string;
   reportSchemaVersion: string;
   report: FullReport;
+  collections?: { path: string; total: number; context?: Record<string, string> }[];
+  servingVersion?: number;
 };
 
 export type ReportSnapshotSummary = {

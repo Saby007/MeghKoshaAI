@@ -13,7 +13,7 @@ export type AnomalyState = { result: AnomalySummary | null; error: string | null
 export const countTone = (value: number | null, severe = false) =>
   value === null ? '' : value === 0 ? 'metric-count-good' : severe ? 'metric-count-risk' : 'metric-count-warn';
 
-export function useAnomalySummary(report: AnomalyScope): AnomalyState {
+export function useAnomalySummary(report: AnomalyScope, snapshotId?: string | null): AnomalyState {
   const [result, setResult] = useState<AnomalySummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -37,7 +37,7 @@ export function useAnomalySummary(report: AnomalyScope): AnomalyState {
       setError('Anomaly history loading timed out. Retry detection.');
       setLoading(false);
     }, 60000);
-    getCostAnomalies(subscriptionIds, controller.signal)
+    (snapshotId ? getCostAnomalies(subscriptionIds, controller.signal, snapshotId) : getCostAnomalies(subscriptionIds, controller.signal))
       .then((response) => {
         if (controller.signal.aborted) return;
         if (response.currency.toUpperCase() !== currency) throw new Error('Anomaly currency does not match the selected report.');
@@ -48,7 +48,7 @@ export function useAnomalySummary(report: AnomalyScope): AnomalyState {
       })
       .finally(() => { window.clearTimeout(timer); if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [scopeKey, currency, reportVersion, refreshVersion]);
+  }, [scopeKey, currency, reportVersion, refreshVersion, snapshotId]);
   return { result, error, loading, refresh: () => setRefreshVersion((version) => version + 1) };
 }
 

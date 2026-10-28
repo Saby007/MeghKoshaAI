@@ -1,4 +1,4 @@
-"""Publish and load complete assessment snapshots from private Blob Storage."""
+"""Archive assessment snapshots and serve PostgreSQL reports without Blob reads."""
 
 from __future__ import annotations
 
@@ -211,7 +211,10 @@ async def load_latest_snapshot(
         )
         if metadata is None:
             raise ReportSnapshotNotFoundError("No completed PostgreSQL report exists for this scope")
-        return await asyncio.to_thread(_load_snapshot, metadata["snapshot_id"], f'{metadata["blob_name"]}.manifest.json')
+        return await assessment_store.sql_snapshot(
+            os.environ["AZURE_TENANT_ID"].lower(), metadata["snapshot_id"],
+            complete=os.environ.get("ASSESSMENT_WORKER_PROCESS") == "true",
+        )
     return await asyncio.to_thread(_load_latest, subscription_ids, stale_days)
 
 
@@ -292,5 +295,8 @@ async def load_snapshot(snapshot_id: str) -> ReportSnapshot:
         )
         if metadata is None:
             raise ReportSnapshotNotFoundError(snapshot_id)
-        return await asyncio.to_thread(_load_snapshot, snapshot_id, f'{metadata["blob_name"]}.manifest.json')
+        return await assessment_store.sql_snapshot(
+            os.environ["AZURE_TENANT_ID"].lower(), snapshot_id,
+            complete=os.environ.get("ASSESSMENT_WORKER_PROCESS") == "true",
+        )
     return await asyncio.to_thread(_load_snapshot, snapshot_id)

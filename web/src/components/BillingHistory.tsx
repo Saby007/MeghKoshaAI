@@ -4,7 +4,7 @@ import { billingDates, billingTags, billingWindow, compareBillingDates, DEFAULT_
 import { CostExportButton, CostFilters, ResourceCostTable } from './CostExplorer';
 import { GroupedCostBreakdown } from './CostBreakdown';
 import { DailyBarChart } from './TrendChart';
-import { compareCostGroups, matchesCostFilter, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { costGroupPage, dailySubscriptionCosts, filteredCostDetails, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import type { CostDetailSummary } from '../report/models';
 import { BudgetContext, type BudgetState } from './BudgetContext';
 
@@ -66,6 +66,7 @@ export function BillingHistoryTab({ report, formatMoney, details, displayCurrenc
     if (!date) return null;
     if (detailed) {
       if (!available.has(date)) return null;
+      if (details?.remote) return dailySubscriptionCosts(details, { startDate: date, endDate: date }).reduce((sum, item) => sum + (item.days[0]?.current ?? 0), 0);
       return details!.rows.reduce((sum, row) => sum + (row.dailyCosts[date] ?? 0), 0);
     }
     return compareBillingDates(report, date, date, '').baseline;
@@ -77,16 +78,14 @@ export function BillingHistoryTab({ report, formatMoney, details, displayCurrenc
 
   /* One row per group, the two days side by side, largest movement first - the
      point of comparing two days is to find what moved. */
-  const groups = useMemo(() => {
-    if (!detailed || !baselineDate || !comparisonDate) return [];
-    return compareCostGroups(details, { startDate: comparisonDate, endDate: comparisonDate }, ALL, dimension, { startDate: baselineDate, endDate: baselineDate })
-      .filter((group) => (group.current ?? 0) !== 0 || (group.previous ?? 0) !== 0)
-      .sort((left, right) => Math.abs(right.delta ?? 0) - Math.abs(left.delta ?? 0) || Math.abs(right.current ?? 0) - Math.abs(left.current ?? 0));
-  }, [details, detailed, baselineDate, comparisonDate, dimension]);
+  const page = useMemo(() => detailed && baselineDate && comparisonDate ? costGroupPage(details, { startDate: comparisonDate, endDate: comparisonDate }, ALL, dimension,
+    { startDate: baselineDate, endDate: baselineDate }, { limit, nonzero: true, sort: 'change' }) : null,
+  [details, baselineDate, comparisonDate, dimension, limit]);
+  const groups = page?.items ?? [];
   const visible = groups.slice(0, limit);
   /* The subscription under each name tells apart same-named services or groups
      in different subscriptions; with one subscription in view it is just noise. */
-  const multipleSubscriptions = new Set(groups.map((group) => group.subscriptionId)).size > 1;
+  const multipleSubscriptions = (page?.subscriptionCount ?? 0) > 1;
   const noun = HISTORY_DIMENSIONS.find((item) => item.id === dimension)!.noun;
   const heading = HISTORY_DIMENSIONS.find((item) => item.id === dimension)!.label;
   const change = (value: number | null) => value === null ? 'Unavailable' : `${value > 0 ? '+' : ''}${formatMoney(value)}`;
@@ -162,10 +161,10 @@ export function BillingHistoryTab({ report, formatMoney, details, displayCurrenc
               </table>
             </div>
             <div className="history-compare-foot">
-              <span>{groups.length.toLocaleString()} {groups.length === 1 ? noun : `${noun}s`} with cost on either day · largest change first</span>
-              {groups.length > visible.length && (
+              <span>{(page?.total ?? 0).toLocaleString()} {page?.total === 1 ? noun : `${noun}s`} with cost on either day · largest change first</span>
+              {(page?.total ?? 0) > visible.length && (
                 <button type="button" className="ghost-button" onClick={() => setLimit((value) => value + 25)}>
-                  Show more ({(groups.length - visible.length).toLocaleString()} remaining)
+                  Show more ({((page?.total ?? 0) - visible.length).toLocaleString()} remaining)
                 </button>
               )}
             </div>
@@ -200,7 +199,7 @@ export function HourlyCostPanel({ report, formatMoney, formatHourlyMoney, rangeD
   const [comparisonDate, setComparisonDate] = useState(() => dates.at(-1) ?? '');
   useEffect(() => { setTagId(''); setLocalFilters({}); setExpandedDate(null); setBaselineDate(dates.at(-2) ?? dates.at(-1) ?? ''); setComparisonDate(dates.at(-1) ?? ''); }, [report]);
   const filteredReport = useMemo(() => report.costDetails?.status === 'complete'
-    ? { ...report, costDetails: { ...report.costDetails, rows: report.costDetails.rows.filter((row) => matchesCostFilter(row, filters)) } } : report, [report, filters]);
+    ? { ...report, costDetails: filteredCostDetails(report.costDetails, filters) } : report, [report, filters]);
   const result = useMemo(() => billingWindow(filteredReport, { rangeDays: rangeDays ?? selectedRange, dayFilter, timeFilter, tagId, startDate: costWindow?.startDate, endDate: costWindow?.endDate, businessCalendar }), [filteredReport, rangeDays, selectedRange, dayFilter, timeFilter, tagId, costWindow?.startDate, costWindow?.endDate, businessCalendar]);
   const comparison = compareBillingDates(filteredReport, baselineDate, comparisonDate, tagId);
   const firstDate = result.days[0]?.date;

@@ -407,6 +407,7 @@ def test_retained_million_row_history_is_replayable_and_publishes_complete_daily
                 db = await asyncpg.create_pool(dsn, min_size=1, max_size=10)
                 monkeypatch.setattr(assessment_store, "_pool", db)
                 publishing = None
+                renewing = None
                 try:
                     await db.execute((Path(__file__).parent.parent / "services" / "assessment_schema.sql").read_text())
                     await db.execute("TRUNCATE assessments.jobs,assessments.snapshots CASCADE")
@@ -420,6 +421,14 @@ def test_retained_million_row_history_is_replayable_and_publishes_complete_daily
                     publishing = asyncio.create_task(assessment_store.publish(
                         snapshot, job, report_snapshots.snapshot_blob_name(snapshot),
                     ))
+
+                    async def renew_lease():
+                        while not publishing.done():
+                            await asyncio.sleep(settings().lease_seconds / 3)
+                            if not publishing.done():
+                                assert await assessment_store.heartbeat(job["job_id"], job["lease_token"])
+
+                    renewing = asyncio.create_task(renew_lease())
                     timings = []
                     rounds = 0
                     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
@@ -442,6 +451,20 @@ def test_retained_million_row_history_is_replayable_and_publishes_complete_daily
                     )
                     assert len(details["items"]) == 1
                     assert len(details["items"][0]["dailyCosts"]) == 61
+                    assert await db.fetchval(
+                        "SELECT count(*) FROM assessments.cost_daily WHERE tenant_id=$1 AND snapshot_id=$2",
+                        TENANT, snapshot.snapshot_id,
+                    ) == 915000
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
+                        began = time.perf_counter()
+                        costs = await client.post(f"/api/report/{snapshot.snapshot_id}/cost-query", json={
+                            "kind": "metrics", "window": {"startDate": "2026-07-01", "endDate": "2026-07-31"},
+                        })
+                        query_seconds = time.perf_counter() - began
+                        assert costs.status_code == 200, costs.text
+                        assert costs.json()["total"] == 15000
+                        assert costs.json()["currentTotal"] == pytest.approx(5000)
+                        assert costs.json()["previousTotal"] == pytest.approx(5000)
                     p95 = sorted(timings)[min(int(len(timings) * 0.95), len(timings) - 1)]
                     assert p95 < 2
                     assert peak_process_memory() < 2 * 1024**3
@@ -449,8 +472,15 @@ def test_retained_million_row_history_is_replayable_and_publishes_complete_daily
                         "retainedPublicationReadP95Seconds": p95,
                         "readRequestsDuringPublication": len(timings), "concurrentReaders": 10,
                         "pipelinePeakWorkingSetBytes": peak_process_memory(),
+                        "normalizedDailyPoints": 915000, "completeCostMetricsQuerySeconds": query_seconds,
                     }))
                 finally:
+                    if renewing is not None:
+                        renewing.cancel()
+                        try:
+                            await renewing
+                        except asyncio.CancelledError:
+                            pass
                     if publishing is not None and not publishing.done():
                         publishing.cancel()
                         try:

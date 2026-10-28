@@ -19,7 +19,7 @@ _REPORT_REFRESH_STALE_DAYS = 90
 
 
 async def run_once() -> int:
-    subscription_ids = await asyncio.to_thread(focus_schedules.scheduled_subscription_ids)
+    subscription_ids = await focus_schedules.list_scheduled_subscription_ids()
     failures = 0
     new_data = False
     for offset in range(0, len(subscription_ids), 4):

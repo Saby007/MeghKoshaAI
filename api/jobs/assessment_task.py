@@ -35,6 +35,14 @@ async def run(job_id: UUID, token: UUID) -> None:
             raise RuntimeError("The supervisor-owned assessment workspace is unavailable.")
         budget_token = active_budget.set(AssessmentBudget(settings(), directory))
         try:
+            if job.get("task_kind", "assessment") == "artifact":
+                from jobs.report_artifact import run as build_artifact
+                try:
+                    await build_artifact(job)
+                except ValueError as error:
+                    logger.exception("Report artifact %s has invalid input", job_id)
+                    await assessment_store.fail(job_id, token, str(error), retryable=False, code="invalid_report_request")
+                return
             report = await _build_and_publish_report(
                 json.loads(job["subscription_ids"]), job["stale_days"], publish=False,
             )

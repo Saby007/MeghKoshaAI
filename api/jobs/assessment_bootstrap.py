@@ -15,7 +15,10 @@ RUNTIME_GRANTS = (
     'GRANT SELECT ON ALL TABLES IN SCHEMA assessments TO meghkosha_api;'
     'GRANT INSERT ON assessments.jobs TO meghkosha_api;'
     'GRANT UPDATE (status,phase,completed_at) ON assessments.jobs TO meghkosha_api;'
+    'GRANT INSERT ON assessments.action_events TO meghkosha_api;'
+    'GRANT INSERT,UPDATE ON assessments.control_state TO meghkosha_api;'
     'GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA assessments TO meghkosha_worker;'
+    'GRANT EXECUTE ON FUNCTION assessments.refresh_serving_statistics(boolean) TO meghkosha_worker;'
 )
 
 

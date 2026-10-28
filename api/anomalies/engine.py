@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import statistics
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -82,13 +83,7 @@ def _investigation_url(subscription_id: str, anomaly_date: str) -> str:
     )
 
 
-def _top_contributors(records: list[DailyCostRecord], anomaly_date: str) -> list[AnomalyContributor]:
-    resources: dict[tuple[str, str], float] = defaultdict(float)
-    for record in records:
-        if record.date != anomaly_date:
-            continue
-        name = record.resource_name or record.service_name or "Unattributed"
-        resources[(name, record.resource_id)] += record.effective_cost
+def _top_contributors(resources: dict[tuple[str, str], float]) -> list[AnomalyContributor]:
     return [
         AnomalyContributor(name=name, resource_id=resource_id, cost=cost)
         for (name, resource_id), cost in sorted(
@@ -97,7 +92,7 @@ def _top_contributors(records: list[DailyCostRecord], anomaly_date: str) -> list
     ]
 
 
-def _trend(records: list[DailyCostRecord], ordered_days: list[str]) -> list[AnomalyTrendPoint]:
+def _trend(records: Sequence[DailyCostRecord], ordered_days: list[str]) -> list[AnomalyTrendPoint]:
     totals: dict[str, float] = defaultdict(float)
     for record in records:
         totals[record.date] += record.effective_cost
@@ -207,28 +202,30 @@ def _collapse_incidents(anomalies: list[CostAnomaly]) -> list[CostAnomaly]:
 
 
 def _detect_series(
-    records: list[DailyCostRecord],
+    records: Sequence[DailyCostRecord],
     dimension_type: str,
     ordered_days: list[str],
+    *,
+    ai_only: bool = False,
 ) -> list[CostAnomaly]:
     series: dict[tuple[str, str, str, str], dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    record_groups: dict[tuple[str, str, str, str], list[DailyCostRecord]] = defaultdict(list)
     for record in records:
+        if ai_only and (not _is_ai_charge(record) or dimension_type == "resource" and not record.resource_id):
+            continue
         key = _series_key(record, dimension_type)
         series[key][record.date] += record.effective_cost
-        record_groups[key].append(record)
 
+    weekdays = {day: date.fromisoformat(day).weekday() for day in ordered_days}
+    baseline_calendar = [
+        [prior for prior in ordered_days[:index] if weekdays[prior] == weekdays[day]][-8:]
+        for index, day in enumerate(ordered_days)
+    ]
     anomalies: list[CostAnomaly] = []
     for (dimension_id, dimension_name, subscription_id, subscription_name), values in sorted(series.items()):
         seen_nonzero = False
         for index, day in enumerate(ordered_days):
             actual = values.get(day, 0.0)
-            weekday = date.fromisoformat(day).weekday()
-            baseline_days = [
-                prior_day
-                for prior_day in ordered_days[:index]
-                if date.fromisoformat(prior_day).weekday() == weekday
-            ][-8:]
+            baseline_days = baseline_calendar[index]
             baseline = [values.get(prior_day, 0.0) for prior_day in baseline_days]
 
             anomaly_type = ""
@@ -279,14 +276,31 @@ def _detect_series(
                     percentage_delta=percentage_delta,
                     severity=_severity(delta, expected),
                     baseline_samples=len(baseline),
-                    contributors=_top_contributors(record_groups[(dimension_id, dimension_name, subscription_id, subscription_name)], day),
+                    contributors=[],
                     investigation_url=_investigation_url(subscription_id, day),
                 )
             )
+    # Replay only detected dates; retaining every raw row defeats history spooling.
+    contributor_costs: dict[tuple[str, str, str, str, str], dict[tuple[str, str], float]] = {
+        (item.dimension_id, item.dimension_name, item.subscription_id, item.subscription_name, item.date): {}
+        for item in anomalies
+    }
+    if contributor_costs:
+        for record in records:
+            if ai_only and (not _is_ai_charge(record) or dimension_type == "resource" and not record.resource_id):
+                continue
+            costs = contributor_costs.get((*_series_key(record, dimension_type), record.date))
+            if costs is not None:
+                key = (record.resource_name or record.service_name or "Unattributed", record.resource_id)
+                costs[key] = costs.get(key, 0.0) + record.effective_cost
+        for item in anomalies:
+            item.contributors = _top_contributors(contributor_costs[
+                (item.dimension_id, item.dimension_name, item.subscription_id, item.subscription_name, item.date)
+            ])
     return anomalies
 
 
-def detect_anomalies(records: list[DailyCostRecord], currency: str) -> AnomalySummary:
+def detect_anomalies(records: Sequence[DailyCostRecord], currency: str) -> AnomalySummary:
     generated_at = datetime.now(timezone.utc).isoformat()
     if not records:
         return AnomalySummary(
@@ -304,7 +318,12 @@ def detect_anomalies(records: list[DailyCostRecord], currency: str) -> AnomalySu
             anomalies=[],
         )
 
-    observed_days = {record.date for record in records}
+    observed_days: set[str] = set()
+    has_ai = False
+    for record in records:
+        observed_days.add(record.date)
+        if not has_ai:
+            has_ai = _is_ai_charge(record)
     start = date.fromisoformat(min(observed_days))
     end = date.fromisoformat(max(observed_days))
     expected_days = _date_range(start, end)
@@ -338,11 +357,10 @@ def detect_anomalies(records: list[DailyCostRecord], currency: str) -> AnomalySu
         key=lambda item: (item.last_detected_date, abs(item.absolute_delta), item.dimension_name),
         reverse=True,
     )
-    ai_records = [record for record in records if _is_ai_charge(record)]
     ai_anomalies = _collapse_incidents(
-        _detect_series(ai_records, "service", expected_days)
-        + _detect_series([record for record in ai_records if record.resource_id], "resource", expected_days)
-    )
+        _detect_series(records, "service", expected_days, ai_only=True)
+        + _detect_series(records, "resource", expected_days, ai_only=True)
+    ) if has_ai else []
     ai_anomalies.sort(
         key=lambda item: (item.last_detected_date, abs(item.absolute_delta), item.dimension_name),
         reverse=True,

@@ -61,6 +61,9 @@ from services import sql_metrics
 from services import resource_uptime
 from services import service_retirements
 from services import assessment_store
+from services import assessment_queries
+from services import assessment_records
+from services import assessment_projection_cache
 from services.assessment_http import AssessmentHTTPBudget
 from services.assessment_settings import scalable_mode, settings as assessment_settings
 from services.assessment_limits import AssessmentLimitError
@@ -205,6 +208,7 @@ class RateOptimizationRequest(RateOptimizationScenario):
 
 class AnomalyRequest(BaseModel):
     subscription_ids: list[str] = Field(alias="subscriptionIds")
+    snapshot_id: str | None = Field(default=None, alias="snapshotId", min_length=8, max_length=64)
 
 
 class CustomReportRequest(BaseModel):
@@ -397,7 +401,7 @@ async def _previous_report_snapshot(
             _expected_tenant_id(), scope=report_snapshots.scope_hash(subscription_ids, stale_days),
             before_period=period_start,
         )
-        return ReportSnapshot(**view, reportSchemaVersion=report_snapshots.REPORT_SCHEMA_VERSION) if view else None
+        return ReportSnapshot.model_validate(view) if view else None
     try:
         catalog = await report_snapshots.list_snapshots(subscription_ids, limit=50)
         previous = next(
@@ -479,6 +483,24 @@ async def get_cost_anomalies(request: AnomalyRequest, http_request: Request):
     request.subscription_ids = await access_control.authorized_subscription_ids(
         principal.entra_object_id, request.subscription_ids
     )
+    if scalable_mode():
+        if request.snapshot_id:
+            snapshot = await _scalable_snapshot(http_request, request.snapshot_id)
+            if snapshot["subscriptionIds"] != report_snapshots.normalize_subscription_ids(request.subscription_ids):
+                raise HTTPException(status_code=422, detail="Anomaly evidence must use the selected report scope.")
+        else:
+            snapshot = await assessment_store.snapshot_view(
+                principal.tenant_id, scope=report_snapshots.scope_hash(request.subscription_ids, 90),
+            )
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="No completed SQL assessment is available for this scope.")
+        metadata = await assessment_store.anomaly_metadata(principal.tenant_id, snapshot["snapshotId"])
+        if metadata is None:
+            raise HTTPException(status_code=409, detail="Run a new background assessment to publish complete anomaly evidence.")
+        return StreamingResponse(
+            assessment_store.stream_anomalies(principal.tenant_id, snapshot["snapshotId"], metadata),
+            media_type="application/json", headers={"Content-Length": str(metadata["bytes"]), "Cache-Control": "private, no-store"},
+        )
     try:
         history = await focus_history_reader.load_complete_focus_history(
             request.subscription_ids,
@@ -967,6 +989,37 @@ async def _build_report_artifact(snapshot: ReportSnapshot, report_type: str, sub
     return await asyncio.to_thread(builder, snapshot)
 
 
+async def _artifact_response(request: Request, job_id: UUID):
+    principal = _control_principal(request)
+    job = await assessment_store.get_job(principal.tenant_id, job_id)
+    if job is None or job.get("taskKind") != "artifact":
+        raise HTTPException(status_code=404, detail="Report download job was not found.")
+    await access_control.require_all_subscription_access(principal.entra_object_id, job["subscriptionIds"])
+    if job["status"] in {"failed", "cancelled"}:
+        raise HTTPException(status_code=422 if job["errorCode"] == "invalid_report_request" else 503,
+                            detail=job["error"] or "Report processing did not complete.")
+    if job["status"] != "succeeded":
+        return JSONResponse(job, status_code=202, headers={
+            "Location": f"/api/report/artifacts/{job_id}", "Retry-After": "2", "Cache-Control": "private, no-store",
+        })
+    metadata = await assessment_store.artifact_metadata(principal.tenant_id, job_id)
+    if metadata is None:
+        raise HTTPException(status_code=503, detail="Completed report download metadata is unavailable.")
+    file_name = metadata["fileName"].replace('"', "").replace("\r", "").replace("\n", "")
+    return StreamingResponse(
+        assessment_store.stream_artifact(principal.tenant_id, job_id, metadata),
+        media_type=metadata["mediaType"],
+        headers={"Content-Disposition": f'attachment; filename="{file_name}"',
+                 "Content-Length": str(metadata["bytes"]), "Cache-Control": "private, no-store"},
+    )
+
+
+@app.get("/api/report/artifacts/{job_id}")
+async def download_processed_report(request: Request, job_id: UUID):
+    _require_scalable_mode()
+    return await _artifact_response(request, job_id)
+
+
 @app.get("/api/report/export/snapshot")
 async def export_snapshot_report(
     request: Request,
@@ -975,6 +1028,16 @@ async def export_snapshot_report(
     subscription_id: str | None = Query(default=None, alias="subscriptionId"),
 ):
     principal = _control_principal(request)
+    if scalable_mode():
+        snapshot = await _scalable_snapshot(request, snapshot_id)
+        subscription_id = subscription_id if isinstance(subscription_id, str) else None
+        if subscription_id and (report_type != "full" or subscription_id.lower() not in snapshot["subscriptionIds"]):
+            raise HTTPException(status_code=422, detail="Subscription-scoped full export must belong to this report.")
+        job = await assessment_store.enqueue_artifact(
+            principal.tenant_id, principal.entra_object_id, snapshot["subscriptionIds"], snapshot["staleDays"],
+            {"operation": "report", "snapshotIds": [snapshot_id], "reportType": report_type, "subscriptionId": subscription_id},
+        )
+        return await _artifact_response(request, UUID(job["jobId"]))
     try:
         snapshot = await report_snapshots.load_snapshot(snapshot_id)
         await access_control.require_all_subscription_access(principal.entra_object_id, snapshot.subscription_ids)
@@ -1010,6 +1073,24 @@ async def get_report_retirements(
         snapshot = await report_snapshots.load_snapshot(snapshot_id)
         await access_control.require_all_subscription_access(principal.entra_object_id, snapshot.subscription_ids)
         summary = await service_retirements.get_retirements(snapshot, subscription_id)
+        if scalable_mode():
+            metadata = snapshot.report.report_metadata
+            start, end = date.fromisoformat(metadata.period_start), date.fromisoformat(metadata.period_end)
+            details = snapshot.report.cost_details
+            complete = details.status == "complete" and {
+                str(start + timedelta(days=index)) for index in range((end - start).days + 1)
+            }.issubset(details.dates)
+            evidence = await assessment_store.resource_cost_evidence(
+                principal.tenant_id, snapshot_id, [notice.resource_id for notice in summary.notices], start, end,
+            )
+            notices = []
+            for notice in summary.notices:
+                costs = evidence[notice.resource_id.lower()]
+                matched = costs["daily"] if complete else None
+                if details.status != "complete" or not costs["has_daily"]:
+                    matched = costs["monthly"]
+                notices.append(notice.model_copy(update={"matched_cost": matched}))
+            summary = summary.model_copy(update={"notices": notices})
         if not export:
             return summary.model_dump(by_alias=True)
         artifact = await asyncio.to_thread(service_retirements.export_retirements, summary)
@@ -1040,7 +1121,11 @@ async def get_report_resource_availability(
     except (report_snapshots.ReportSnapshotIntegrityError, AzureError) as error:
         raise HTTPException(status_code=503, detail="Completed report snapshot is unavailable") from error
     details = snapshot.report.cost_details
-    if details.status != "complete" or str(billing_date) not in details.dates or not any(row.resource_id.lower() == resource_id.lower() for row in details.rows):
+    present = await (await assessment_store.pool()).fetchval(
+        "SELECT EXISTS(SELECT 1 FROM assessments.cost_rows WHERE tenant_id=$1 AND snapshot_id=$2 AND resource_id=$3)",
+        principal.tenant_id, snapshot_id, resource_id.lower(),
+    ) if scalable_mode() else any(row.resource_id.lower() == resource_id.lower() for row in details.rows)
+    if details.status != "complete" or str(billing_date) not in details.dates or not present:
         raise HTTPException(status_code=404, detail="Resource and date were not found in this snapshot's cost evidence")
     return await resource_uptime.get_resource_availability(resource_id, billing_date)
 
@@ -1058,6 +1143,13 @@ class CostDetailExportRequest(BaseModel):
 @app.post("/api/report/cost-details/export")
 async def export_cost_details(request: Request, body: CostDetailExportRequest):
     principal = _control_principal(request)
+    if scalable_mode():
+        snapshot = await _scalable_snapshot(request, body.snapshot_id)
+        job = await assessment_store.enqueue_artifact(
+            principal.tenant_id, principal.entra_object_id, snapshot["subscriptionIds"], snapshot["staleDays"],
+            {"operation": "cost", "snapshotIds": [body.snapshot_id], "request": body.model_dump(by_alias=True, mode="json")},
+        )
+        return await _artifact_response(request, UUID(job["jobId"]))
     try:
         snapshot = await report_snapshots.load_snapshot(body.snapshot_id)
         await access_control.require_all_subscription_access(principal.entra_object_id, snapshot.subscription_ids)
@@ -1267,6 +1359,14 @@ async def export_custom_report(request: Request, body: CustomReportRequest):
     invalid = sorted(set(body.modules) - report_exports.CUSTOM_REPORT_MODULES)
     if invalid:
         raise HTTPException(status_code=422, detail=f"Unsupported custom modules: {', '.join(invalid)}")
+    if scalable_mode():
+        snapshots = [await _scalable_snapshot(request, snapshot_id) for snapshot_id in body.snapshot_ids]
+        subscription_ids = sorted({value for snapshot in snapshots for value in snapshot["subscriptionIds"]})
+        job = await assessment_store.enqueue_artifact(
+            principal.tenant_id, principal.entra_object_id, subscription_ids, snapshots[0]["staleDays"],
+            {"operation": "custom", "snapshotIds": body.snapshot_ids, "modules": body.modules},
+        )
+        return await _artifact_response(request, UUID(job["jobId"]))
     try:
         snapshots = await asyncio.gather(*(report_snapshots.load_snapshot(value) for value in body.snapshot_ids))
         combined_subscription_ids = sorted({sub_id for snap in snapshots for sub_id in snap.subscription_ids})
@@ -1452,6 +1552,8 @@ async def _build_and_publish_report(subscription_ids: list[str], stale_days: int
         detail_max_rows=assessment_settings().detail_rows if scalable_mode() else 20000,
         detail_max_points=assessment_settings().detail_points if scalable_mode() else 500000,
     )
+    if scalable_mode() and os.environ.get("ASSESSMENT_WORKER_PROCESS") == "true":
+        report._anomaly_evidence = await asyncio.to_thread(detect_anomalies, focus_history.records, focus_history.currency)
     previous_snapshot = await _previous_report_snapshot(
         subscription_ids,
         stale_days,
@@ -1556,25 +1658,68 @@ async def get_assessment_records(
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
+@app.post("/api/report/{snapshot_id}/hierarchy-query")
+async def query_saved_hierarchy(request: Request, snapshot_id: str, query: assessment_records.HierarchyQuery):
+    snapshot = await _scalable_snapshot(request, snapshot_id)
+    if snapshot.get("servingVersion", 0) < 1:
+        raise HTTPException(status_code=409, detail="Run a new background assessment to publish SQL report evidence.")
+    principal = _control_principal(request)
+    cache_key = assessment_projection_cache.key(principal.tenant_id, snapshot_id, "hierarchy", query)
+    cached = assessment_projection_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    async with (await assessment_store.pool()).acquire(timeout=10) as connection:
+        result = await assessment_records.hierarchy(connection, principal.tenant_id, snapshot_id, query)
+    return assessment_projection_cache.response(cache_key, result)
+
+
+@app.post("/api/report/{snapshot_id}/records-query")
+async def query_saved_records(request: Request, snapshot_id: str, query: assessment_records.RecordQuery):
+    snapshot = await _scalable_snapshot(request, snapshot_id)
+    if snapshot.get("servingVersion", 0) < 1:
+        raise HTTPException(status_code=409, detail="Run a new background assessment to publish SQL report evidence.")
+    principal = _control_principal(request)
+    cache_key = assessment_projection_cache.key(principal.tenant_id, snapshot_id, "records", query)
+    cached = assessment_projection_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        async with (await assessment_store.pool()).acquire(timeout=10) as connection:
+            result = await assessment_records.project(
+                connection, principal.tenant_id, snapshot_id, query, snapshot["collections"],
+            )
+    except ValueError as error:
+        logger.warning("Invalid record query for snapshot %s", snapshot_id)
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return assessment_projection_cache.response(cache_key, result)
+
+
+@app.post("/api/report/{snapshot_id}/cost-query")
+async def query_saved_costs(request: Request, snapshot_id: str, query: assessment_queries.CostQuery):
+    snapshot = await _scalable_snapshot(request, snapshot_id)
+    if snapshot.get("servingVersion", 0) < 1:
+        raise HTTPException(status_code=409, detail="Run a new background assessment to publish SQL cost evidence.")
+    details = snapshot["report"].get("costDetails", {})
+    if details.get("status") != "complete":
+        raise HTTPException(status_code=409, detail=details.get("statusMessage") or "Complete cost evidence is unavailable.")
+    principal = _control_principal(request)
+    cache_key = assessment_projection_cache.key(principal.tenant_id, snapshot_id, "costs", query)
+    cached = assessment_projection_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        async with (await assessment_store.pool()).acquire(timeout=10) as connection:
+            result = await assessment_queries.execute(connection, principal.tenant_id, snapshot_id, query, details["dates"])
+    except ValueError as error:
+        logger.warning("Invalid cost query for snapshot %s", snapshot_id)
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return assessment_projection_cache.response(cache_key, result)
+
+
 @app.get("/api/assessments/snapshots/{snapshot_id}/interactive", response_model=ReportSnapshot, response_model_by_alias=True)
 async def get_interactive_assessment(request: Request, snapshot_id: str):
-    expected = await _scalable_snapshot(request, snapshot_id)
-    if assessment_store.interactive_row_count(expected) > assessment_settings().interactive_rows:
-        raise AssessmentLimitError(
-            "This assessment exceeds the classic-view row budget. Use the paginated explorer "
-            "or select a smaller scope; complete totals remain available."
-        )
-    try:
-        snapshot = await report_snapshots.load_snapshot(snapshot_id)
-    except report_snapshots.ReportSnapshotNotFoundError as error:
-        raise HTTPException(status_code=404, detail="Completed assessment archive was not found") from error
-    except report_snapshots.ReportSnapshotIntegrityError as error:
-        logger.exception("Interactive assessment archive failed integrity validation")
-        raise HTTPException(status_code=503, detail="Assessment archive failed integrity validation") from error
-    if snapshot.scope_hash != expected["scopeHash"] or snapshot.subscription_ids != expected["subscriptionIds"]:
-        logger.error("Interactive assessment archive does not match its published database scope")
-        raise HTTPException(status_code=503, detail="Assessment archive failed scope integrity validation")
-    return JSONResponse(snapshot.model_dump(by_alias=True, mode="json"), headers={"Cache-Control": "private, no-store"})
+    await _scalable_snapshot(request, snapshot_id)
+    raise HTTPException(status_code=410, detail="The original report UI now uses bounded SQL queries; this alternate full-snapshot view is retired.")
 
 
 @app.get("/api/assessments/snapshots/{snapshot_id}/archive")

@@ -10,6 +10,11 @@ param(
     [string] $ServiceManagementReference = '',
     [switch] $IncludeLocalhostRedirects,
     [switch] $GrantAdminConsent,
+    [switch] $ApproveOwnedRegistrationMigration,
+    [uri] $PreviousWebOrigin,
+    [guid] $PreviousOboPrincipalId = [guid]::Empty,
+    [guid] $ExpectedApiClientId = [guid]::Empty,
+    [guid] $ExpectedWebClientId = [guid]::Empty,
     [switch] $Apply
 )
 
@@ -17,6 +22,18 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion -lt [version]'7.0') { throw 'PowerShell 7 or later is required. Run this script with `pwsh`, not Windows PowerShell 5.1.' }
 if ($TenantId -eq [guid]::Empty -or $SubscriptionId -eq [guid]::Empty) { throw 'Tenant and subscription IDs must be nonzero.' }
+if ($ApproveOwnedRegistrationMigration) {
+    if (-not $PreviousWebOrigin -or -not $PreviousWebOrigin.IsAbsoluteUri -or $PreviousWebOrigin.Scheme -ne 'https' -or
+        $PreviousWebOrigin.Port -ne 443 -or $PreviousWebOrigin.AbsolutePath -ne '/' -or $PreviousWebOrigin.Query -or
+        $PreviousWebOrigin.Fragment -or $PreviousWebOrigin.UserInfo -or $PreviousOboPrincipalId -eq [guid]::Empty -or
+        $ExpectedApiClientId -eq [guid]::Empty -or $ExpectedWebClientId -eq [guid]::Empty -or
+        $ExpectedApiClientId -eq $ExpectedWebClientId) {
+        throw 'Owned registration migration requires the exact previous HTTPS origin, previous OBO principal and distinct expected API/web client IDs.'
+    }
+} elseif ($PreviousWebOrigin -or $PreviousOboPrincipalId -ne [guid]::Empty -or
+          $ExpectedApiClientId -ne [guid]::Empty -or $ExpectedWebClientId -ne [guid]::Empty) {
+    throw 'Previous identity values require -ApproveOwnedRegistrationMigration; no trust is changed implicitly.'
+}
 if (-not $WebOrigin.IsAbsoluteUri -or $WebOrigin.Scheme -ne 'https' -or $WebOrigin.Port -ne 443 -or
     $WebOrigin.AbsolutePath -ne '/' -or $WebOrigin.Query -or $WebOrigin.Fragment -or $WebOrigin.UserInfo) {
     throw 'WebOrigin must be an HTTPS origin without credentials, path, query or fragment.'
@@ -46,6 +63,12 @@ $plan = [ordered]@{
     managedIdentityAudience = 'api://AzureADTokenExchange'
     administratorConsentRequested = [bool]$GrantAdminConsent
     createsClientSecret = $false
+    ownedRegistrationMigration = $(if ($ApproveOwnedRegistrationMigration) { @{
+        previousWebOrigin = $PreviousWebOrigin.GetLeftPart([UriPartial]::Authority)
+        previousOboPrincipalId = $PreviousOboPrincipalId.ToString()
+        expectedApiClientId = $ExpectedApiClientId.ToString()
+        expectedWebClientId = $ExpectedWebClientId.ToString()
+    } } else { $null })
     assignsSubscriptionRoles = $false
     liveValidationRequired = $true
 }
@@ -147,11 +170,20 @@ function Assert-ResourceAccess([object] $Application, [string] $ResourceAppId, [
     }
 }
 
-function Assert-Federation([object[]] $Credentials, [System.Collections.IDictionary] $Expected) {
+function Assert-Federation([object[]] $Credentials, [System.Collections.IDictionary] $Expected, [switch] $AllowPrevious) {
+    $previousSubjectAllowed = $ApproveOwnedRegistrationMigration -and $AllowPrevious -and
+        $Credentials.Count -eq 1 -and $Credentials[0].subject -ceq $PreviousOboPrincipalId.ToString()
     if ($Credentials.Count -gt 1 -or ($Credentials.Count -and ($Credentials[0].name -ne $Expected.name -or
-        $Credentials[0].issuer -cne $Expected.issuer -or $Credentials[0].subject -cne $Expected.subject -or
+        $Credentials[0].issuer -cne $Expected.issuer -or
+        ($Credentials[0].subject -cne $Expected.subject -and -not $previousSubjectAllowed) -or
         @($Credentials[0].audiences).Count -ne 1 -or $Credentials[0].audiences[0] -cne $Expected.audiences[0]))) {
         throw 'Existing federation differs from the approved OBO identity. No trust relationship was replaced.'
+    }
+}
+
+function Assert-Callbacks([string[]] $Existing, [string[]] $Allowed) {
+    if (@($Existing | Where-Object { $_ -notin $Allowed }).Count) {
+        throw 'Unexpected SPA callbacks require explicit migration, not silent replacement.'
     }
 }
 
@@ -203,6 +235,11 @@ try {
     $graphHeaders = @{ Authorization = "Bearer $($graphToken.accessToken)" }
     $api = Find-Application $apiName
     $web = Find-Application $webName
+    if ($ApproveOwnedRegistrationMigration -and
+        (-not $api -or -not $web -or $api.appId -ne $ExpectedApiClientId.ToString() -or
+         $web.appId -ne $ExpectedWebClientId.ToString())) {
+        throw 'Owned registration migration did not match both explicitly approved client IDs. No registration was changed.'
+    }
     $federation = @{
         name = 'obo-managed-identity'
         issuer = "https://login.microsoftonline.com/$TenantId/v2.0"
@@ -217,7 +254,7 @@ try {
     if ($armScope.Count -ne 1) { throw 'The ARM delegated user_impersonation scope is unavailable.' }
     if ($api) {
         Assert-ResourceAccess $api $armAppId $armScope[0].id
-        Assert-Federation @(Get-GraphCollection "applications/$($api.id)/federatedIdentityCredentials") $federation
+        Assert-Federation @(Get-GraphCollection "applications/$($api.id)/federatedIdentityCredentials") $federation -AllowPrevious
         if (@($api.api.oauth2PermissionScopes | Where-Object { $_.value -ne 'access_as_user' -or -not $_.isEnabled }).Count -or
             @($api.spa.redirectUris | Where-Object { $_ }).Count -or $api.api.acceptMappedClaims) {
             throw 'The API registration contains unexpected scopes or identity configuration.'
@@ -229,7 +266,11 @@ try {
     }
     if ($web) {
         if (-not $api) { throw 'Existing SPA without its API registration requires operator review.' }
-        if (@($web.spa.redirectUris | Where-Object { $_ -notin $callbacks }).Count) { throw 'Unexpected SPA callbacks require explicit migration, not silent replacement.' }
+        $allowedCallbacks = @($callbacks)
+        if ($ApproveOwnedRegistrationMigration) {
+            $allowedCallbacks += "$($PreviousWebOrigin.GetLeftPart([UriPartial]::Authority))/auth-callback.html"
+        }
+        Assert-Callbacks @($web.spa.redirectUris) $allowedCallbacks
     }
     if (-not $api) {
         $apiRegistration = @{ displayName = $apiName; signInAudience = 'AzureADMyOrg'; tags = @($ownershipTag); isFallbackPublicClient = $false }
@@ -280,7 +321,15 @@ try {
     $webPrincipal = Ensure-ServicePrincipal $web.appId
 
     $credentials = @(Get-GraphCollection "applications/$($api.id)/federatedIdentityCredentials")
-    Assert-Federation $credentials $federation
+    Assert-Federation $credentials $federation -AllowPrevious
+    if ($credentials.Count -eq 1 -and $credentials[0].subject -cne $federation.subject) {
+        Invoke-IdentityGraph "applications/$($api.id)/federatedIdentityCredentials/$($credentials[0].id)" 'PATCH' @{
+            subject = $federation.subject
+        } | Out-Null
+        $updated = @(Get-GraphCollection "applications/$($api.id)/federatedIdentityCredentials")
+        if ($updated.Count -ne 1) { throw 'The updated OBO trust could not be verified. No additional trust was created.' }
+        Assert-Federation $updated $federation
+    }
     if (-not $credentials.Count) { Invoke-IdentityGraph "applications/$($api.id)/federatedIdentityCredentials" 'POST' $federation | Out-Null }
     if ($GrantAdminConsent) {
         Ensure-DelegatedConsent $apiPrincipal.id $armPrincipals[0].id 'user_impersonation'
@@ -295,6 +344,7 @@ try {
         apiApplicationObjectId = $api.id
         webApplicationObjectId = $web.id
         administratorConsentRequested = [bool]$GrantAdminConsent
+        ownedRegistrationMigrationApproved = [bool]$ApproveOwnedRegistrationMigration
         liveValidationRequired = $true
     } | ConvertTo-Json -Depth 5
 } finally {

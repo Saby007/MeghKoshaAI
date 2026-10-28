@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 
@@ -14,6 +15,9 @@ from azure.storage.blob import ContentSettings
 
 from reports.models import FinOpsActionState
 from services.report_snapshots import get_container_client
+from services.assessment_settings import scalable_mode
+from services import assessment_store
+from services.entra_tokens import configured_uuid
 
 _ACTION_ID = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,127}$")
 
@@ -121,8 +125,41 @@ def _save(state: FinOpsActionState, expected_version: int) -> FinOpsActionState:
     return saved
 
 
+async def _sql_save(state: FinOpsActionState, expected_version: int) -> FinOpsActionState:
+    if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 0:
+        raise ValueError("Expected action version must be a nonnegative integer")
+    _validate_action_id(state.action_id)
+    tenant = configured_uuid(os.environ.get("AZURE_TENANT_ID"))
+    async with (await assessment_store.pool()).acquire(timeout=10) as connection, connection.transaction():
+        await connection.execute("SELECT pg_advisory_xact_lock(hashtextextended($1,74027262))",
+                                 f"{tenant}:{state.scope_hash}:{state.action_id}")
+        row = await connection.fetchrow(
+            "SELECT * FROM assessments.action_events WHERE tenant_id=$1 AND scope_hash=$2 AND action_id=$3 "
+            "ORDER BY version DESC LIMIT 1", tenant, state.scope_hash, state.action_id,
+        )
+        current = None
+        previous = None
+        if row:
+            current, _ = _decode(row["payload"].encode(), state.scope_hash, state.action_id)
+            if row["event_id"] != _event_blob(current, row["previous_event"]):
+                raise ActionIntegrityError("Stored SQL action event failed its content hash.")
+            previous = row["event_id"]
+        if (current.version if current else 0) != expected_version:
+            raise ActionConflictError("This action changed. Reload saved actions before saving again.")
+        changes = {"version": expected_version + 1}
+        if current is not None and current.status == "completed" and state.status == "completed":
+            changes["completed_at"] = current.completed_at
+        saved = state.model_copy(update=changes)
+        await connection.execute(
+            "INSERT INTO assessments.action_events VALUES($1,$2,$3,$4,$5::jsonb,$6,$7)",
+            tenant, saved.scope_hash, saved.action_id, saved.version, _bytes(saved, previous).decode(),
+            _event_blob(saved, previous), previous,
+        )
+    return saved
+
+
 async def save_action(state: FinOpsActionState, *, expected_version: int) -> FinOpsActionState:
-    return await asyncio.to_thread(_save, state, expected_version)
+    return await _sql_save(state, expected_version) if scalable_mode() else await asyncio.to_thread(_save, state, expected_version)
 
 
 def _list(scope_hash: str) -> list[FinOpsActionState]:
@@ -140,6 +177,18 @@ def _list(scope_hash: str) -> list[FinOpsActionState]:
 
 
 async def list_actions(scope_hash: str) -> list[FinOpsActionState]:
+    if scalable_mode():
+        rows = await (await assessment_store.pool()).fetch(
+            "SELECT DISTINCT ON(action_id) * FROM assessments.action_events WHERE tenant_id=$1 AND scope_hash=$2 "
+            "ORDER BY action_id,version DESC", configured_uuid(os.environ.get("AZURE_TENANT_ID")), scope_hash,
+        )
+        states = []
+        for row in rows:
+            state, _ = _decode(row["payload"].encode(), scope_hash, row["action_id"])
+            if row["event_id"] != _event_blob(state, row["previous_event"]):
+                raise ActionIntegrityError("Stored SQL action event failed its content hash.")
+            states.append(state)
+        return states
     return await asyncio.to_thread(_list, scope_hash)
 
 
@@ -180,6 +229,26 @@ def _history(scope_hash: str, action_id: str) -> list[FinOpsActionState]:
 
 
 async def list_action_history(scope_hash: str, action_id: str) -> list[FinOpsActionState]:
+    if scalable_mode():
+        _validate_action_id(action_id)
+        rows = await (await assessment_store.pool()).fetch(
+            "SELECT * FROM assessments.action_events WHERE tenant_id=$1 AND scope_hash=$2 AND action_id=$3 "
+            "ORDER BY version DESC LIMIT 10001", configured_uuid(os.environ.get("AZURE_TENANT_ID")), scope_hash, action_id,
+        )
+        if len(rows) > 10000:
+            raise ActionIntegrityError("Action audit history exceeds its read budget.")
+        history = []
+        expected = rows[0]["version"] if rows else 0
+        for index, row in enumerate(rows):
+            state, _ = _decode(row["payload"].encode(), scope_hash, action_id)
+            previous = rows[index + 1]["event_id"] if index + 1 < len(rows) else None
+            if state.version != expected or row["previous_event"] != previous or row["event_id"] != _event_blob(state, previous):
+                raise ActionIntegrityError("Stored SQL action audit chain is invalid.")
+            history.append(state)
+            expected -= 1
+        if expected != 0:
+            raise ActionIntegrityError("Stored SQL action audit chain is incomplete.")
+        return history
     return await asyncio.to_thread(_history, scope_hash, action_id)
 
 

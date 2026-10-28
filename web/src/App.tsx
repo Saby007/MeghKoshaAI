@@ -5,7 +5,7 @@ import { SubscriptionPicker, type Subscription } from './components/Subscription
 import { CostRangeControls } from './components/CostRangeControls';
 import { defaultCostWindow, monthCostWindow, monthToDateWindow, type CostWindow } from './report/costDetails';
 import { runCostAssessment, type StaleDays } from './collectors/costAssessment';
-import { getLatestReport, narrate, type CostAgentOutput, type ScalableSnapshot } from './api';
+import { getLatestReport, narrate, type CostAgentOutput } from './api';
 import { apiFetch, ApiIdentityRequiredError, initializeApiIdentity, redirectApiIdentity, signOutApiIdentity, IDENTITY_REQUIRED_EVENT, type VerifiedIdentity } from './apiIdentity';
 import type { FullReport, ReportSnapshot } from './report/models';
 import { BRAND_NAME } from './brand';
@@ -13,7 +13,6 @@ import { BRAND_NAME } from './brand';
 const ReportView = lazy(() => import('./components/ReportView').then((module) => ({ default: module.ReportView })));
 const ChatWindow = lazy(() => import('./components/ChatWindow').then((module) => ({ default: module.ChatWindow })));
 const ScheduleManager = lazy(() => import('./components/ScheduleManager').then((module) => ({ default: module.ScheduleManager })));
-const ScalableWorkspace = lazy(() => import('./components/ScalableWorkspace'));
 
 // Prevents a single bad field/render error anywhere in the (large) report tree from
 // unmounting the whole app to a blank screen - shows a reload prompt instead. This
@@ -247,22 +246,26 @@ export default function App() {
   const [identityConnecting, setIdentityConnecting] = useState(false);
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [report, setReport] = useState<FullReport | null>(null);
+  const pendingReaderDisposal = useRef<{ reader: NonNullable<FullReport['remote']>; timer: number } | null>(null);
+  useEffect(() => {
+    const reader = report?.remote;
+    if (!reader) return;
+    if (pendingReaderDisposal.current?.reader === reader) {
+      window.clearTimeout(pendingReaderDisposal.current.timer);
+      pendingReaderDisposal.current = null;
+    }
+    return () => {
+      const timer = window.setTimeout(() => reader.dispose(), 0);
+      pendingReaderDisposal.current = { reader, timer };
+    };
+  }, [report?.remote]);
   const [loadedSnapshot, setLoadedSnapshot] = useState<ReportSnapshot | null>(null);
-  const [scalableSnapshot, setScalableSnapshot] = useState<ScalableSnapshot | null>(null);
   const [narration, setNarration] = useState<CostAgentOutput>(null);
   const [running, setRunning] = useState(false);
-  const [scalableRefresh, setScalableRefresh] = useState(0);
-  const scalableHandledRefresh = useRef(0);
-  const scalable = verifiedIdentity?.features?.assessmentMode === 'postgres';
   const [assessmentPhase, setAssessmentPhase] = useState<AssessmentPhase>(null);
   const [error, setError] = useState<string | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const chatSnapshot = scalable
-    ? scalableSnapshot && [...selectedIds].map((id) => id.toLowerCase()).sort().join(',')
-      === scalableSnapshot.subscriptionIds.map((id) => id.toLowerCase()).sort().join(',')
-      ? scalableSnapshot : null
-    : loadedSnapshot;
   const [loadingSubscriptions, setLoadingSubscriptions] = useState(false);
   const [loadingSnapshot, setLoadingSnapshot] = useState(false);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
@@ -352,14 +355,11 @@ export default function App() {
       setView('report');
       setReport(null);
       setLoadedSnapshot(null);
-      setScalableSnapshot(null);
       setNarration(null);
       setAssessmentPhase(null);
       setLoadingSnapshot(false);
       setLoadingSubscriptions(false);
       setRunning(false);
-      setScalableRefresh(0);
-      scalableHandledRefresh.current = 0;
       setIdentityError('Your API session needs verification. Reconnect your Microsoft account.');
     };
     window.addEventListener(IDENTITY_REQUIRED_EVENT, requireConnection);
@@ -407,7 +407,6 @@ export default function App() {
         setSelectedIds(new Set(subscriptionIds));
         setLoadingSubscriptions(false);
         setError(null);
-        if (verifiedIdentity.features?.assessmentMode === 'postgres') return;
         if (!subscriptionIds.length) { setSnapshotMissing(true); return; }
         stage = 'snapshot';
         setLoadingSnapshot(true);
@@ -484,11 +483,6 @@ export default function App() {
 
   async function handleRun() {
     if (running || loadingSubscriptions || selectedIds.size === 0 || !verifiedIdentity || identityError) return;
-    if (scalable) {
-      rememberScope(verifiedIdentity, [...selectedIds].map((value) => value.toLowerCase()));
-      setScalableRefresh((value) => value + 1);
-      return;
-    }
     pendingStartup.current?.abort();
     setLoadingSnapshot(false);
     setSnapshotError(null);
@@ -636,7 +630,7 @@ export default function App() {
             <button type="button" className="ghost-button" onClick={() => setStartupVersion((value) => value + 1)} disabled={loadingSubscriptions || loadingSnapshot || running}><RefreshCw size={16} aria-hidden="true" /> Retry saved report</button>
           </section>}
           {running && assessmentPhase && <AssessmentProgress phase={assessmentPhase} updating={report !== null} />}
-          {!scalable && !report && !running && !loadingSubscriptions && !loadingSnapshot && !error && !snapshotError && (
+          {!report && !running && !loadingSubscriptions && !loadingSnapshot && !error && !snapshotError && (
             <section className="report-awaiting" aria-labelledby="report-ready-heading">
               <BarChart3 size={28} aria-hidden="true" />
               <h2 id="report-ready-heading">{selectedIds.size ? snapshotMissing ? 'No saved report for this scope' : 'Report workspace ready' : 'No subscriptions selected'}</h2>
@@ -665,25 +659,15 @@ export default function App() {
               </Suspense>
             </ReportErrorBoundary>
           )}
-          {scalable && !loadingSubscriptions && <ReportErrorBoundary>
-            <Suspense fallback={<WorkspaceLoading label="assessment dashboard" />}>
-              <ScalableWorkspace
-                subscriptionIds={[...selectedIds]} staleDays={STALE_DAYS}
-                refreshToken={scalableRefresh} handledRefresh={scalableHandledRefresh} onBusyChange={setRunning}
-                onInteractiveSnapshot={setLoadedSnapshot}
-                onSnapshotChange={setScalableSnapshot}
-              />
-            </Suspense>
-          </ReportErrorBoundary>}
         </div>
         {visitedViews.has('chat') && (
           <div className="view-panel" hidden={view !== 'chat'}>
             <Suspense fallback={<WorkspaceLoading label="chat" />}>
               <ChatWindow
-                snapshotId={chatSnapshot?.snapshotId ?? null}
-                period={chatSnapshot?.report.reportMetadata.period ?? null}
-                currency={chatSnapshot?.report.reportMetadata.currency ?? null}
-                subscriptionCount={chatSnapshot?.subscriptionIds.length ?? 0}
+                snapshotId={loadedSnapshot?.snapshotId ?? null}
+                period={report?.reportMetadata.period ?? null}
+                currency={report?.reportMetadata.currency ?? null}
+                subscriptionCount={loadedSnapshot?.subscriptionIds.length ?? 0}
                 onOpenReport={() => changeView('report')}
               />
             </Suspense>

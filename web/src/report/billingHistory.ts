@@ -1,5 +1,5 @@
 import type { FullReport, TagDailyCostSeries } from './models';
-import { matchesCostFilter, type CostFilter } from './costDetails';
+import { dailySubscriptionCosts, matchesCostFilter, type CostFilter } from './costDetails';
 
 export type BillingSource = Pick<FullReport, 'dailyCostTrend' | 'tagDailyCostTrend'> & Partial<Pick<FullReport, 'costDetails' | 'reportMetadata'>>;
 export type BillingDayFilter = 'all' | 'weekdays' | 'weekends';
@@ -38,6 +38,8 @@ export function businessHoursForDate(date: string, calendar: BusinessCalendar): 
 
 export function billingTags(source: BillingSource) {
   if (source.costDetails?.status === 'complete') {
+    if (source.costDetails.remote) return source.costDetails.remote.facets('', true).tagPair
+      .map(([id, label]) => ({ id, label })).sort((first, second) => first.label.localeCompare(second.label));
     const tags = new Map<string, string>();
     for (const row of source.costDetails.rows) for (const [key, value] of Object.entries(row.tags)) tags.set(JSON.stringify([key, value]), `${key} / ${value}`);
     return [...tags].sort((first, second) => first[1].localeCompare(second[1])).map(([id, label]) => ({ id, label }));
@@ -63,6 +65,11 @@ export function billingCostOnDate(source: BillingSource, date: string, tagId = '
       if (!billingTags(source).some((tag) => tag.id === tagId)) return null;
       const [tagKey, tagValue] = JSON.parse(tagId);
       filters = { tagKey, tagValue };
+    }
+    if (source.costDetails.remote) {
+      const dates = billingDates(source);
+      const series = dailySubscriptionCosts(source.costDetails, { startDate: dates[0], endDate: dates[dates.length - 1] }, filters);
+      return series.reduce((sum, item) => sum + (item.days.find(day => day.date === date)?.current ?? 0), 0);
     }
     return source.costDetails.rows.filter((row) => matchesCostFilter(row, filters)).reduce((sum, row) => sum + (row.dailyCosts[date] ?? 0), 0);
   }

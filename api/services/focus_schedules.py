@@ -23,6 +23,8 @@ from fastapi import HTTPException
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from services import focus_export_control, user_arm_client
+from services import assessment_control
+from services.assessment_settings import scalable_mode
 from services.entra_tokens import configured_uuid
 
 logger = logging.getLogger(__name__)
@@ -183,6 +185,10 @@ def _read(blob, subscription_id: str) -> StoredSchedule | None:
         raw = blob.download_blob(offset=0, length=MAX_RECORD_BYTES + 1).readall()
     except ResourceNotFoundError:
         return None
+    return _decode_record(raw, subscription_id)
+
+
+def _decode_record(raw: bytes, subscription_id: str) -> StoredSchedule:
     if len(raw) > MAX_RECORD_BYTES:
         raise ValueError("Schedule metadata exceeds its size limit")
     record = StoredSchedule.model_validate_json(raw)
@@ -200,6 +206,11 @@ def _read(blob, subscription_id: str) -> StoredSchedule | None:
     return record
 
 
+async def _sql_read(subscription_id: str) -> StoredSchedule | None:
+    row = await assessment_control.read(_configuration()[0], "focus-schedules", subscription_id)
+    return _decode_record(row["payload"].encode(), subscription_id) if row is not None else None
+
+
 def _write(blob, record: StoredSchedule, **kwargs):
     payload = record.model_dump_json().encode()
     if len(payload) > MAX_RECORD_BYTES:
@@ -209,6 +220,30 @@ def _write(blob, record: StoredSchedule, **kwargs):
 
 @asynccontextmanager
 async def _locked(subscription_id: str):
+    if scalable_mode():
+        tenant = _configuration()[0]
+        token = uuid4()
+        if not await assessment_control.acquire(tenant, "focus-schedules", subscription_id, token):
+            record = await _sql_read(subscription_id)
+            raise HTTPException(status_code=404 if record is None else 409,
+                                detail="Schedule not found." if record is None else "This schedule is being updated. Refresh and retry.")
+        try:
+            async with asyncio.timeout(40):
+                record = await _sql_read(subscription_id)
+                if record is None:
+                    raise HTTPException(status_code=404, detail="Schedule not found.")
+
+                async def save():
+                    payload = record.model_dump_json()
+                    if len(payload.encode()) > MAX_RECORD_BYTES:
+                        raise ValueError("Schedule metadata exceeds its size limit")
+                    if not await assessment_control.save(tenant, "focus-schedules", subscription_id, token, payload):
+                        raise HTTPException(status_code=409, detail="The schedule update lease expired. Refresh and retry.")
+
+                yield record, save
+        finally:
+            await assessment_control.release(tenant, "focus-schedules", subscription_id, token)
+        return
     try:
         with _container() as container:
             blob = container.get_blob_client(_blob_name(subscription_id))
@@ -523,8 +558,11 @@ async def load(subscription: dict):
     except (AzureError, ValueError):
         return _unavailable_view(subscription, "export_unavailable", "FOCUS schedule storage could not be safely read. Retry later.")
     try:
-        with _container() as container:
-            record = await asyncio.to_thread(_read, container.get_blob_client(_blob_name(subscription_id)), subscription_id)
+        if scalable_mode():
+            record = await _sql_read(subscription_id)
+        else:
+            with _container() as container:
+                record = await asyncio.to_thread(_read, container.get_blob_client(_blob_name(subscription_id)), subscription_id)
         if record is None:
             start = _utc(datetime.now(timezone.utc) + timedelta(minutes=6))
             return await create(subscription, "system:auto-provision", start)
@@ -547,8 +585,15 @@ async def create(subscription: dict, actor: str, schedule_start: str, window_mon
                             display_name=subscription["displayName"], created_by=actor, updated_by=actor, updated_at=now,
                             window_months=window_months, schedule_start_at=normalized, next_run_at=normalized, daily=daily)
     try:
-        with _container() as container:
-            await asyncio.to_thread(_write, container.get_blob_client(_blob_name(subscription_id)), record, overwrite=False)
+        if scalable_mode():
+            payload = record.model_dump_json()
+            if len(payload.encode()) > MAX_RECORD_BYTES:
+                raise ValueError("Schedule metadata exceeds its size limit")
+            if not await assessment_control.create(_configuration()[0], "focus-schedules", subscription_id, payload):
+                raise ResourceExistsError("Schedule already exists.")
+        else:
+            with _container() as container:
+                await asyncio.to_thread(_write, container.get_blob_client(_blob_name(subscription_id)), record, overwrite=False)
     except ResourceExistsError:
         async with _locked(subscription_id) as (stored, save):
             if stored.state != "deleted":
@@ -851,6 +896,14 @@ def scheduled_subscription_ids() -> list[str]:
 
 
 async def active_scheduled_subscription_ids() -> list[str]:
+    if scalable_mode():
+        subscription_ids = await list_scheduled_subscription_ids()
+        active = []
+        for subscription_id in subscription_ids:
+            record = await _sql_read(subscription_id)
+            if record is not None and record.state == "active":
+                active.append(subscription_id)
+        return active
     subscription_ids = await asyncio.to_thread(scheduled_subscription_ids)
     active: list[str] = []
     with _container() as container:
@@ -859,3 +912,9 @@ async def active_scheduled_subscription_ids() -> list[str]:
             if record is not None and record.state == "active":
                 active.append(subscription_id)
     return active
+
+
+async def list_scheduled_subscription_ids() -> list[str]:
+    if scalable_mode():
+        return [configured_uuid(value) for value in await assessment_control.keys(_configuration()[0], "focus-schedules", MAX_SCHEDULES)]
+    return await asyncio.to_thread(scheduled_subscription_ids)

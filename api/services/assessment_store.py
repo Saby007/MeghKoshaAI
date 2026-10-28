@@ -1,17 +1,19 @@
 """Private PostgreSQL persistence, token-authenticated pools, and durable job leases."""
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import re
 import ssl
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID, uuid4
 
 import asyncpg
 
-from services import report_snapshots, runtime_identity
+from services import assessment_queries, report_snapshots, runtime_identity
 from services.assessment_limits import AssessmentLimitError
 from services.assessment_settings import settings
 from services.assessment_request_context import dashboard_read
@@ -109,6 +111,7 @@ def _job(row: asyncpg.Record) -> dict:
         "createdAt": row["created_at"].isoformat(), "attempts": row["attempts"],
         "snapshotId": row["snapshot_id"], "errorCode": row["error_code"],
         "error": row["error_message"],
+        "taskKind": row.get("task_kind", "assessment"),
     }
 
 
@@ -274,14 +277,65 @@ async def fail(job_id: UUID, token: UUID, message: str, *, retryable: bool, code
         logger.info("Assessment %s no longer owns its job lease", job_id)
 
 
+def _resource_collection(path: str) -> bool:
+    return path in {
+        "costHierarchy", "costDetails.rows", "storageOptimization.accounts", "aiUsage.deployments",
+        "aiUsage.opportunities", "extendedSupport.rows", "offHoursSavings.rows", "chargeback.rows",
+    } or bool(re.fullmatch(r"(?:domains\.[^.]+\.categories\.\d+|tierACategories\.\d+)\.lines", path)) \
+        or bool(re.fullmatch(r"tagCosts\.dimensions\.\d+\.rows", path)) \
+        or path.startswith("domains.") and path.endswith(".advisorRecommendations")
+
+
+def _metadata_collection(path: str) -> bool:
+    return path in {
+        "tierACategories", "tagCosts.dimensions", "prioritizedFindings", "savingsRoadmap", "actionPlan",
+        "subscriptionBreakdown", "governance", "topServices", "spendCategories", "regionSpend",
+        "networkMetricCoverage", "advisorReconciliation.measures", "spendHistory.months",
+        "commitmentInsights.months", "pricingSummary.subscriptions", "dailyCostTrend.days",
+        "tagDailyCostTrend.windowDates",
+    } or bool(re.fullmatch(r"domains\.[^.]+\.categories", path))
+
+
+def collection_contexts(report: dict, paths: set[str]) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+
+    def visit(value, path: str, context: dict[str, str]):
+        if isinstance(value, dict):
+            context = {**context, **{key: value[key] for key in
+                       ("domain", "category", "displayName", "impactType", "tagKey") if isinstance(value.get(key), str)}}
+        if path in paths:
+            result[path] = context
+            if _resource_collection(path):
+                return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                visit(item, f"{path}.{key}" if path else key, context)
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                visit(item, f"{path}.{index}", context)
+
+    visit(report, "", {})
+    return result
+
+
 def split_report(report: dict) -> tuple[dict, list[tuple[str, list]]]:
     collections: list[tuple[str, list]] = []
 
     def visit(value, path: str):
         if isinstance(value, dict):
             return {key: visit(item, f"{path}.{key}" if path else key) for key, item in value.items()}
-        if isinstance(value, list) and len(value) > settings().inline_rows:
-            records = [visit(item, f"{path}.{index}") for index, item in enumerate(value)]
+        if path == "costDetails.dates" and isinstance(value, list):
+            if len(value) > 366:
+                raise AssessmentLimitError("Cost evidence exceeds the supported 366-day date axis.")
+            return value
+        if isinstance(value, list) and _metadata_collection(path):
+            return [visit(item, f"{path}.{index}") for index, item in enumerate(value)]
+        if isinstance(value, list) and (_resource_collection(path) or len(value) > settings().inline_rows):
+            records = [
+                item if _resource_collection(path) and len(_json(item).encode()) <= settings().record_bytes
+                else visit(item, f"{path}.{index}")
+                for index, item in enumerate(value)
+            ]
             collections.append((path, records))
             return []
         if isinstance(value, list):
@@ -327,24 +381,45 @@ async def publish(snapshot: ReportSnapshot, job: asyncpg.Record, blob_name: str)
             or snapshot.report.report_metadata.stale_days != snapshot.stale_days
             or not snapshot.report.completeness.complete):
         raise ValueError("Completed assessment does not match its leased job scope.")
-    summary, collections = split_report(snapshot.report.model_dump(by_alias=True, mode="json"))
+    complete = snapshot.report.model_dump(by_alias=True, mode="json")
+    summary, collections = split_report(complete)
+    contexts = collection_contexts(complete, {path for path, _ in collections})
+    if len(_json(contexts).encode()) > settings().response_bytes // 4:
+        raise AssessmentLimitError("Report collection metadata exceeds its response budget.")
     chat = _json(build_chat_evidence(snapshot.report).model_dump(by_alias=True, mode="json"))
     if len(chat.encode()) > CHAT_EVIDENCE_BYTES:
         logger.warning("Chat evidence exceeds its bounded payload budget for snapshot %s; report publication remains complete",
                        snapshot.snapshot_id)
         chat = None
     tenant = job["tenant_id"]
+    anomaly = snapshot.report._anomaly_evidence
+    anomaly_content = anomaly.model_dump_json(by_alias=True).encode() if anomaly is not None else None
     db = await pool()
     async with db.acquire(timeout=10) as connection, connection.transaction():
+        await connection.execute("SET LOCAL statement_timeout='5min'")
         await connection.execute(
             "INSERT INTO assessments.snapshots "
-            "(tenant_id,snapshot_id,scope_hash,subscription_ids,stale_days,created_at,summary,blob_name,period_start,chat_evidence) "
-            "VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7::jsonb,$8,$9,$10::jsonb)",
+            "(tenant_id,snapshot_id,scope_hash,subscription_ids,stale_days,created_at,summary,blob_name,period_start,chat_evidence,collection_context) "
+            "VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7::jsonb,$8,$9,$10::jsonb,$11::jsonb)",
             tenant, snapshot.snapshot_id, snapshot.scope_hash, _json(snapshot.subscription_ids),
             snapshot.stale_days, datetime.fromisoformat(snapshot.created_at), _json(summary), blob_name,
             snapshot.report.report_metadata.period_start,
-            chat,
+            chat, _json(contexts),
         )
+        await assessment_queries.persist_costs(connection, tenant, snapshot.snapshot_id, snapshot.report.cost_details)
+        if anomaly_content is not None:
+            parts = (len(anomaly_content) + 1048575) // 1048576
+            for ordinal in range(parts):
+                await connection.execute(
+                    "INSERT INTO assessments.anomaly_parts VALUES($1,$2,$3,$4)",
+                    tenant, snapshot.snapshot_id, ordinal, anomaly_content[ordinal * 1048576:(ordinal + 1) * 1048576],
+                )
+            await connection.execute(
+                "UPDATE assessments.snapshots SET anomaly_metadata=$3::jsonb WHERE tenant_id=$1 AND snapshot_id=$2",
+                tenant, snapshot.snapshot_id, _json({
+                    "parts": parts, "bytes": len(anomaly_content), "sha256": hashlib.sha256(anomaly_content).hexdigest(),
+                }),
+            )
         for path, records in collections:
             await connection.execute(
                 "INSERT INTO assessments.collections VALUES ($1,$2,$3,$4)",
@@ -362,6 +437,7 @@ async def publish(snapshot: ReportSnapshot, job: asyncpg.Record, blob_name: str)
                 await connection.executemany(
                     "INSERT INTO assessments.records VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)", batch,
                 )
+        await connection.execute("SELECT assessments.refresh_serving_statistics(true)")
         result = await connection.execute(
             "UPDATE assessments.jobs SET status='succeeded',phase='complete',completed_at=now(),"
             "snapshot_id=$3,error_code=NULL,error_message=NULL WHERE job_id=$1 AND lease_token=$2 "
@@ -371,7 +447,7 @@ async def publish(snapshot: ReportSnapshot, job: asyncpg.Record, blob_name: str)
         if result != "UPDATE 1":
             raise LeaseLostError("Assessment was cancelled or its lease expired before publication.")
         await connection.execute(
-            "UPDATE assessments.snapshots SET published=true WHERE tenant_id=$1 AND snapshot_id=$2",
+            "UPDATE assessments.snapshots SET published=true,serving_version=1 WHERE tenant_id=$1 AND snapshot_id=$2",
             tenant, snapshot.snapshot_id,
         )
 
@@ -388,7 +464,7 @@ async def snapshot_view(tenant: str, *, scope: str | None = None, snapshot_id: s
         arguments.append(before_period)
     row = await db.fetchrow(
         "SELECT snapshot_id,scope_hash,subscription_ids,stale_days,created_at,summary,"
-        "chat_evidence IS NOT NULL AS chat_available FROM assessments.snapshots WHERE tenant_id=$1 AND published "
+        "chat_evidence IS NOT NULL AS chat_available,serving_version,collection_context FROM assessments.snapshots WHERE tenant_id=$1 AND published "
         f"AND {selector} {period_clause}ORDER BY created_at DESC LIMIT 1", *arguments,
     )
     if not row:
@@ -397,12 +473,16 @@ async def snapshot_view(tenant: str, *, scope: str | None = None, snapshot_id: s
         "SELECT path,record_count FROM assessments.collections WHERE tenant_id=$1 AND snapshot_id=$2 ORDER BY path",
         tenant, row["snapshot_id"],
     )
+    contexts = json.loads(row["collection_context"])
     view = {
         "snapshotId": row["snapshot_id"], "scopeHash": row["scope_hash"],
         "subscriptionIds": json.loads(row["subscription_ids"]), "staleDays": row["stale_days"],
         "createdAt": row["created_at"].isoformat(), "report": json.loads(row["summary"]),
+        "reportSchemaVersion": report_snapshots.REPORT_SCHEMA_VERSION,
+        "servingVersion": row["serving_version"],
         "chatAvailable": row["chat_available"],
-        "collections": [{"path": item["path"], "total": item["record_count"]} for item in collections],
+        "collections": [{"path": item["path"], "total": item["record_count"],
+                         **({"context": contexts[item["path"]]} if contexts.get(item["path"]) else {})} for item in collections],
     }
     if len(_json(view).encode()) > settings().response_bytes:
         raise AssessmentLimitError("Stored dashboard exceeds its response budget; ask the operator to rebuild it.")
@@ -461,3 +541,171 @@ async def page(tenant: str, snapshot_id: str, path: str, after: int, limit: int,
     )
     return {"path": path, "total": total, "items": [json.loads(row["payload"]) for row in rows],
             "nextCursor": last if more else None, "filtered": bool(subscription_id or search)}
+
+
+async def sql_snapshot(tenant: str, snapshot_id: str, *, complete: bool = False) -> ReportSnapshot:
+    view = await snapshot_view(tenant, snapshot_id=snapshot_id)
+    if view is None:
+        raise report_snapshots.ReportSnapshotNotFoundError(snapshot_id)
+    if complete:
+        if os.environ.get("ASSESSMENT_WORKER_PROCESS") != "true":
+            raise AssessmentLimitError("Complete report materialization is background-worker only.")
+        async with (await pool()).acquire(timeout=10) as connection, connection.transaction(isolation="repeatable_read", readonly=True):
+            for collection in sorted(view["collections"], key=lambda item: item["path"].count(".")):
+                values = []
+                last = -1
+                while len(values) < collection["total"]:
+                    rows = await connection.fetch(
+                        "SELECT ordinal,payload FROM assessments.records WHERE tenant_id=$1 AND snapshot_id=$2 "
+                        "AND path=$3 AND ordinal>$4 ORDER BY ordinal LIMIT 100",
+                        tenant, snapshot_id, collection["path"], last,
+                    )
+                    if not rows:
+                        raise report_snapshots.ReportSnapshotIntegrityError("Stored report collection is incomplete.")
+                    values.extend(json.loads(row["payload"]) for row in rows)
+                    last = rows[-1]["ordinal"]
+                if len(values) != collection["total"]:
+                    raise report_snapshots.ReportSnapshotIntegrityError("Stored report collection count is invalid.")
+                target = view["report"]
+                pieces = collection["path"].split(".")
+                try:
+                    for piece in pieces[:-1]:
+                        target = target[int(piece)] if isinstance(target, list) else target[piece]
+                    if isinstance(target, list):
+                        target[int(pieces[-1])] = values
+                    else:
+                        target[pieces[-1]] = values
+                except (KeyError, IndexError, ValueError, TypeError) as error:
+                    raise report_snapshots.ReportSnapshotIntegrityError("Stored report collection path is invalid.") from error
+    try:
+        return ReportSnapshot.model_validate(view)
+    except ValueError as error:
+        raise report_snapshots.ReportSnapshotIntegrityError("Stored SQL report failed schema validation.") from error
+
+
+async def enqueue_artifact(tenant: str, actor: str, subscription_ids: list[str], stale_days: int, payload: dict) -> dict:
+    scope = hashlib.sha256(("artifact:" + json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)).encode()).hexdigest()
+    async with (await pool()).acquire(timeout=10) as connection, connection.transaction():
+        await connection.execute("SELECT pg_advisory_xact_lock(74027261)")
+        existing = await connection.fetchrow(
+            "SELECT * FROM assessments.jobs WHERE tenant_id=$1 AND scope_hash=$2 AND status IN ('queued','running')",
+            tenant, scope,
+        )
+        if existing:
+            return _job(existing)
+        count = await connection.fetchval("SELECT count(*) FROM assessments.jobs WHERE status IN ('queued','running')")
+        if count >= settings().queue_capacity:
+            raise QueueFullError("Report processing queue is full. Retry shortly.")
+        row = await connection.fetchrow(
+            "INSERT INTO assessments.jobs(job_id,tenant_id,requested_by,scope_hash,subscription_ids,stale_days,status,task_kind,task_payload) "
+            "VALUES ($1,$2,$3,$4,$5::jsonb,$6,'queued','artifact',$7::jsonb) RETURNING *",
+            uuid4(), tenant, actor, scope, _json(report_snapshots.normalize_subscription_ids(subscription_ids)), stale_days, _json(payload),
+        )
+    return _job(row)
+
+
+async def publish_artifact(job, file_name: str, media_type: str, content: bytes) -> None:
+    if len(content) > settings().spool_bytes:
+        raise AssessmentLimitError("Generated report exceeds the worker output budget.")
+    parts = (len(content) + 1048575) // 1048576
+    metadata = _json({
+        "fileName": file_name, "mediaType": media_type, "bytes": len(content), "parts": parts,
+        "sha256": hashlib.sha256(content).hexdigest(),
+    })
+    async with (await pool()).acquire(timeout=10) as connection, connection.transaction():
+        await connection.execute("SET LOCAL statement_timeout='5min'")
+        for ordinal in range(parts):
+            await connection.execute(
+                "INSERT INTO assessments.artifact_parts VALUES($1,$2,$3,$4)",
+                job["tenant_id"], job["job_id"], ordinal, content[ordinal * 1048576:(ordinal + 1) * 1048576],
+            )
+        result = await connection.execute(
+            "UPDATE assessments.jobs SET status='succeeded',phase='complete',completed_at=now(),result_metadata=$3::jsonb "
+            "WHERE job_id=$1 AND lease_token=$2 AND status='running' AND lease_until>clock_timestamp()",
+            job["job_id"], job["lease_token"], metadata,
+        )
+        if result != "UPDATE 1":
+            raise LeaseLostError("Report generation lost its job lease before publication.")
+
+
+async def artifact_metadata(tenant: str, job_id: UUID) -> dict | None:
+    payload = await (await pool()).fetchval(
+        "SELECT result_metadata FROM assessments.jobs WHERE tenant_id=$1 AND job_id=$2 "
+        "AND task_kind='artifact' AND status='succeeded'", tenant, job_id,
+    )
+    return json.loads(payload) if payload is not None else None
+
+
+async def stream_artifact(tenant: str, job_id: UUID, metadata: dict):
+    received = 0
+    digest = hashlib.sha256()
+    for ordinal in range(metadata["parts"]):
+        content = await (await pool()).fetchval(
+            "SELECT content FROM assessments.artifact_parts WHERE tenant_id=$1 AND job_id=$2 AND ordinal=$3",
+            tenant, job_id, ordinal,
+        )
+        if content is None:
+            logger.error("Stored artifact %s is missing part %s", job_id, ordinal)
+            raise report_snapshots.ReportSnapshotIntegrityError("Stored report download is incomplete.")
+        received += len(content)
+        digest.update(content)
+        yield content
+    if received != metadata["bytes"] or digest.hexdigest() != metadata["sha256"]:
+        logger.error("Stored artifact %s failed download integrity validation", job_id)
+        raise report_snapshots.ReportSnapshotIntegrityError("Stored report download failed integrity validation.")
+
+
+async def anomaly_metadata(tenant: str, snapshot_id: str) -> dict | None:
+    value = await (await pool()).fetchval(
+        "SELECT anomaly_metadata FROM assessments.snapshots WHERE tenant_id=$1 AND snapshot_id=$2 AND published",
+        tenant, snapshot_id,
+    )
+    return json.loads(value) if value is not None else None
+
+
+async def resource_cost_evidence(
+    tenant: str, snapshot_id: str, resource_ids: list[str], start: date, end: date,
+) -> dict[str, dict]:
+    result = {}
+    identifiers = sorted({value.lower() for value in resource_ids})
+    for offset in range(0, len(identifiers), 250):
+        rows = await (await pool()).fetch(
+            """WITH daily AS (
+                SELECT r.resource_id,true AS has_daily,coalesce(sum(d.amount),0) AS amount
+                FROM assessments.cost_rows r LEFT JOIN assessments.cost_daily d
+                ON (r.tenant_id,r.snapshot_id,r.detail_id)=(d.tenant_id,d.snapshot_id,d.detail_id)
+                AND d.charge_date BETWEEN $4 AND $5
+                WHERE r.tenant_id=$1 AND r.snapshot_id=$2 AND r.resource_id=ANY($3::text[])
+                GROUP BY r.resource_id
+            ), monthly AS (
+                SELECT resource_id,sum((payload->>'monthlySpend')::double precision) AS amount
+                FROM assessments.records
+                WHERE tenant_id=$1 AND snapshot_id=$2 AND path='costHierarchy' AND resource_id=ANY($3::text[])
+                GROUP BY resource_id
+            )
+            SELECT wanted.id AS resource_id,coalesce(d.has_daily,false) AS has_daily,d.amount AS daily,m.amount AS monthly
+            FROM unnest($3::text[]) wanted(id)
+            LEFT JOIN daily d ON d.resource_id=wanted.id LEFT JOIN monthly m ON m.resource_id=wanted.id""",
+            tenant, snapshot_id, identifiers[offset:offset + 250], start, end,
+        )
+        result.update((row["resource_id"], dict(row)) for row in rows)
+    return result
+
+
+async def stream_anomalies(tenant: str, snapshot_id: str, metadata: dict):
+    digest = hashlib.sha256()
+    received = 0
+    for ordinal in range(metadata["parts"]):
+        content = await (await pool()).fetchval(
+            "SELECT content FROM assessments.anomaly_parts WHERE tenant_id=$1 AND snapshot_id=$2 AND ordinal=$3",
+            tenant, snapshot_id, ordinal,
+        )
+        if content is None:
+            logger.error("Stored anomaly evidence %s is missing part %s", snapshot_id, ordinal)
+            raise report_snapshots.ReportSnapshotIntegrityError("Stored anomaly evidence is incomplete.")
+        received += len(content)
+        digest.update(content)
+        yield content
+    if received != metadata["bytes"] or digest.hexdigest() != metadata["sha256"]:
+        logger.error("Stored anomaly evidence %s failed integrity validation", snapshot_id)
+        raise report_snapshots.ReportSnapshotIntegrityError("Stored anomaly evidence failed integrity validation.")

@@ -1,6 +1,6 @@
 import { ArrowRight } from 'lucide-react';
 import type { Budget, CostDetailRow, FullReport } from '../report/models';
-import { costWindowDates, type CostWindow } from '../report/costDetails';
+import { costMetrics, costWindowDates, type CostWindow } from '../report/costDetails';
 import { budgetThreshold } from './BudgetContext';
 
 export type TakeawayTone = 'neutral' | 'good' | 'warning' | 'risk';
@@ -65,7 +65,11 @@ export function buildTakeaways({ report, budgets, anomalySignals, window, format
     items.push({ key: 'anomalies', tone: 'warning', text: `${anomalySignals} cost ${anomalySignals === 1 ? 'anomaly' : 'anomalies'} detected`, target: 'Cost Anomalies' });
   }
 
-  const untagged = report.costDetails?.status === 'complete' ? untaggedShare(report.costDetails.rows, window) : null;
+  const totalCost = report.costDetails?.remote ? costMetrics(report.costDetails, window).observedCurrentTotal : null;
+  const untagged = report.costDetails?.status === 'complete'
+    ? report.costDetails.remote
+      ? totalCost !== null && totalCost > 0 ? costMetrics(report.costDetails, window, {}, { untaggedOnly: true }).observedCurrentTotal / totalCost : null
+      : untaggedShare(report.costDetails.rows, window) : null;
   if (untagged !== null && untagged >= 0.2) {
     items.push({ key: 'untagged', tone: untagged >= 0.5 ? 'warning' : 'neutral', text: `${Math.round(untagged * 100)}% of spend carries no tags, so it cannot be attributed`, target: 'Cost by Tags/Application' });
   }

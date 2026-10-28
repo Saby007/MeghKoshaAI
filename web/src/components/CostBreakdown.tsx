@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { CostDetailSummary } from '../report/models';
-import { compareCostGroups, costWindowDates, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { costGroupPage, costWindowDates, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
 import './cost-breakdown.css';
 
 type Formatter = (value: number) => string;
@@ -49,14 +49,15 @@ export function GroupedCostBreakdown({
 }) {
   const [limit, setLimit] = useState(initialLimit);
   const filterKey = JSON.stringify(filters);
-  const groups = useMemo(
-    () => compareCostGroups(details, window, filters, dimension),
+  const page = useMemo(
+    () => costGroupPage(details, window, filters, dimension, undefined, { limit }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [details, window.startDate, window.endDate, filterKey, dimension],
+    [details, window.startDate, window.endDate, window.monthToDate, filterKey, dimension, limit],
   );
   const dates = costWindowDates(window);
-  const total = groups.reduce((sum, row) => sum + (row.current ?? 0), 0);
-  const largest = groups.reduce((peak, row) => Math.max(peak, row.current ?? 0), 0);
+  const groups = page.items;
+  const total = page.currentTotal;
+  const largest = page.largest;
   const noun = BREAKDOWN_DIMENSIONS.find((item) => item.id === dimension)?.noun ?? 'group';
   const visible = groups.slice(0, limit);
 
@@ -77,7 +78,7 @@ export function GroupedCostBreakdown({
           ))}
         </div>
         <span className="cost-breakdown-total">
-          {groups.length.toLocaleString()} {groups.length === 1 ? noun : `${noun}s`} · {formatMoney(total)}
+          {page.total.toLocaleString()} {page.total === 1 ? noun : `${noun}s`} · {formatMoney(total)}
         </span>
       </div>
 
@@ -123,9 +124,9 @@ export function GroupedCostBreakdown({
               </tbody>
             </table>
           </div>
-          {groups.length > visible.length && (
+          {page.total > visible.length && (
             <button type="button" className="ghost-button" onClick={() => setLimit((value) => value + 25)}>
-              Show more ({(groups.length - visible.length).toLocaleString()} remaining)
+              Show more ({(page.total - visible.length).toLocaleString()} remaining)
             </button>
           )}
         </>

@@ -19,6 +19,17 @@ CREATE INDEX IF NOT EXISTS snapshots_latest
     WHERE published;
 ALTER TABLE assessments.snapshots ADD COLUMN IF NOT EXISTS period_start text NOT NULL DEFAULT '';
 ALTER TABLE assessments.snapshots ADD COLUMN IF NOT EXISTS chat_evidence jsonb;
+ALTER TABLE assessments.snapshots ADD COLUMN IF NOT EXISTS serving_version integer NOT NULL DEFAULT 0;
+ALTER TABLE assessments.snapshots ADD COLUMN IF NOT EXISTS collection_context jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE assessments.snapshots ADD COLUMN IF NOT EXISTS anomaly_metadata jsonb;
+CREATE TABLE IF NOT EXISTS assessments.anomaly_parts (
+    tenant_id text NOT NULL,
+    snapshot_id text NOT NULL,
+    ordinal integer NOT NULL,
+    content bytea NOT NULL,
+    PRIMARY KEY (tenant_id, snapshot_id, ordinal),
+    FOREIGN KEY (tenant_id, snapshot_id) REFERENCES assessments.snapshots ON DELETE CASCADE
+);
 UPDATE assessments.snapshots SET period_start=summary#>>'{reportMetadata,periodStart}'
     WHERE period_start='' AND summary#>>'{reportMetadata,periodStart}' IS NOT NULL;
 CREATE INDEX IF NOT EXISTS snapshots_period
@@ -54,6 +65,58 @@ CREATE INDEX IF NOT EXISTS records_resource
 CREATE INDEX IF NOT EXISTS records_search
     ON assessments.records USING gin (search_text gin_trgm_ops);
 
+CREATE TABLE IF NOT EXISTS assessments.cost_rows (
+    tenant_id text NOT NULL,
+    snapshot_id text NOT NULL,
+    detail_id text NOT NULL,
+    ordinal integer NOT NULL,
+    subscription_id text NOT NULL,
+    resource_id text NOT NULL,
+    resource_key text NOT NULL,
+    resource_group text NOT NULL,
+    service_name text NOT NULL,
+    region text NOT NULL,
+    resource_type text NOT NULL,
+    normalized_tags jsonb NOT NULL,
+    metadata jsonb NOT NULL,
+    PRIMARY KEY (tenant_id, snapshot_id, detail_id),
+    UNIQUE (tenant_id, snapshot_id, ordinal),
+    FOREIGN KEY (tenant_id, snapshot_id) REFERENCES assessments.snapshots ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS cost_rows_resource
+    ON assessments.cost_rows (tenant_id, snapshot_id, resource_id);
+CREATE INDEX IF NOT EXISTS cost_rows_subscription
+    ON assessments.cost_rows (tenant_id, snapshot_id, subscription_id);
+CREATE INDEX IF NOT EXISTS cost_rows_tags
+    ON assessments.cost_rows USING gin (normalized_tags);
+CREATE TABLE IF NOT EXISTS assessments.cost_daily (
+    tenant_id text NOT NULL,
+    snapshot_id text NOT NULL,
+    detail_id text NOT NULL,
+    charge_date date NOT NULL,
+    amount double precision NOT NULL,
+    PRIMARY KEY (tenant_id, snapshot_id, charge_date, detail_id),
+    FOREIGN KEY (tenant_id, snapshot_id, detail_id) REFERENCES assessments.cost_rows ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS cost_daily_resource_dates
+    ON assessments.cost_daily (tenant_id, snapshot_id, detail_id, charge_date);
+
+CREATE OR REPLACE FUNCTION assessments.refresh_serving_statistics(include_details boolean)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    ANALYZE assessments.cost_rows;
+    IF include_details THEN
+        ANALYZE assessments.cost_daily;
+        ANALYZE assessments.records;
+    END IF;
+END
+$$;
+REVOKE ALL ON FUNCTION assessments.refresh_serving_statistics(boolean) FROM PUBLIC;
+
 CREATE TABLE IF NOT EXISTS assessments.jobs (
     job_id uuid PRIMARY KEY,
     tenant_id text NOT NULL,
@@ -82,6 +145,36 @@ CREATE INDEX IF NOT EXISTS jobs_claim
     WHERE status IN ('queued', 'running');
 CREATE INDEX IF NOT EXISTS jobs_scope_history
     ON assessments.jobs (tenant_id, scope_hash, created_at DESC);
+ALTER TABLE assessments.jobs ADD COLUMN IF NOT EXISTS task_kind text NOT NULL DEFAULT 'assessment';
+ALTER TABLE assessments.jobs ADD COLUMN IF NOT EXISTS task_payload jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE assessments.jobs ADD COLUMN IF NOT EXISTS result_metadata jsonb;
+CREATE TABLE IF NOT EXISTS assessments.artifact_parts (
+    tenant_id text NOT NULL,
+    job_id uuid NOT NULL REFERENCES assessments.jobs ON DELETE CASCADE,
+    ordinal integer NOT NULL,
+    content bytea NOT NULL,
+    PRIMARY KEY (tenant_id, job_id, ordinal)
+);
+CREATE TABLE IF NOT EXISTS assessments.action_events (
+    tenant_id text NOT NULL,
+    scope_hash text NOT NULL,
+    action_id text NOT NULL,
+    version integer NOT NULL,
+    payload jsonb NOT NULL,
+    event_id text NOT NULL,
+    previous_event text,
+    PRIMARY KEY (tenant_id, scope_hash, action_id, version)
+);
+CREATE TABLE IF NOT EXISTS assessments.control_state (
+    tenant_id text NOT NULL,
+    namespace text NOT NULL,
+    key text NOT NULL,
+    version bigint NOT NULL DEFAULT 1,
+    payload jsonb NOT NULL,
+    lease_token uuid,
+    lease_until timestamptz,
+    PRIMARY KEY (tenant_id, namespace, key)
+);
 
 CREATE TABLE IF NOT EXISTS assessments.azure_request_budgets (
     scope_key text PRIMARY KEY,

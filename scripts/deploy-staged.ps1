@@ -19,6 +19,11 @@ param(
     [switch] $AllowNativeExportTrustedServices,
     [switch] $BlobDataProtection,
     [switch] $IncludeLocalhostRedirects,
+    [switch] $ApproveOwnedRegistrationMigration,
+    [uri] $PreviousWebOrigin,
+    [guid] $PreviousOboPrincipalId = [guid]::Empty,
+    [guid] $ExpectedApiClientId = [guid]::Empty,
+    [guid] $ExpectedWebClientId = [guid]::Empty,
     [switch] $SkipLogin,
     [switch] $ApproveAll,
     [switch] $Apply,
@@ -36,6 +41,18 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion -lt [version]'7.4') { throw 'PowerShell 7.4 or later is required.' }
 if ($EnvironmentName -eq 'meghkoshaai-dev') { throw 'The existing Dev environment is under a layout hold. Use a reviewed parallel environment.' }
+if ($ApproveOwnedRegistrationMigration) {
+    if (-not $PreviousWebOrigin -or -not $PreviousWebOrigin.IsAbsoluteUri -or $PreviousWebOrigin.Scheme -ne 'https' -or
+        $PreviousWebOrigin.Port -ne 443 -or $PreviousWebOrigin.AbsolutePath -ne '/' -or $PreviousWebOrigin.Query -or
+        $PreviousWebOrigin.Fragment -or $PreviousWebOrigin.UserInfo -or $PreviousOboPrincipalId -eq [guid]::Empty -or
+        $ExpectedApiClientId -eq [guid]::Empty -or $ExpectedWebClientId -eq [guid]::Empty -or
+        $ExpectedApiClientId -eq $ExpectedWebClientId) {
+        throw 'Owned registration migration requires the exact previous HTTPS origin, previous OBO principal and distinct expected API/web client IDs.'
+    }
+} elseif ($PreviousWebOrigin -or $PreviousOboPrincipalId -ne [guid]::Empty -or
+          $ExpectedApiClientId -ne [guid]::Empty -or $ExpectedWebClientId -ne [guid]::Empty) {
+    throw 'Previous identity values require -ApproveOwnedRegistrationMigration.'
+}
 if (-not $Apply -or $WhatIfPreference) {
     [ordered]@{
         stage = $Stage; environment = $EnvironmentName; subscription = $SubscriptionId
@@ -47,6 +64,7 @@ if (-not $Apply -or $WhatIfPreference) {
         targets = $TargetSubscriptionId
         appliesChanges = $false
         nativeExportTrustedServicesException = [bool]$AllowNativeExportTrustedServices
+        ownedRegistrationMigrationApproved = [bool]$ApproveOwnedRegistrationMigration
         note = 'Plan only. No Azure calls. VM, disk, NAT, registry and database add cost; deallocation does not remove retained charges.'
     } | ConvertTo-Json -Depth 5
     return
@@ -260,6 +278,10 @@ function Invoke-AllStages {
     Write-Host "Private Foundry/Model Router region: $FoundryLocation. Chat is included; the hosted-agent narrator remains separate and opt-in."
     Write-Host "Assessed subscriptions: $($targets -join ', ')"
     Write-Host "Source commit: $commit"
+    if ($ApproveOwnedRegistrationMigration) {
+        Write-Host "Guarded owned sign-in migration: API $ExpectedApiClientId; web $ExpectedWebClientId."
+        Write-Host "Only previous callback origin $PreviousWebOrigin and OBO principal $PreviousOboPrincipalId may be replaced."
+    }
     Write-Host 'Includes private ACR Premium, PostgreSQL, private Foundry/model usage, VM/disk/NAT costs, image publication, sign-in registration, and Reader/Cost Management Contributor grants.'
     Write-Host "Blob trusted-service export exception: $($AllowNativeExportTrustedServices.IsPresent). No public ACR/PostgreSQL access or inbound VM access."
     Write-Host 'The builder is deallocated on completion/failure; disk, NAT, registry and database charges remain.'
@@ -285,6 +307,13 @@ function Invoke-AllStages {
         Repository = $Repository; SourceCommit = $commit; Apply = $true; ApproveAzureChanges = $true
         Confirm = $false; AllowNativeExportTrustedServices = $AllowNativeExportTrustedServices
         BlobDataProtection = $BlobDataProtection; IncludeLocalhostRedirects = $IncludeLocalhostRedirects
+    }
+    if ($ApproveOwnedRegistrationMigration) {
+        $common.ApproveOwnedRegistrationMigration = $true
+        $common.PreviousWebOrigin = $PreviousWebOrigin
+        $common.PreviousOboPrincipalId = $PreviousOboPrincipalId
+        $common.ExpectedApiClientId = $ExpectedApiClientId
+        $common.ExpectedWebClientId = $ExpectedWebClientId
     }
     $runner = $PSCommandPath
     function Run-Stage([string] $Name, [hashtable] $Extra = @{}) {
@@ -436,6 +465,7 @@ try {
                 Check-Private
                 Save 'APP_STAGED_FOUNDATION_READY' 'true'
                 Save 'APP_STAGED_FOUNDATION_CHAT_CONFIG' (Chat-Configuration)
+                if ((Value 'APP_RESTORE_AI_ACCOUNT') -eq 'true') { Save 'APP_RESTORE_AI_ACCOUNT' 'false' }
                 Save 'APP_REUSE_AI_ACCOUNT' 'true'
             }
             'Build' {
@@ -524,6 +554,13 @@ try {
                 if ($ServiceManagementReference) { $arguments.ServiceManagementReference = $ServiceManagementReference }
                 $arguments.Confirm = $false
                 if ($IncludeLocalhostRedirects) { $arguments.IncludeLocalhostRedirects = $true }
+                if ($ApproveOwnedRegistrationMigration) {
+                    $arguments.ApproveOwnedRegistrationMigration = $true
+                    $arguments.PreviousWebOrigin = $PreviousWebOrigin
+                    $arguments.PreviousOboPrincipalId = $PreviousOboPrincipalId
+                    $arguments.ExpectedApiClientId = $ExpectedApiClientId
+                    $arguments.ExpectedWebClientId = $ExpectedWebClientId
+                }
                 $identity = & (Join-Path $PSScriptRoot 'bootstrap-identity.ps1') @arguments | ConvertFrom-Json -AsHashtable
                 Save 'MEGHKOSHA_API_CLIENT_ID' $identity.MEGHKOSHA_API_CLIENT_ID
                 Save 'MEGHKOSHA_WEB_CLIENT_ID' $identity.MEGHKOSHA_WEB_CLIENT_ID

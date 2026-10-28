@@ -38,6 +38,10 @@ operator-run steps. Do not commit `.azure`, `.env`, credentials, or sign-in stat
   private endpoint/DNS and Entra managed-identity authentication.
 - A separate ingress-disabled assessment worker, durable PostgreSQL jobs, and a
   dedicated **manual** database-bootstrap job. Runtime identities are not DB admins.
+- The original dashboard and features use PostgreSQL aggregates, series and
+  bounded detail queries. No alternative workspace or classic-mode switch is used.
+  Full/custom/cost downloads are generated in the isolated background worker from
+  SQL and streamed from SQL chunks, not reconstructed in API requests.
 - Existing Blob exports/snapshots remain the raw-data/audit source.
 
 Expect ongoing charges for ACR Premium, PostgreSQL, private endpoints, Log Analytics

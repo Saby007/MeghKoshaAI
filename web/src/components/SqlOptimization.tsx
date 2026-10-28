@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Database } from 'lucide-react';
 import type { FindingLine, SqlResourceContext, SqlOptimizationCheck } from '../findings/models';
 import './SqlOptimization.css';
+import type { ReportDataReader } from '../report/postgresData';
+import { useReportRecords } from '../report/useReportRecords';
 
 const models: Record<SqlResourceContext['deploymentModel'], string> = {
   single_database: 'Single database', pooled_database: 'Pooled database', elastic_pool: 'Elastic pool',
@@ -16,27 +18,38 @@ const utcDate = (value: string) => Number.isFinite(Date.parse(value))
   ? new Date(value).toISOString().slice(0, 10) : 'Unavailable';
 const percent = (value: number | null) => value !== null && Number.isFinite(value) ? `${value.toFixed(1)}%` : 'Unavailable';
 
-export function SqlOptimization({ lines }: { lines: FindingLine[] }) {
+export function SqlOptimization({ lines, data }: { lines: FindingLine[]; data?: ReportDataReader }) {
   const [model, setModel] = useState('all');
   const [status, setStatus] = useState('all');
   const [search, setSearch] = useState('');
   const analyzed = lines.filter(line => (line.sqlContext?.optimizationChecks?.length ?? 0) > 0);
-  const visible = analyzed.filter(line => (model === 'all' || line.sqlContext?.deploymentModel === model)
+  const legacyVisible = analyzed.filter(line => (model === 'all' || line.sqlContext?.deploymentModel === model)
     && (status === 'all' || line.sqlContext?.optimizationChecks?.some(check => check.status === status))
     && `${line.resourceName} ${line.resourceId} ${line.subscriptionName}`.toLowerCase().includes(search.toLowerCase()));
+  const paths = data?.collections.filter(item => item.path.startsWith('domains.sql.categories.') && item.path.endsWith('.lines'))
+    .sort((left, right) => left.path.localeCompare(right.path, undefined, { numeric: true })).map(item => item.path) ?? [];
+  const analysis = paths.length ? data?.records<FindingLine>(paths, { hasArrays: ['sqlContext.optimizationChecks'], metadataOnly: true }, 1) : null;
+  const { page, lastRowRef } = useReportRecords<FindingLine>(data, paths, {
+    hasArrays: ['sqlContext.optimizationChecks'], search,
+    searchFields: ['resourceName', 'resourceId', 'subscriptionName'],
+    equals: model === 'all' ? {} : { 'sqlContext.deploymentModel': model },
+    arrayMatches: status === 'all' ? [] : [{ path: 'sqlContext.optimizationChecks', field: 'status', value: status }],
+  });
+  const visible = page?.items.map(item => item.value) ?? legacyVisible;
+  const analyzedCount = analysis?.total ?? analyzed.length;
 
   return <section className="sql-analysis" aria-labelledby="sql-analysis-title">
-    <header className="sql-analysis-heading"><h2 id="sql-analysis-title"><Database size={18} /> SQL analysis</h2><span>{analyzed.length} resource{analyzed.length === 1 ? '' : 's'} assessed</span></header>
+    <header className="sql-analysis-heading"><h2 id="sql-analysis-title"><Database size={18} /> SQL analysis</h2><span>{analyzedCount} resource{analyzedCount === 1 ? '' : 's'} assessed</span></header>
     <div className="sql-analysis-filters">
       <label>Resource or subscription<input type="search" value={search} onChange={event => setSearch(event.target.value)} /></label>
       <label>Deployment model<select value={model} onChange={event => setModel(event.target.value)}><option value="all">All models</option>{Object.entries(models).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
       <label>Analysis status<select value={status} onChange={event => setStatus(event.target.value)}><option value="all">All statuses</option>{Object.entries(statuses).map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
     </div>
-    {analyzed.length === 0 ? <p role="status">SQL analysis is unavailable for this snapshot.</p> : visible.length === 0 ? <p role="status">No matching SQL resources.</p> : visible.map(line => {
+    {analyzedCount === 0 ? <p role="status">SQL analysis is unavailable for this snapshot.</p> : visible.length === 0 ? <p role="status">No matching SQL resources.</p> : visible.map((line, index) => {
       const context = line.sqlContext!;
       const evidence = context.workloadEvidence;
       const checks = (context.optimizationChecks ?? []).filter(check => status === 'all' || check.status === status);
-      return <details key={line.resourceId} className="sql-analysis-resource">
+      return <details key={line.resourceId} className="sql-analysis-resource" ref={index === visible.length - 1 ? lastRowRef : undefined}>
         <summary><strong>{line.resourceName || line.resourceId}</strong><span>{models[context.deploymentModel]}</span><span>{line.subscriptionName || line.subscriptionId}</span></summary>
         <div className="sql-resource-content">
           <code>{line.resourceId}</code>

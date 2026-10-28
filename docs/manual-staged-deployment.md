@@ -281,6 +281,24 @@ Contributor on those explicitly selected targets. Review those scopes before
 running. The script cannot grant permissions your operator identity does not hold.
 Allow RBAC propagation; app sign-in/consent policies still apply.
 
+### Reusing owned sign-in registrations after an approved full Dev rebuild
+
+A recreated ACA environment can have a new hostname, and a recreated OBO managed
+identity has a new principal ID. Ordinary reruns must not silently replace those
+trust settings. After separately approving that exact migration, supply
+`-ApproveOwnedRegistrationMigration`, `-PreviousWebOrigin`,
+`-PreviousOboPrincipalId`, `-ExpectedApiClientId` and `-ExpectedWebClientId` to
+the end-to-end/staged runner. These values are also supported directly by
+`bootstrap-identity.ps1`.
+
+The helper still requires the original environment ownership tags, exact approved
+app IDs, the existing OBO credential's name/issuer/audience, and a callback list
+containing only the approved old/new origins (plus explicitly selected localhost
+callbacks). It updates only the known old callback and old subject, verifies the
+new trust, and refuses unrelated registrations, credentials or callbacks. No
+registrations, consent grants or outside-scope role assignments are deleted.
+Do not use this flag for an unreviewed migration or bypass a rejected guard.
+
 ## 7. Release and verify
 
 Release refuses unverified bootstrap, mismatched image digests, absent sign-in
@@ -302,8 +320,9 @@ digests; it does **not** call `azd deploy`, enable public ACR, or substitute a
 placeholder image. Verify checks provisioned/running apps and health/readiness.
 
 Sign in at the printed web origin, configure/complete native FOCUS exports, queue
-one assessment and verify the exact authorized report scope. Open **Chat** without
-opening classic tabs and check a response labeled **Model Router** (not only the
+one assessment and verify the exact authorized report scope. Confirm that the
+original dashboard and all report pages are unchanged while their evidence is
+served by bounded SQL queries. Open **Chat** and check a response labeled **Model Router** (not only the
 verified fallback). Runtime private connectivity, Entra/RBAC propagation, model
 quota and token usage must be verified by the operator. Run the representative
 retained-history/concurrent-read and restart checks from the

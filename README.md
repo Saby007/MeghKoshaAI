@@ -203,19 +203,22 @@ success or a fallback to synchronous assessment generation.
   Complete totals are never recomputed from only the visible page.
   PostgreSQL reports retain all positive-cost resource rows for pagination rather
   than inheriting the Blob renderer's historical top-200 cost-hierarchy limit.
-- In PostgreSQL mode the UI intentionally uses a **summary/detail explorer**
-  rather than the legacy whole-report tab renderer. All stored report sections and
-  deferred collections remain inspectable. **Open classic tabs** preserves the
-  original views only when the complete snapshot fits the interactive size budget.
-  Chat is independent of that limit: it uses the completed PostgreSQL snapshot's
-  bounded evidence, not the full Blob report. It never renders charts from truncated detail data.
-  On-demand FOCUS reprocessing is worker-only. Keep `blob` mode for the unchanged
-  synchronous tab/Chat workflow.
-- Classic tabs require at most 1,000 combined inline/deferred rows by default.
-  Legacy full-snapshot interactive operations are limited to 4 MiB reads and
-  bounded concurrency. Larger reports use paginated evidence or the authenticated,
-  streamed JSON archive endpoint
-  `/api/assessments/snapshots/{snapshotId}/archive`; they are not silently truncated.
+- Immutable SQL projection responses use a per-API-process LRU capped at 16 MiB
+  and 256 entries. Tenant/snapshot/query keys are separate, authorization is
+  rechecked before every hit, and responses remain private/no-store. This bounds
+  memory while avoiding repeated million-row aggregation for warm dashboard reads.
+- PostgreSQL mode keeps the original dashboard, all 19 report pages, navigation,
+  styling, filters, charts, drilldowns, budgets, actions and Chat. There is no
+  replacement workspace or small-report-only classic mode. The same components
+  use bounded SQL projections for complete totals, filtered groups, daily series
+  and progressively loaded resource evidence. They never calculate financial
+  totals from only the visible page or hydrate a complete large report in the browser.
+- Original full/custom/filtered report downloads run as durable background jobs.
+  Only the isolated worker reconstructs complete report models, from PostgreSQL.
+  Files are published as SQL chunks and streamed by the API; existing download
+  controls wait for completion. Anomaly evidence, audited actions and schedule
+  control state are also served from PostgreSQL. The rejected alternate
+  `/api/assessments/snapshots/{snapshotId}/interactive` endpoint returns HTTP 410.
 - Native FOCUS files and immutable snapshots remain in Blob Storage. PostgreSQL
   publication does not advance Blob compatibility pointers for cancelled/unfinished
   jobs.
@@ -226,7 +229,7 @@ success or a fallback to synchronous assessment generation.
   calculates financial amounts. Chat labels limited resource listings and explicit
   deterministic fallback if the model is unavailable.
 - Schema upgrades require private bootstrap plus a new background assessment for
-  the new Chat evidence. Old snapshots return an explicit rebuild message rather
+  versioned SQL dashboard and Chat evidence. Old snapshots return an explicit rebuild message rather
   than loading all data into the API.
 
 The initial acceptance workload is **15,000 resources and 1,000,000 FOCUS rows per
@@ -236,12 +239,24 @@ Regional quota/SKU availability, private connectivity, real Entra token renewal,
 worker restart recovery, and container restart counts require a separately approved
 Dev deployment/load test. There is no unlimited-load guarantee.
 
-Local validation on 2026-10-27 passed that single-subscription synthetic profile
-through CSV parsing, report construction, PostgreSQL publication, and concurrent
-API reads: summary p95 approximately **0.20 seconds**, pipeline process peak
-approximately **206 MiB**, with all 15,000 positive-cost resource records retained.
-Azure authorization/ARM calls were mocked. The local database was PostgreSQL 18.4;
-the Azure template targets PostgreSQL 16/17 and still requires live verification.
+UI-preserving correction checks use PostgreSQL 16.15 and the original main UI.
+All 19 pages match the original fixture-driven report in dark/light browser
+checks; captured executive, subscription and SQL views are pixel-identical.
+The million-row/15,000-resource retained-history gate publishes **915,000 daily
+points** atomically while ten readers remain active: **9,090 reads**, summary
+p95 **0.059 seconds**, and pipeline peak working set approximately **412 MiB**.
+Complete SQL cost metrics over that actual snapshot measured **1.42 seconds**
+uncached and **0.20 seconds p95** with ten warm readers, using a two-connection
+operation pool; authorization was rechecked on every request.
+The separate million-row anomaly gate preserves the original detector results
+with peak working set approximately **176 MiB**. Bulk facts use bounded COPY
+batches inside one fenced atomic publication.
+The bootstrap-owned fixed statistics-maintenance function is executable only by
+the worker, not the API or PUBLIC. It analyzes new rows before bulk foreign-key
+checks and before publication, preventing empty/stale-table estimates from
+selecting a prefix-only index for every daily charge. Runtime identities still
+have no schema/table-ownership or DDL rights.
+These synthetic checks do not replace authenticated Azure/customer-data acceptance.
 
 The backend regression suite passed 826 tests; the two opt-in PostgreSQL/scale
 tests passed separately. All 270 available frontend tests and the production

@@ -4,8 +4,34 @@ import { listBudgets } from '../api';
 import type { Budget, CostDetailRow, CostDetailSummary, FullReport } from '../report/models';
 import { costTagValue, costWindowDates, matchesCostFilter, sameTagKey, type CostFilter, type CostWindow } from '../report/costDetails';
 import { DailyBarChart } from './TrendChart';
+import { EvidenceState } from './EvidenceState';
 
 export type BudgetState = { budgets: Budget[]; loading: boolean; error: string | null; refresh: () => void };
+
+export function budgetExpiryDays(periodEnd: string, now = new Date()): number | null {
+  if (!periodEnd) return null;
+  const date = periodEnd.slice(0, 10);
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+    return null;
+  }
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((parsed.getTime() - today) / 86400000);
+}
+
+export function BudgetExpiry({ periodEnd, highlightNearExpiry = false }: Pick<Budget, 'periodEnd'> & { highlightNearExpiry?: boolean }) {
+  if (!periodEnd) return <span className="budget-expiry">Open-ended</span>;
+  const daysLeft = budgetExpiryDays(periodEnd);
+  if (daysLeft === null) return <span className="budget-expiry">Unavailable</span>;
+  const date = periodEnd.slice(0, 10);
+  const parsed = new Date(`${date}T00:00:00Z`);
+  const warning = highlightNearExpiry && daysLeft <= 30;
+  const label = daysLeft < 0 ? 'Expired' : daysLeft === 0 ? 'Expires today' : `${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left`;
+  return <span className={`budget-expiry${warning ? ' budget-expiry-warning' : ''}`}>
+    <time dateTime={date}>{parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}</time>
+    {warning && <> · {label}</>}
+  </span>;
+}
 
 export function budgetThreshold(budget: Budget) {
   if (budget.category !== 'Cost' || budget.currentSpend === null || !Number.isFinite(budget.currentSpend) || !Number.isFinite(budget.amount) || budget.amount < 0) return { tone: 'unknown', label: 'Unavailable' };
@@ -182,6 +208,18 @@ export function budgetDailyAllowance(budget: Budget, window: CostWindow): number
    the budget chart and by pages that show one budget's figures beside their own
    graph instead of drawing a second one. */
 export function budgetDailySummary(budget: Budget, details: CostDetailSummary | undefined, window: CostWindow, filters: CostFilter = {}) {
+  if (details?.remote && costWindowDates(window).length) {
+    const data = details.remote.budgetDaily(budget, window, filters);
+    const dates = costWindowDates(window);
+    if (JSON.stringify(data.dates) !== JSON.stringify(dates) || data.values.length !== dates.length) throw new Error('Saved budget cost evidence has an invalid date axis.');
+    const observed = data.values.filter((value): value is number => value !== null);
+    const allowance = budgetDailyAllowance(budget, window);
+    return {
+      dates, values: data.values, observedDays: observed.length,
+      total: observed.reduce((sum, value) => sum + value, 0), allowance,
+      over: allowance === null ? 0 : observed.filter(value => value > allowance).length, verified: data.verified,
+    };
+  }
   const { rows, verified } = budgetScopedRows(budget, details, filters);
   const dates = costWindowDates(window);
   const values = dates.map((date) => {
@@ -270,12 +308,16 @@ export function relateBudgets(budgets: Budget[], rows: CostDetailRow[], filters:
     .filter((item) => item.relation !== 'unrelated');
 }
 
+export function relatedCostBudgets(budgets: Budget[], details: CostDetailSummary | undefined, filters: CostFilter = {}, requireEvidence = false) {
+  return details?.remote ? details.remote.relatedBudgets(budgets, filters, requireEvidence)
+    : relateBudgets(budgets, details?.rows.filter(row => matchesCostFilter(row, filters)) ?? [], filters, requireEvidence);
+}
+
 export function BudgetContext({ state, details, filters = {}, showHeading = true, window, formatMoney }: { state: BudgetState; details?: CostDetailSummary; filters?: CostFilter; showHeading?: boolean; window?: CostWindow; formatMoney?: (value: number) => string }) {
   const [openBudget, setOpenBudget] = useState<string | null>(null);
   const [budgetQuery, setBudgetQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'attention' | 'within' | 'unknown'>('all');
-  const rows = details?.rows.filter((row) => matchesCostFilter(row, filters)) ?? [];
-  const related = relateBudgets(state.budgets, rows, filters);
+  const related = relatedCostBudgets(state.budgets, details, filters);
   const query = budgetQuery.trim().toLocaleLowerCase();
   /* Over budget now, or forecast by Azure to finish the cycle over it. */
   const needsAttention = (budget: Budget) => ['warning', 'over'].includes(budgetThreshold(budget).tone)
@@ -297,7 +339,12 @@ export function BudgetContext({ state, details, filters = {}, showHeading = true
       </div>
       <span className="table-count" role="status">{budgets.length} of {related.length} budgets</span>
     </div>}
-    {state.loading ? <p role="status">Checking subscription budgets...</p> : state.error ? <p role="alert">{state.error}</p> : !related.length ? <p role="status">No matching subscription-scope budgets were returned.</p> : !budgets.length ? <p role="status">No budgets match this search or status.</p> : <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Azure budget status"><table className="data-table billing-table budget-table"><thead><tr><th>Budget / scope</th><th>Budget</th><th>Spend this cycle</th><th>Remaining</th><th>Azure forecast</th><th>Status</th></tr></thead><tbody>{budgets.map(({ budget, relation }) => {
+    {state.loading ? <EvidenceState loading title="Checking subscription budgets..." detail="Reading configured budgets, current-cycle spend and forecasts from Azure." />
+      : state.error ? <EvidenceState tone="error" title="Subscription budget lookup unavailable" detail={state.error} action={{ label: 'Retry subscription budgets', onClick: state.refresh }} />
+      : !related.length ? <EvidenceState title="No matching subscription-scope budgets were returned." detail="No budget context is available for this selection. This does not mean spending is zero." />
+      : !budgets.length ? <EvidenceState title="No budgets match this search or status." detail="Reset these local filters to show the budgets returned for this scope."
+        action={{ label: 'Reset budget context filters', onClick: () => { setBudgetQuery(''); setStatusFilter('all'); } }} />
+      : <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Azure budget status"><table className="data-table billing-table budget-table"><thead><tr><th>Budget / scope</th><th>Budget</th><th>Spend this cycle</th><th>Remaining</th><th>Azure forecast</th><th>Status</th></tr></thead><tbody>{budgets.map(({ budget, relation }) => {
       const status = budgetThreshold(budget);
       const key = `${budget.subscriptionId}:${budget.name}`;
       /* The drilldown needs a period to chart and a formatter to label it, so
@@ -310,7 +357,7 @@ export function BudgetContext({ state, details, filters = {}, showHeading = true
       return <Fragment key={`${budget.subscriptionId}:${budget.name}`}><tr><th>{drillable
         ? <button type="button" className="finding-link" aria-expanded={openBudget === key} aria-label={`Daily spend for ${budget.name}`} onClick={() => setOpenBudget((value) => value === key ? null : key)}>{budget.name}</button>
         : budget.name}<small>{relation}</small><details><summary>Scope</summary><span>{budget.scope || budget.subscriptionId}</span><pre>{JSON.stringify(budget.filter ?? 'Filter metadata not returned', null, 2)}</pre><small>Active: {budget.periodStart} - {budget.periodEnd || 'Open-ended'} / {budget.timeGrain}</small><small>Checked: {budget.observedAt || 'Not reported'}</small></details></th>
-        <td>{native(budget.amount)}<small>{budget.timeGrain}</small></td>
+        <td>{native(budget.amount)}<small>{budget.timeGrain}</small><small>Expiry: <BudgetExpiry periodEnd={budget.periodEnd} /></small></td>
         <td>{native(budget.currentSpend)}{cycle && <small>{cycleLabel(cycle)} to date</small>}</td>
         <td className={remaining !== null && remaining < 0 ? 'cost-increase' : ''}>{remaining === null ? 'Unavailable' : remaining < 0 ? `${money(-remaining)} over` : `${money(remaining)} left`}</td>
         <td>{native(budget.forecastSpend)}{budget.forecastSpend !== null && <small>{budget.forecastSpend > budget.amount ? `Overrun ${money(budget.forecastSpend - budget.amount)}` : 'Within budget'}</small>}</td>

@@ -1,12 +1,12 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { startTransition, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Activity, ArrowRight, Download, TriangleAlert, X } from 'lucide-react';
 import { downloadCostDetailReport, getResourceAvailability, type ResourceAvailability } from '../api';
 import { countTone } from './AnomalyOverview';
 import type { CostDetailSummary, FullReport } from '../report/models';
-import { compareCostGroups, costCoverage, costWindowDates, dailySubscriptionCosts, isMonthToDate, presetCostWindow, previousCostWindow, type CostDimension, type CostFilter, type CostWindow } from '../report/costDetails';
+import { costGroupPage, costMetrics, costCoverage, costWindowDates, dailySubscriptionCosts, isMonthToDate, presetCostWindow, previousCostWindow, sameTagKey, selectedGroupDetails, type CostDimension, type CostFilter, type CostGroup, type CostWindow } from '../report/costDetails';
 import './cost-explorer.css';
 import { BudgetContext, type BudgetState } from './BudgetContext';
-import { DayAxis, dayAxis } from './TrendChart';
+import { CHART_POINT_HINT, chartTooltipPlacement, DayAxis, dayAxis, moveChartFocus } from './TrendChart';
 
 type Formatter = (value: number) => string;
 export type SelectedDay = { date: string; previousDate: string; subscriptionId: string };
@@ -45,19 +45,25 @@ function useChartWidth(ref: { current: HTMLElement | null }) {
   return width;
 }
 
-export function CostFilters({ details, value, onChange }: { details?: CostDetailSummary; value: CostFilter; onChange: (value: CostFilter) => void }) {
+export function CostFilters({ details, value, onChange, tagDimensions }: {
+  details?: CostDetailSummary; value: CostFilter; onChange: (value: CostFilter) => void;
+  tagDimensions?: { tagKey: string; values: string[] }[];
+}) {
   const rows = details?.rows ?? [];
+  const facets = details?.remote?.facets(value.tagKey);
   const fields = [
-    { key: 'subscriptionId', label: 'Subscription', options: [...new Map(rows.map((row) => [row.subscriptionId, row.subscriptionName])).entries()] },
-    ...(['serviceName', 'resourceGroup', 'region'] as const).map((key) => ({ key, label: key === 'serviceName' ? 'Service' : key === 'resourceGroup' ? 'Resource group' : 'Region', options: [...new Set(rows.map((row) => row[key]))].sort().map((text) => [text, text]) })),
+    { key: 'subscriptionId', label: 'Subscription', options: facets?.subscriptionId ?? [...new Map(rows.map((row) => [row.subscriptionId, row.subscriptionName])).entries()] },
+    ...(['serviceName', 'resourceGroup', 'region'] as const).map((key) => ({ key, label: key === 'serviceName' ? 'Service' : key === 'resourceGroup' ? 'Resource group' : 'Region', options: facets?.[key] ?? [...new Set(rows.map((row) => row[key]))].sort().map((text) => [text, text]) })),
   ];
-  const tagKeys = [...new Set(rows.flatMap((row) => Object.keys(row.tags)))].sort();
-  const tagValues = [...new Set(rows.flatMap((row) => Object.entries(row.tags).filter(([key]) => key.toLowerCase() === value.tagKey?.toLowerCase()).map(([, text]) => text)))].sort();
+  const tagKeys = tagDimensions ? tagDimensions.map(dimension => dimension.tagKey) : facets?.tagKey ?? [...new Set(rows.flatMap((row) => Object.keys(row.tags)))].sort();
+  const tagValues = tagDimensions
+    ? tagDimensions.find(dimension => value.tagKey && sameTagKey(dimension.tagKey, value.tagKey))?.values ?? []
+    : facets?.tagValue ?? [...new Set(rows.flatMap((row) => Object.entries(row.tags).filter(([key]) => value.tagKey && sameTagKey(key, value.tagKey)).map(([, text]) => text)))].sort();
   return <div className="billing-filters cost-detail-filters">
     {fields.map((field) => <label className="billing-filter" key={field.key}><span>{field.label}</span><select aria-label={`Cost ${field.label.toLowerCase()}`} value={value[field.key as keyof CostFilter] ?? ''} onChange={(event) => onChange({ ...value, [field.key]: event.target.value || undefined })}>
       <option value="">All</option>{field.options.map(([id, name]) => <option value={id} key={id}>{name}</option>)}
     </select></label>)}
-    <label className="billing-filter"><span>Tag key</span><select aria-label="Cost tag key" value={value.tagKey ?? ''} onChange={(event) => onChange({ ...value, tagKey: event.target.value || undefined, tagValue: undefined })}><option value="">All tags</option>{tagKeys.map((key) => <option key={key}>{key}</option>)}</select></label>
+    <label className="billing-filter"><span>Tag key</span><select aria-label="Cost tag key" value={value.tagKey ?? ''} onChange={(event) => onChange({ ...value, tagKey: event.target.value || undefined, tagValue: undefined })}><option value="">{tagDimensions ? 'All tag keys' : 'All tags'}</option>{tagKeys.map((key) => <option key={key}>{key}</option>)}</select></label>
     {value.tagKey && <label className="billing-filter"><span>Tag value</span><select aria-label="Cost tag value" value={value.tagValue === undefined ? '' : JSON.stringify(value.tagValue)} onChange={(event) => onChange({ ...value, tagValue: event.target.value === '' ? undefined : JSON.parse(event.target.value) })}><option value="">All values</option>{tagValues.map((text) => <option key={text} value={JSON.stringify(text)}>{text || '(Empty value)'}</option>)}</select></label>}
   </div>;
 }
@@ -97,27 +103,49 @@ function ResourceAvailabilityCell({ resourceId, resourceType, date, snapshotId }
   </div>;
 }
 
+function ResourceCostRow({ row, details, window, previous, filters, formatMoney, snapshotId }: {
+  row: CostGroup; details?: CostDetailSummary; window: CostWindow; previous?: CostWindow;
+  filters: CostFilter; formatMoney: Formatter; snapshotId?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [sourceLimit, setSourceLimit] = useState(50);
+  const lastSource = useRef<HTMLDivElement | null>(null);
+  const sources = details?.remote && open
+    ? details.remote.sources(window, filters, 'resource', row.id, previous, sourceLimit)
+    : { items: row.sources, total: row.sourceCount ?? row.sources.length };
+  useEffect(() => {
+    if (!details?.remote || !open || sources.items.length >= sources.total || !lastSource.current || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) startTransition(() => setSourceLimit(count => count + 50));
+    });
+    observer.observe(lastSource.current);
+    return () => observer.disconnect();
+  }, [details, open, sources.items.length, sources.total]);
+  return <tr>
+    <th scope="row"><details onToggle={event => startTransition(() => setOpen(event.currentTarget.open))}><summary>{row.name}</summary><span className="cost-resource-id">{row.sources[0]?.resourceId || 'No resource ID in FOCUS'}</span>
+      {(!details?.remote || open) && sources.items.map((source, index) => <div key={source.detailId} ref={index === sources.items.length - 1 ? lastSource : undefined} className="cost-source-detail"><strong>{source.serviceName} / {source.resourceGroup} / {source.region}</strong><span>{Object.entries(source.tags).map(([key, value]) => `${key}: ${value}`).join('; ') || 'Untagged'}</span><small>{source.tagAttributionSource === 'exported_resource_tags' ? 'Exported resource tags' : 'Includes current resource-group tags'}</small></div>)}
+    </details><small>{row.subscriptionName}</small></th>
+    <td>{row.owners.join('; ') || 'Not recorded'}</td><td>{money(row.current, formatMoney)}</td><td>{money(row.previous, formatMoney)}</td>
+    <td className={`cost-change-cell ${tone(row.delta)}`.trim()}>{money(row.delta, formatMoney)}<small>{changeLabel(row.percentage)}{row.previous === 0 ? ' (zero baseline)' : ''}</small></td>
+    <td>{row.current === null ? 'Unavailable' : `${formatMoney(row.current / (costWindowDates(window).length * 24))}/hr`}</td><td><ResourceAvailabilityCell resourceId={row.sources[0].resourceId} resourceType={row.sources[0].resourceType} date={window.startDate === window.endDate ? window.startDate : null} snapshotId={snapshotId} /></td>
+  </tr>;
+}
+
 export function ResourceCostTable({ details, window, previous, filters = {}, formatMoney, snapshotId }: { details?: CostDetailSummary; window: CostWindow; previous?: CostWindow; filters?: CostFilter; formatMoney: Formatter; snapshotId?: string | null }) {
-  const rows = compareCostGroups(details, window, filters, 'resource', previous);
   const [limit, setLimit] = useState(50);
   useEffect(() => setLimit(50), [window.startDate, window.endDate, JSON.stringify(filters)]);
+  const page = costGroupPage(details, window, filters, 'resource', previous, { limit });
+  const rows = page.items;
   if (details?.status !== 'complete') return <p role="status">{details?.statusMessage ?? 'Resource costs are unavailable in this snapshot. Run a new report.'}</p>;
   return <>
     <div className="billing-table-scroll cost-detail-scroll" tabIndex={0} role="region" aria-label="Resource cost comparison">
       <table className="data-table billing-table cost-detail-table"><caption>Resource costs: {window.startDate} - {window.endDate}; previous: {(previous ?? previousCostWindow(window)).startDate} - {(previous ?? previousCostWindow(window)).endDate}</caption>
         <thead><tr><th>Resource / subscription</th><th>Owner tag</th><th>Selected cost</th><th>Previous cost</th><th>Change</th><th>Average / hour</th><th>Uptime</th></tr></thead>
-        <tbody>{rows.slice(0, limit).map((row) => <tr key={row.id}>
-          <th scope="row"><details><summary>{row.name}</summary><span className="cost-resource-id">{row.sources[0]?.resourceId || 'No resource ID in FOCUS'}</span>
-            {row.sources.map((source) => <div key={source.detailId} className="cost-source-detail"><strong>{source.serviceName} / {source.resourceGroup} / {source.region}</strong><span>{Object.entries(source.tags).map(([key, value]) => `${key}: ${value}`).join('; ') || 'Untagged'}</span><small>{source.tagAttributionSource === 'exported_resource_tags' ? 'Exported resource tags' : 'Includes current resource-group tags'}</small></div>)}
-          </details><small>{row.subscriptionName}</small></th>
-          <td>{row.owners.join('; ') || 'Not recorded'}</td><td>{money(row.current, formatMoney)}</td><td>{money(row.previous, formatMoney)}</td>
-          <td className={`cost-change-cell ${tone(row.delta)}`.trim()}>{money(row.delta, formatMoney)}<small>{changeLabel(row.percentage)}{row.previous === 0 ? ' (zero baseline)' : ''}</small></td>
-          <td>{row.current === null ? 'Unavailable' : `${formatMoney(row.current / (costWindowDates(window).length * 24))}/hr`}</td><td><ResourceAvailabilityCell resourceId={row.sources[0].resourceId} resourceType={row.sources[0].resourceType} date={window.startDate === window.endDate ? window.startDate : null} snapshotId={snapshotId} /></td>
-        </tr>)}</tbody>
+        <tbody>{rows.map(row => <ResourceCostRow key={row.id} row={row} details={details} window={window} previous={previous} filters={filters} formatMoney={formatMoney} snapshotId={snapshotId} />)}</tbody>
       </table>
       {!rows.length && <p role="status">No resource charges match this window and filter.</p>}
     </div>
-    {rows.length > limit && <button type="button" className="ghost-button" onClick={() => setLimit((count) => count + 50)}>Show more resources ({rows.length - limit})</button>}
+    {page.total > rows.length && <button type="button" className="ghost-button" onClick={() => startTransition(() => setLimit((count) => count + 50))}>Show more resources ({page.total - rows.length})</button>}
     <p className="billing-provenance">FOCUS EffectiveCost. Hourly values are daily averages, not measured hourly billing or uptime. VM availability is an on-demand platform observation, not application health or billable runtime; gaps remain unknown. Owner values are tags, not verified approvals.</p>
   </>;
 }
@@ -206,6 +234,7 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
   const chartRef = useRef<HTMLDivElement>(null);
   const tooltipId = useId();
   const [activePoint, setActivePoint] = useState<{ subscriptionId: string; date: string } | null>(null);
+  const [viewportLeft, setViewportLeft] = useState(0);
   useEffect(() => setActivePoint(null), [details, window.startDate, window.endDate, JSON.stringify(filters)]);
   const measured = useChartWidth(chartRef);
   const axis = dayAxis(dates, measured, 82, 24, Math.max(1, dates.length - 1));
@@ -219,10 +248,8 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
   const activeSeries = series.find((item) => item.subscriptionId === activePoint?.subscriptionId);
   const activeSlot = activeSeries?.days.findIndex((day) => day.date === activePoint?.date) ?? -1;
   const activeDay = activeSeries?.days[activeSlot];
-  const viewportLeft = chartRef.current?.scrollLeft ?? 0;
   const viewportWidth = chartRef.current?.clientWidth || width;
-  const tooltipWidth = Math.min(320, viewportWidth - 16);
-  const tooltipX = Math.max(viewportLeft + 8, Math.min(xFor(activeSlot) + 12, viewportLeft + viewportWidth - tooltipWidth - 8, width - tooltipWidth - 8));
+  const tooltip = chartTooltipPlacement(width, xFor(activeSlot), viewportLeft, viewportWidth);
   const tooltipY = activeDay?.current == null ? 8 : Math.max(8, Math.min(yFor(activeDay.current) - 140, height - 140));
   function pathFor(points: { current: number | null; previous: number | null }[], field: 'current' | 'previous') {
     let connected = false;
@@ -235,8 +262,8 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
   }
   if (!series.length || !dates.length) return <p role="status">{details?.statusMessage ?? 'Daily subscription cost detail is unavailable in this snapshot.'}</p>;
   return <>
-    <div className="cost-chart-legend">{series.map((item, index) => <span key={item.subscriptionId}><i style={{ background: COLORS[index % COLORS.length] }} />{item.subscriptionName}</span>)}<span>Solid: selected period</span><span>Dotted: preceding period</span></div>
-    <div className="cost-chart-scroll" ref={chartRef} tabIndex={0} role="region" aria-label="Subscription cost comparison chart">
+    <div className="cost-chart-legend">{series.map((item, index) => <span key={item.subscriptionId}><i style={{ background: COLORS[index % COLORS.length] }} />{item.subscriptionName}</span>)}<span>Solid: selected period</span><span>Dotted: preceding period</span><span>{CHART_POINT_HINT}{onSelectDay ? '; select to open resource costs.' : '.'}</span></div>
+    <div className="cost-chart-scroll" ref={chartRef} tabIndex={0} role="region" aria-label="Subscription cost comparison chart" onScroll={event => setViewportLeft(event.currentTarget.scrollLeft)}>
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: `${width}px`, minWidth: `${width}px` }} className="cost-comparison-chart" role="group" aria-label="Current and previous subscription cost">
         {[0, 1, 2, 3, 4].map((tick) => { const value = minimum + (maximum - minimum) * tick / 4; return <g key={tick}><line x1={82} x2={width - 24} y1={yFor(value)} y2={yFor(value)} className="cost-chart-grid" /><text x={72} y={yFor(value)} textAnchor="end" dominantBaseline="middle">{formatMoney(value)}</text></g>; })}
         {series.map((item, index) => <g key={item.subscriptionId} style={{ color: COLORS[index % COLORS.length] }}>
@@ -253,18 +280,22 @@ export function CostComparisonChart({ details, window, filters = {}, formatMoney
             aria-label={`${item.subscriptionName}, ${day.date}, ${formatMoney(day.current)}`}
             aria-describedby={activePoint?.subscriptionId === item.subscriptionId && activePoint.date === day.date ? tooltipId : undefined}
             onPointerEnter={() => setActivePoint({ subscriptionId: item.subscriptionId, date: day.date })}
-            onPointerLeave={(event) => { if (document.activeElement !== event.currentTarget) setActivePoint(null); }}
+            onPointerLeave={(event) => {
+              if (document.activeElement !== event.currentTarget) setActivePoint(current =>
+                current?.subscriptionId === item.subscriptionId && current.date === day.date ? null : current);
+            }}
             onFocus={() => setActivePoint({ subscriptionId: item.subscriptionId, date: day.date })}
             onBlur={() => setActivePoint(null)}
             onClick={() => onSelectDay?.(day.date, day.previousDate, item.subscriptionId)}
             onKeyDown={(event) => {
               if (event.key === 'Escape') setActivePoint(null);
+              moveChartFocus(event);
               if (onSelectDay && ['Enter', ' '].includes(event.key)) { event.preventDefault(); onSelectDay(day.date, day.previousDate, item.subscriptionId); }
             }}
           />)}
         </g>)}
         <DayAxis dates={dates} xFor={xFor} y={axis.rotated ? chartHeight - 30 : chartHeight - 16} rotated={axis.rotated} />
-        {activeSeries && activeDay?.current != null && <foreignObject x={tooltipX} y={tooltipY} width={tooltipWidth} height={132} className="cost-point-tooltip-container">
+        {activeSeries && activeDay?.current != null && <foreignObject x={tooltip.left} y={tooltipY} width={tooltip.width} height={132} className="cost-point-tooltip-container">
           <div className="cost-point-tooltip" role="tooltip" id={tooltipId}>
             <strong title={activeSeries.subscriptionName}>{activeSeries.subscriptionName}</strong>
             <dl>
@@ -289,10 +320,10 @@ export function CostWindowMetrics({ report, window, filters, formatMoney, onOpen
   const coverage = costCoverage(report.costDetails, window);
   const previous = previousCostWindow(window);
   const previousCoverage = costCoverage(report.costDetails, previous);
-  const groups = compareCostGroups(report.costDetails, window, filters);
-  const total = coverage.complete ? groups.reduce((sum, row) => sum + (row.current ?? 0), 0) : null;
-  const before = previousCoverage.complete ? groups.reduce((sum, row) => sum + (row.previous ?? 0), 0) : null;
-  const spikes = groups.filter((row) => row.previous !== null && row.previous > 0 && row.percentage !== null && row.percentage > 30);
+  const metrics = costMetrics(report.costDetails, window, filters);
+  const total = coverage.complete ? metrics.currentTotal : null;
+  const before = previousCoverage.complete ? metrics.previousTotal : null;
+  const spikeCount = metrics.spikeCount;
   const selectedContent = <><span>Selected period spend</span><output>{money(total, formatMoney)}</output><small>{window.startDate} - {window.endDate} / {coverage.coveredDays} of {coverage.dates.length} days</small>
     {monthlyContext && <small className="assessed-month-context">
       {(window.startDate !== report.reportMetadata.periodStart || window.endDate !== report.reportMetadata.periodEnd || Object.values(filters).some(Boolean)) && <>Assessed month: {formatMoney(report.executiveSummary.currentMonthlySpend)} · </>}
@@ -305,7 +336,7 @@ export function CostWindowMetrics({ report, window, filters, formatMoney, onOpen
       : <div>{selectedContent}</div>}
     <div><span>Previous period</span><output>{money(before, formatMoney)}</output><small>{previous.startDate} - {previous.endDate} / {previousCoverage.coveredDays} of {previousCoverage.dates.length} days</small></div>
     {children}
-    <button type="button" className="period-anomaly-link" onClick={onOpenAnomalies}><span><TriangleAlert size={16} aria-hidden="true" /> Cost spikes</span><strong className={countTone(coverage.complete && previousCoverage.complete ? spikes.length : null, true)}>{coverage.complete && previousCoverage.complete ? spikes.length : 'Unavailable'}</strong><small>{spikes.length === 1 ? 'Resource' : 'Resources'} up more than 30% on the previous period <ArrowRight size={14} aria-hidden="true" /></small></button>
+    <button type="button" className="period-anomaly-link" onClick={onOpenAnomalies}><span><TriangleAlert size={16} aria-hidden="true" /> Cost spikes</span><strong className={countTone(coverage.complete && previousCoverage.complete ? spikeCount : null, true)}>{coverage.complete && previousCoverage.complete ? spikeCount : 'Unavailable'}</strong><small>{spikeCount === 1 ? 'Resource' : 'Resources'} up more than 30% on the previous period <ArrowRight size={14} aria-hidden="true" /></small></button>
   </div>;
 }
 
@@ -337,24 +368,26 @@ export function PeriodCostAnomalies({ report, window, onChange, formatMoney, fil
   const coverage = costCoverage(report.costDetails, window);
   const previous = previousCostWindow(window);
   const available = coverage.complete && costCoverage(report.costDetails, previous).complete;
-  const changes = compareCostGroups(report.costDetails, window, filters, dimension).sort((first, second) => Math.abs(second.delta ?? 0) - Math.abs(first.delta ?? 0));
-  const spikes = changes.filter((row) => row.previous !== null && row.previous > 0 && row.percentage !== null && row.percentage > 30);
-  const selectedGroup = changes.find((row) => row.id === selectedGroupId);
-  const chartDetails = selectedGroup && report.costDetails ? { ...report.costDetails, rows: selectedGroup.sources } : report.costDetails;
+  const changePage = costGroupPage(report.costDetails, window, filters, dimension, undefined, { sort: 'change', limit });
+  const spikePage = costGroupPage(report.costDetails, window, filters, dimension, undefined, { sort: 'change', spikesOnly: true, limit });
+  const changes = changePage.items;
+  const spikes = spikePage.items;
+  const selectedGroup = [...changes, ...spikes].find((row) => row.id === selectedGroupId);
+  const chartDetails = selectedGroup && report.costDetails ? selectedGroupDetails(report.costDetails, selectedGroup, dimension, filters.tagKey) : report.costDetails;
   useEffect(() => { setSelectedGroupId(null); setLimit(50); }, [window.startDate, window.endDate, JSON.stringify(filters), dimension]);
   return <section className="period-cost-anomalies" aria-label="Selected period anomalies">
     <CostFilters details={report.costDetails} value={filters} onChange={onFiltersChange} />
     <div className="cost-section-heading"><label className="billing-filter"><span>Analyze by</span><select aria-label="Period anomaly dimension" value={dimension} onChange={(event) => setDimension(event.target.value as CostDimension)}><option value="resource">Resource</option><option value="resourceGroup">Resource group</option><option value="tag" disabled={!filters.tagKey}>Tag value</option><option value="service">Service</option></select></label><CostExportButton report={report} snapshotId={snapshotId} window={window} filters={filters} /></div>
-    <h2>Period cost spikes <span className={`cost-count ${countTone(available ? spikes.length : null, true)}`.trim()}>{available ? spikes.length : 'Unavailable'}</span></h2>
+    <h2>Period cost spikes <span className={`cost-count ${countTone(available ? spikePage.total : null, true)}`.trim()}>{available ? spikePage.total : 'Unavailable'}</span></h2>
     <p className="billing-provenance">More than 30% above {isMonthToDate(window) ? `the same ${coverage.dates.length} days of the previous month` : `the preceding ${coverage.dates.length}-day window`}. New spend with a zero baseline is not a percentage spike. Separate from the same-weekday statistical detector below.</p>
     {!available ? <p role="status">Complete resource cost evidence is required for both {window.startDate} - {window.endDate} and {previous.startDate} - {previous.endDate}.</p> : <>
       <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Period cost spikes"><table className="data-table billing-table"><thead><tr><th>Dimension</th><th>Subscription</th><th>Owner tag</th><th>Selected cost</th><th>Previous cost</th><th>Increase</th></tr></thead><tbody>{spikes.slice(0, limit).map((row) => <tr key={row.id}><th><button type="button" className="finding-link" onClick={() => setSelectedGroupId(row.id)}>{row.name}</button></th><td>{row.subscriptionName}</td><td>{row.owners.join('; ') || 'Not recorded'}</td><td>{money(row.current, formatMoney)}</td><td>{money(row.previous, formatMoney)}</td><td className="cost-increase">{changeLabel(row.percentage)}</td></tr>)}</tbody></table></div>
       {!spikes.length && <p role="status">No resource cost spikes exceeded 30% in this period.</p>}
-      {spikes.length > limit && <button type="button" className="ghost-button" onClick={() => setLimit((value) => value + 50)}>Show more spikes</button>}
-      {selectedGroup && <><p>{selectedGroup.name} rose {changeLabel(selectedGroup.percentage)} ({money(selectedGroup.delta, formatMoney)}) across {new Set(selectedGroup.sources.map((row) => row.resourceId || row.detailId)).size} resource(s) in the selected period.</p><button type="button" className="ghost-button" onClick={() => setSelectedGroupId(null)}>Show all resources</button></>}
+      {spikePage.total > spikes.length && <button type="button" className="ghost-button" onClick={() => startTransition(() => setLimit((value) => value + 50))}>Show more spikes</button>}
+      {selectedGroup && <><p>{selectedGroup.name} rose {changeLabel(selectedGroup.percentage)} ({money(selectedGroup.delta, formatMoney)}) across {selectedGroup.resourceCount ?? new Set(selectedGroup.sources.map((row) => row.resourceId || row.detailId)).size} resource(s) in the selected period.</p><button type="button" className="ghost-button" onClick={() => setSelectedGroupId(null)}>Show all resources</button></>}
       <CostComparisonChart details={chartDetails} window={window} filters={filters} formatMoney={formatMoney} />
       {selectedGroup && <ResourceCostTable details={chartDetails} window={window} filters={filters} formatMoney={formatMoney} snapshotId={snapshotId} />}
-      <details><summary>All increases and decreases</summary><div className="billing-table-scroll" tabIndex={0} role="region" aria-label="All period cost changes"><table className="data-table billing-table"><thead><tr><th>Dimension</th><th>Subscription</th><th>Current</th><th>Previous</th><th>Change</th></tr></thead><tbody>{changes.slice(0, limit).map((row) => <tr key={row.id}><th>{row.name}</th><td>{row.subscriptionName}</td><td>{money(row.current, formatMoney)}</td><td>{money(row.previous, formatMoney)}</td><td className={`cost-change-cell ${tone(row.delta)}`.trim()}>{money(row.delta, formatMoney)} / {changeLabel(row.percentage)}</td></tr>)}</tbody></table></div>{changes.length > limit && <button type="button" className="ghost-button" onClick={() => setLimit((value) => value + 50)}>Show more changes</button>}</details>
+      <details><summary>All increases and decreases</summary><div className="billing-table-scroll" tabIndex={0} role="region" aria-label="All period cost changes"><table className="data-table billing-table"><thead><tr><th>Dimension</th><th>Subscription</th><th>Current</th><th>Previous</th><th>Change</th></tr></thead><tbody>{changes.slice(0, limit).map((row) => <tr key={row.id}><th>{row.name}</th><td>{row.subscriptionName}</td><td>{money(row.current, formatMoney)}</td><td>{money(row.previous, formatMoney)}</td><td className={`cost-change-cell ${tone(row.delta)}`.trim()}>{money(row.delta, formatMoney)} / {changeLabel(row.percentage)}</td></tr>)}</tbody></table></div>{changePage.total > changes.length && <button type="button" className="ghost-button" onClick={() => startTransition(() => setLimit((value) => value + 50))}>Show more changes</button>}</details>
     </>}
   </section>;
 }
@@ -362,7 +395,8 @@ export function PeriodCostAnomalies({ report, window, onChange, formatMoney, fil
 export function SubscriptionCostBreakdown({ report, snapshotId, window, onChange, formatMoney, filters, onFiltersChange }: { report: FullReport; snapshotId: string | null; window: CostWindow; onChange: (value: CostWindow) => void; formatMoney: Formatter; filters: CostFilter; onFiltersChange: (value: CostFilter) => void }) {
   const [dimension, setDimension] = useState<CostDimension>('resource');
   const [limit, setLimit] = useState(50);
-  const rows = compareCostGroups(report.costDetails, window, filters, dimension);
+  const page = costGroupPage(report.costDetails, window, filters, dimension, undefined, { limit });
+  const rows = page.items;
   useEffect(() => setLimit(50), [dimension, JSON.stringify(filters), window.startDate, window.endDate]);
   return <section className="subscription-cost-breakdown" aria-label="Subscription cost breakdown">
     <div className="cost-section-heading"><h2>Cost by subscription</h2><CostExportButton report={report} snapshotId={snapshotId} window={window} filters={filters} /></div>
@@ -370,7 +404,7 @@ export function SubscriptionCostBreakdown({ report, snapshotId, window, onChange
     <label className="billing-filter"><span>Group by</span><select aria-label="Cost grouping" value={dimension} onChange={(event) => setDimension(event.target.value as CostDimension)}><option value="resource">Resource</option><option value="service">Service</option><option value="resourceType">Resource type</option><option value="region">Region</option><option value="resourceGroup">Resource group</option><option value="tag" disabled={!filters.tagKey}>Tag value</option></select></label>
     {dimension === 'resource' ? <ResourceCostTable details={report.costDetails} window={window} filters={filters} formatMoney={formatMoney} snapshotId={snapshotId} /> : report.costDetails?.status !== 'complete' ? <p role="status">Resource cost details are unavailable in this snapshot. Run a new report.</p> : <>
       <div className="billing-table-scroll" tabIndex={0} role="region" aria-label="Grouped subscription costs"><table className="data-table billing-table"><thead><tr><th>Subscription</th><th>{dimension === 'tag' ? filters.tagKey : 'Dimension'}</th><th>Selected cost</th><th>Previous cost</th><th>Change</th></tr></thead><tbody>{rows.slice(0, limit).map((row) => <tr key={row.id}><th>{row.subscriptionName}</th><td>{row.name}</td><td>{money(row.current, formatMoney)}</td><td>{money(row.previous, formatMoney)}</td><td className={tone(row.delta)}>{money(row.delta, formatMoney)}<small>{changeLabel(row.percentage)}</small></td></tr>)}</tbody></table></div>
-      {rows.length > limit && <button type="button" className="ghost-button" onClick={() => setLimit((value) => value + 50)}>Show more groups</button>}
+      {page.total > rows.length && <button type="button" className="ghost-button" onClick={() => startTransition(() => setLimit((value) => value + 50))}>Show more groups</button>}
     </>}
   </section>;
 }
@@ -378,15 +412,15 @@ export function SubscriptionCostBreakdown({ report, snapshotId, window, onChange
 export function RequiredTagCosts({ report, snapshotId, window, formatMoney, filters }: { report: FullReport; snapshotId: string | null; window: CostWindow; formatMoney: Formatter; filters: CostFilter }) {
   const [requiredKeys, setRequiredKeys] = useState<string[]>([]);
   const [newKey, setNewKey] = useState('');
-  const keys = [...new Set(report.costDetails?.rows.flatMap((row) => Object.keys(row.tags)) ?? [])].sort();
+  const keys = report.costDetails?.remote?.facets().tagKey ?? [...new Set(report.costDetails?.rows.flatMap((row) => Object.keys(row.tags)) ?? [])].sort();
   const selectedFilters = { ...filters, requiredTagKeys: JSON.stringify(requiredKeys) };
-  const rows = compareCostGroups(report.costDetails, window, selectedFilters).filter((row) => row.sources.some((source) => Object.keys(source.dailyCosts).some((day) => day >= window.startDate && day <= window.endDate)));
-  const amount = costCoverage(report.costDetails, window).complete ? rows.reduce((sum, row) => sum + (row.current ?? 0), 0) : null;
+  const metrics = costMetrics(report.costDetails, window, selectedFilters, { currentOnly: true });
+  const amount = costCoverage(report.costDetails, window).complete ? metrics.currentTotal : null;
   return <section className="required-tag-costs" aria-label="Missing required tag costs">
     <div className="cost-section-heading"><h2>Missing-tag resource cost</h2><CostExportButton report={report} snapshotId={snapshotId} window={window} filters={selectedFilters} /></div>
     <div className="billing-filters"><label className="billing-filter"><span>Required tag key</span><input aria-label="Required tag key" value={newKey} maxLength={512} list="known-cost-tag-keys" onChange={(event) => setNewKey(event.target.value)} /><datalist id="known-cost-tag-keys">{keys.map((key) => <option key={key} value={key} />)}</datalist></label><button type="button" className="ghost-button" disabled={!newKey.trim() || requiredKeys.length >= 50} onClick={() => { setRequiredKeys((current) => [...new Set([...current, newKey.trim()])]); setNewKey(''); }}>Add required key</button></div>
     <div className="cost-chart-legend">{requiredKeys.map((key) => <span key={key}>{key}<button type="button" className="ghost-button" aria-label={`Remove required key ${key}`} title={`Remove ${key}`} onClick={() => setRequiredKeys((current) => current.filter((value) => value !== key))}><X size={14} /></button></span>)}</div>
-    <p>{money(amount, formatMoney)} / {rows.length} billed resource{rows.length === 1 ? '' : 's'} / {window.startDate} - {window.endDate}</p>
+    <p>{money(amount, formatMoney)} / {metrics.total} billed resource{metrics.total === 1 ? '' : 's'} / {window.startDate} - {window.endDate}</p>
     <p className="billing-provenance">{requiredKeys.length ? 'Missing any selected key or an empty value.' : 'Resources with no non-empty tags.'} Unattributed charges without resource IDs are excluded. Current resource-group fallback is identified in resource details.</p>
     <ResourceCostTable details={report.costDetails} window={window} filters={selectedFilters} formatMoney={formatMoney} snapshotId={snapshotId} />
   </section>;

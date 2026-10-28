@@ -1,4 +1,5 @@
 import type { CostDetailRow, CostDetailSummary } from './models';
+import type { CostGroupPage, CostMetrics, CostQueryOptions } from './postgresData';
 
 export type CostWindow = {
   startDate: string;
@@ -9,6 +10,15 @@ export type CostWindow = {
 export type CostDimension = 'resource' | 'subscription' | 'service' | 'resourceType' | 'region' | 'resourceGroup' | 'tag';
 export type CostFilter = { subscriptionId?: string; resourceId?: string; serviceName?: string; resourceGroup?: string; region?: string; tagKey?: string; tagValue?: string; requiredTagKeys?: string };
 const DAY_MS = 86400000;
+
+export type CostSource = Omit<CostDetailRow, 'dailyCosts'> & { dailyCosts?: Record<string, number> };
+export type CostGroup = {
+  id: string; name: string; subscriptionId: string; subscriptionName: string;
+  current: number | null; previous: number | null; delta: number | null; percentage: number | null;
+  sources: CostSource[]; owners: string[]; sourceCount?: number; hasCurrent?: boolean;
+  resourceCount?: number;
+};
+export type LegacyCostGroup = Omit<CostGroup, 'sources'> & { sources: CostDetailRow[] };
 
 export function validCostDate(value: string): boolean {
   const instant = Date.parse(`${value}T00:00:00Z`);
@@ -145,7 +155,8 @@ export function costChange(current: number | null, previous: number | null) {
   return { delta, percentage: delta === null || previous === null || previous === 0 ? null : delta / Math.abs(previous) * 100 };
 }
 
-export function compareCostGroups(details: CostDetailSummary | undefined, window: CostWindow, filter: CostFilter = {}, dimension: CostDimension = 'resource', previous = previousCostWindow(window)) {
+export function compareCostGroups(details: CostDetailSummary | undefined, window: CostWindow, filter: CostFilter = {}, dimension: CostDimension = 'resource', previous = previousCostWindow(window)): LegacyCostGroup[] {
+  if (details?.remote) throw new Error('SQL costs require a bounded projection query, not complete client-side row aggregation.');
   const currentCoverage = costCoverage(details, window);
   const previousCoverage = costCoverage(details, previous);
   const currentDates = new Set(currentCoverage.dates);
@@ -183,6 +194,7 @@ export function compareCostGroups(details: CostDetailSummary | undefined, window
 }
 
 export function dailySubscriptionCosts(details: CostDetailSummary | undefined, window: CostWindow, filter: CostFilter = {}) {
+  if (details?.remote) return costWindowDates(window).length ? details.remote.daily(window, filter) : [];
   const previous = previousCostWindow(window);
   const rows = details?.status === 'complete' ? details.rows.filter((row) => matchesCostFilter(row, filter)) : [];
   const subscriptions = [...new Map(rows.map((row) => [row.subscriptionId, row.subscriptionName])).entries()];
@@ -198,4 +210,65 @@ export function dailySubscriptionCosts(details: CostDetailSummary | undefined, w
       return { date, previousDate, current: available.has(date) ? totals.get(date) ?? 0 : null, previous: previousDate && available.has(previousDate) ? totals.get(previousDate) ?? 0 : null };
     }) };
   });
+}
+
+export function costGroupPage(details: CostDetailSummary | undefined, window: CostWindow, filter: CostFilter = {}, dimension: CostDimension = 'resource', previous?: CostWindow, options: CostQueryOptions = {}): CostGroupPage {
+  if (!costWindowDates(window).length || previous && !costWindowDates(previous).length) {
+    return { items: [], total: 0, currentTotal: 0, previousTotal: 0, largest: 0, spikeCount: 0, subscriptionCount: 0, observedCurrentTotal: 0, nextOffset: null };
+  }
+  if (details?.remote) return details.remote.groups(window, filter, dimension, previous, options);
+  const scopedDetails = options.untaggedOnly && details
+    ? { ...details, rows: details.rows.filter(row => !Object.values(row.tags).some(value => value.trim())) } : details;
+  let groups = compareCostGroups(scopedDetails, window, filter, dimension, previous);
+  if (options.nonzero) groups = groups.filter(row => (row.current ?? 0) !== 0 || (row.previous ?? 0) !== 0);
+  if (options.currentOnly) groups = groups.filter(row => row.sources.some(source =>
+    source.dailyCosts !== undefined && Object.keys(source.dailyCosts).some(day => day >= window.startDate && day <= window.endDate)));
+  if (options.spikesOnly) groups = groups.filter(row => row.previous !== null && row.previous > 0 && row.percentage !== null && row.percentage > 30);
+  if (options.sort === 'change') groups.sort((left, right) => Math.abs(right.delta ?? 0) - Math.abs(left.delta ?? 0) || Math.abs(right.current ?? 0) - Math.abs(left.current ?? 0));
+  const limit = options.limit ?? groups.length;
+  return {
+    items: groups.slice(0, limit), total: groups.length,
+    currentTotal: groups.reduce((sum, row) => sum + (row.current ?? 0), 0),
+    previousTotal: groups.reduce((sum, row) => sum + (row.previous ?? 0), 0),
+    largest: groups.reduce((peak, row) => Math.max(peak, row.current ?? 0), 0),
+    spikeCount: groups.filter(row => row.previous !== null && row.previous > 0 && row.percentage !== null && row.percentage > 30).length,
+    subscriptionCount: new Set(groups.map(row => row.subscriptionId)).size,
+    observedCurrentTotal: scopedDetails?.rows.filter(row => matchesCostFilter(row, filter))
+      .reduce((sum, row) => sum + Object.entries(row.dailyCosts).reduce((total, [day, value]) => total + (day >= window.startDate && day <= window.endDate ? value : 0), 0), 0) ?? 0,
+    nextOffset: groups.length > limit ? limit : null,
+  };
+}
+
+export function costMetrics(details: CostDetailSummary | undefined, window: CostWindow, filter: CostFilter = {}, options: CostQueryOptions = {}): CostMetrics {
+  return details?.remote && costWindowDates(window).length ? details.remote.metrics(window, filter, options) : costGroupPage(details, window, filter, 'resource', undefined, options);
+}
+
+export function observedCostSeries(details: CostDetailSummary | undefined, window: CostWindow, filters: CostFilter = {}): (number | null)[] {
+  if (!costWindowDates(window).length) return [];
+  if (details?.remote) {
+    const series = details.remote.daily(window, filters, true);
+    return costWindowDates(window).map((_, index) => {
+      const observed = series.map(item => item.days[index]?.current).filter((value): value is number => value !== null && value !== undefined);
+      return observed.length ? observed.reduce((sum, value) => sum + value, 0) : null;
+    });
+  }
+
+  const rows = details?.status === 'complete' ? details.rows.filter(row => matchesCostFilter(row, filters)) : [];
+  return costWindowDates(window).map(day => {
+    const covered = rows.filter(row => row.dailyCosts[day] !== undefined);
+    return covered.length ? covered.reduce((sum, row) => sum + row.dailyCosts[day], 0) : null;
+  });
+}
+
+export function filteredCostDetails(details: CostDetailSummary, filters: CostFilter): CostDetailSummary {
+  return details.remote ? { ...details, remote: details.remote.withFilters(filters) }
+    : { ...details, rows: details.rows.filter(row => matchesCostFilter(row, filters)) };
+}
+
+export function selectedGroupDetails(details: CostDetailSummary, group: CostGroup, dimension: CostDimension, tagKey?: string): CostDetailSummary {
+  if (details.remote) return { ...details, remote: details.remote.forGroup(dimension, group.id, tagKey) };
+  return { ...details, rows: group.sources.map(source => {
+    if (source.dailyCosts === undefined) throw new Error('Complete local cost evidence is missing daily values.');
+    return { ...source, dailyCosts: source.dailyCosts };
+  }) };
 }

@@ -65,6 +65,11 @@
     without one. When it is omitted and the tenant asks for one, the script asks in the terminal and
     offers the ID your existing registrations use. The answer is kept in the azd environment for reruns.
 
+.PARAMETER ApproveOwnedRegistrationMigration
+    Explicitly approve replacement of only the supplied previous Dev callback and OBO subject.
+    Requires PreviousWebOrigin, PreviousOboPrincipalId and exact ExpectedApiClientId/ExpectedWebClientId.
+    Existing ownership, permission, issuer, audience and unrelated-callback guards still apply.
+
 .EXAMPLE
     pwsh ./scripts/deploy-end-to-end.ps1 -EnvironmentName my-environment -TargetSubscriptionId 'sub-a,sub-b'
 
@@ -108,6 +113,11 @@ param(
     [string] $BuilderVmSize = 'Standard_D2s_v5',
     [string] $BuilderSshPublicKeyPath = '',
     [switch] $ApproveAll,
+    [switch] $ApproveOwnedRegistrationMigration,
+    [uri] $PreviousWebOrigin,
+    [guid] $PreviousOboPrincipalId = [guid]::Empty,
+    [guid] $ExpectedApiClientId = [guid]::Empty,
+    [guid] $ExpectedWebClientId = [guid]::Empty,
     [switch] $PlanOnly
 )
 
@@ -115,6 +125,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion -lt [version]'7.0') {
     throw 'PowerShell 7 or later is required. Run this script with `pwsh`, not Windows PowerShell 5.1.'
+}
+if ($AssessmentMode -ne 'postgres' -and ($ApproveOwnedRegistrationMigration -or $PreviousWebOrigin -or
+    $PreviousOboPrincipalId -ne [guid]::Empty -or $ExpectedApiClientId -ne [guid]::Empty -or
+    $ExpectedWebClientId -ne [guid]::Empty)) {
+    throw 'Guarded owned-registration migration is supported only by the staged PostgreSQL rollout.'
 }
 if ($AssessmentMode -eq 'postgres') {
     if ($SkipProcessor -or $SkipIdentityBootstrap -or $SkipRoleAssignments -or $SkipPreview -or $GrantAdminConsent -or $SkipModelAvailabilityCheck) {
@@ -143,6 +158,16 @@ if ($AssessmentMode -eq 'postgres') {
         SkipLogin = $SkipLogin; ApproveAll = $ApproveAll; IncludeLocalhostRedirects = $IncludeLocalhostRedirects
         BlobDataProtection = $BlobDataProtection; AllowNativeExportTrustedServices = $true
         Apply = (-not $PlanOnly); ApproveAzureChanges = (-not $PlanOnly); Confirm = $false
+    }
+    if ($ApproveOwnedRegistrationMigration) {
+        $arguments.ApproveOwnedRegistrationMigration = $true
+        $arguments.PreviousWebOrigin = $PreviousWebOrigin
+        $arguments.PreviousOboPrincipalId = $PreviousOboPrincipalId
+        $arguments.ExpectedApiClientId = $ExpectedApiClientId
+        $arguments.ExpectedWebClientId = $ExpectedWebClientId
+    } elseif ($PreviousWebOrigin -or $PreviousOboPrincipalId -ne [guid]::Empty -or
+              $ExpectedApiClientId -ne [guid]::Empty -or $ExpectedWebClientId -ne [guid]::Empty) {
+        throw 'Previous sign-in values require explicit -ApproveOwnedRegistrationMigration.'
     }
     & $runner @arguments
     return

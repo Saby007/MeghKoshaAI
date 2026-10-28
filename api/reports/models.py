@@ -6,7 +6,8 @@ Governance & Risk, Action Plan. Field aliases are camelCase for the frontend.
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr
+from anomalies.models import AnomalySummary
 
 from findings.models import FindingCategorySummary
 
@@ -724,6 +725,7 @@ class RateOptimizationResponse(BaseModel):
 
 
 class FullReport(BaseModel):
+    _anomaly_evidence: AnomalySummary | None = PrivateAttr(default=None)
     model_config = ConfigDict(populate_by_name=True)
 
     executive_summary: ExecutiveSummary = Field(alias="executiveSummary")
@@ -854,11 +856,15 @@ class ScalableReportSummary(BaseModel):
 class ReportCollection(BaseModel):
     path: str
     total: int
+    context: dict[str, str] = Field(default_factory=dict)
 
 
 class ScalableReportSnapshot(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
+    schema_version: str = Field(default="1.0", alias="schemaVersion")
+    report_schema_version: str = Field(default="1.0", alias="reportSchemaVersion")
+    serving_version: int = Field(default=0, alias="servingVersion")
     snapshot_id: str = Field(alias="snapshotId")
     scope_hash: str = Field(alias="scopeHash")
     subscription_ids: list[str] = Field(alias="subscriptionIds")

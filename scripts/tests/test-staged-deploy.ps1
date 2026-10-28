@@ -8,8 +8,15 @@ foreach ($file in @('deploy-staged.ps1', 'deploy-end-to-end.ps1', 'validate-depl
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\..\api\jobs\scheduler.py') -Destination (Join-Path $testRoot 'api\jobs\scheduler.py')
 [IO.File]::WriteAllText((Join-Path $testRoot 'scripts\bootstrap-identity.ps1'), @'
 [CmdletBinding(SupportsShouldProcess)]
-param($TenantId,$SubscriptionId,$EnvironmentName,$WebOrigin,$OboManagedIdentityResourceId,$ServiceManagementReference,[switch]$Apply,[switch]$IncludeLocalhostRedirects)
+param($TenantId,$SubscriptionId,$EnvironmentName,$WebOrigin,$OboManagedIdentityResourceId,$ServiceManagementReference,[switch]$Apply,[switch]$IncludeLocalhostRedirects,
+    [switch]$ApproveOwnedRegistrationMigration,$PreviousWebOrigin,$PreviousOboPrincipalId,$ExpectedApiClientId,$ExpectedWebClientId)
 $global:stagedState.calls.Add('identity')
+if ($ApproveOwnedRegistrationMigration) {
+    $global:stagedState.migration = @{
+        previousOrigin = $PreviousWebOrigin.ToString(); previousSubject = $PreviousOboPrincipalId.ToString()
+        api = $ExpectedApiClientId.ToString(); web = $ExpectedWebClientId.ToString()
+    }
+}
 @{ MEGHKOSHA_API_CLIENT_ID='44444444-4444-4444-4444-444444444444'; MEGHKOSHA_WEB_CLIENT_ID='55555555-5555-5555-5555-555555555555' } | ConvertTo-Json -Compress
 '@)
 $global:stagedState = @{
@@ -20,6 +27,7 @@ $global:stagedState = @{
     responses = [Collections.Generic.Queue[string]]::new()
     prompts = [Collections.Generic.List[string]]::new()
     environmentExists = $true; cleanupFailed = $false; imageDrift = $false; keyCreates = 0; foundryUnavailable = $false
+    migration = $null
     quotaCoreUsage = 2; quotaFamilyUsage = 2; quotaCoreLimit = 150; quotaFamilyLimit = 100
     quotaPowerState = 'VM deallocated'; malformedQuota = $false
     values = @{
@@ -362,6 +370,26 @@ try {
         -TargetSubscriptionId 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' | ConvertFrom-Json
     if ($result.assessedSubscriptions.Count -ne 2 -or $global:stagedState.assignments.Count -ne 8) {
         throw 'The end-to-end entry point did not preserve the explicitly selected subscription scopes.'
+    }
+    Reset-Rollout
+    $global:stagedState.values.APP_RESTORE_AI_ACCOUNT = 'true'
+    $global:stagedState.values.APP_REUSE_AI_ACCOUNT = 'false'
+    $result = & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll `
+        -ApproveOwnedRegistrationMigration -PreviousWebOrigin 'https://old.example.test' `
+        -PreviousOboPrincipalId '66666666-6666-6666-6666-666666666666' `
+        -ExpectedApiClientId '44444444-4444-4444-4444-444444444444' `
+        -ExpectedWebClientId '55555555-5555-5555-5555-555555555555' | ConvertFrom-Json
+    if ($result.status -ne 'deployment_completed' -or
+        $global:stagedState.values.APP_RESTORE_AI_ACCOUNT -ne 'false' -or
+        $global:stagedState.values.APP_REUSE_AI_ACCOUNT -ne 'true') {
+        throw 'A restored Foundry foundation must switch from restore to reuse before bootstrap/release.'
+    }
+    if (-not $global:stagedState.migration -or
+        $global:stagedState.migration.previousOrigin -ne 'https://old.example.test/' -or
+        $global:stagedState.migration.previousSubject -ne '66666666-6666-6666-6666-666666666666' -or
+        $global:stagedState.migration.api -ne '44444444-4444-4444-4444-444444444444' -or
+        $global:stagedState.migration.web -ne '55555555-5555-5555-5555-555555555555') {
+        throw 'The end-to-end runner lost the exact approved identity-migration boundaries.'
     }
     Reset-Rollout
     $global:stagedState.badBuild=$true

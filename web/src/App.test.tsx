@@ -15,17 +15,8 @@ vi.mock('./apiIdentity', () => ({
   initializeApiIdentity: vi.fn(), connectApiIdentity: vi.fn(), redirectApiIdentity: vi.fn(), signOutApiIdentity: vi.fn(),
   apiFetch: (...args: Parameters<typeof fetch>) => fetch(...args), IDENTITY_REQUIRED_EVENT: 'mkai-identity-required',
 }));
-vi.mock('./components/ChatWindow', () => ({ ChatWindow: ({ snapshotId }: { snapshotId: string | null }) => <input aria-label="Chat draft" data-snapshot={snapshotId ?? ''} /> }));
+vi.mock('./components/ChatWindow', () => ({ ChatWindow: () => <input aria-label="Chat draft" /> }));
 vi.mock('./components/ScheduleManager', () => ({ ScheduleManager: () => <input aria-label="Schedule filter" /> }));
-vi.mock('./components/ScalableWorkspace', () => ({ default: ({
-  refreshToken, onSnapshotChange,
-}: { refreshToken: number; onSnapshotChange?: (value: ReportSnapshot & { collections: { path: string; total: number }[] }) => void }) =>
-  <div data-testid="scalable-workspace" data-refresh={refreshToken}>Scalable assessment
-    <button type="button" onClick={() => onSnapshotChange?.({
-      ...snapshot, collections: [{ path: 'costHierarchy', total: 15000 }],
-    })}>Load scalable Chat context</button>
-  </div>,
-}));
 vi.mock('./components/SubscriptionPicker', () => ({
   SubscriptionPicker: ({ onRun, error, children }: { onRun: () => void; error: string | null; children?: ReactNode }) => (
     <div className="scope-ribbon">Scope picker<button type="button" onClick={onRun}>Run Report</button>{error && <p role="alert">{error}</p>}{children && <div className="scope-range">{children}</div>}</div>
@@ -73,26 +64,6 @@ it('restores an authorized saved report on sign-in without starting an assessmen
   expect(container.querySelector('.report-awaiting')).toBeNull();
   expect(runCostAssessment).not.toHaveBeenCalled();
   expect(narrate).not.toHaveBeenCalled();
-});
-
-it('routes PostgreSQL mode to the lazy scalable workspace without full-report or narration calls', async () => {
-  vi.mocked(initializeApiIdentity).mockResolvedValue({
-    userId: 'verified-user', userDetails: 'verified@example.com', tenantId: 'tenant-1',
-    features: { aiNarration: true, assessmentMode: 'postgres' },
-  });
-  await act(async () => root.render(<App />));
-  expect(container.querySelector('[data-testid="scalable-workspace"]')).not.toBeNull();
-  expect(container.querySelector('.report-awaiting')).toBeNull();
-  expect(getLatestReport).not.toHaveBeenCalled();
-  await act(async () => button('Run Report').click());
-  expect(container.querySelector('[data-testid="scalable-workspace"]')?.getAttribute('data-refresh')).toBe('1');
-  expect(runCostAssessment).not.toHaveBeenCalled();
-  expect(narrate).not.toHaveBeenCalled();
-  await act(async () => button('Load scalable Chat context').click());
-  await act(async () => button('Chat').click());
-  expect(container.querySelector<HTMLInputElement>('[aria-label="Chat draft"]')?.dataset.snapshot).toBe('report-1');
-  expect(container.textContent).not.toContain('Open classic tabs on a report');
-  expect(getLatestReport).not.toHaveBeenCalled();
 });
 
 it('presents one report-wide cost window in the scope bar and hands it to the report', async () => {

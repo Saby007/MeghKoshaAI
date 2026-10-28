@@ -11,6 +11,16 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def _isolate_immutable_projection_cache():
+    from services import assessment_projection_cache
+    assessment_projection_cache._entries.clear()
+    assessment_projection_cache._bytes = 0
+    yield
+    assessment_projection_cache._entries.clear()
+    assessment_projection_cache._bytes = 0
+
+
+@pytest.fixture(autouse=True)
 def _bind_test_identity(monkeypatch, request):
     tenant_id = "11111111-1111-1111-1111-111111111111"
     monkeypatch.setenv("AZURE_TENANT_ID", tenant_id)

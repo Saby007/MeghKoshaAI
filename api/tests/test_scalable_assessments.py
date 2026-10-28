@@ -243,7 +243,7 @@ def test_oversized_snapshot_is_rejected_before_download(monkeypatch):
     blob.download_blob.assert_not_called()
 
 
-def test_interactive_snapshot_budget_failure_never_falls_back_to_partial_report(monkeypatch):
+def test_retired_alternate_view_never_returns_partial_report_metadata(monkeypatch):
     monkeypatch.setenv("ASSESSMENT_MODE", "postgres")
     monkeypatch.setattr(assessment_store, "snapshot_view", AsyncMock(
         return_value={"subscriptionIds": [SUB], "scopeHash": "scope", "report": {}, "collections": []}))
@@ -253,12 +253,13 @@ def test_interactive_snapshot_budget_failure_never_falls_back_to_partial_report(
     async def exercise():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
             response = await client.get("/api/assessments/snapshots/snapshot/interactive")
-            assert response.status_code == 413
-            assert "interactive read budget" in response.json()["detail"]
+            assert response.status_code == 410
+            assert "retired" in response.json()["detail"]
     asyncio.run(exercise())
+    report_snapshots.load_snapshot.assert_not_called()
 
 
-def test_classic_row_budget_stops_large_report_before_blob_loading(monkeypatch):
+def test_large_sql_report_does_not_offer_an_alternate_full_blob_view(monkeypatch):
     monkeypatch.setenv("ASSESSMENT_MODE", "postgres")
     monkeypatch.setattr(assessment_store, "snapshot_view", AsyncMock(return_value={
         "subscriptionIds": [SUB], "scopeHash": "scope", "report": {},
@@ -270,8 +271,8 @@ def test_classic_row_budget_stops_large_report_before_blob_loading(monkeypatch):
     async def exercise():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
             response = await client.get("/api/assessments/snapshots/snapshot/interactive")
-            assert response.status_code == 413
-            assert "row budget" in response.json()["detail"]
+            assert response.status_code == 410
+            assert "bounded SQL queries" in response.json()["detail"]
     asyncio.run(exercise())
     load.assert_not_called()
 
