@@ -24,6 +24,7 @@ def test_staged_rollout_has_offline_approval_and_attestation_regressions():
     assert proof["oneCommandCompletes"]
     assert proof["checkpointResumeVerified"]
     assert proof["failureCleanupVerified"]
+    assert proof["numericQuotaValidationVerified"]
 
 
 def test_private_builder_shell_syntax():

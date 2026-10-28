@@ -19,6 +19,8 @@ $global:stagedState = @{
     responses = [Collections.Generic.Queue[string]]::new()
     prompts = [Collections.Generic.List[string]]::new()
     environmentExists = $true; cleanupFailed = $false; imageDrift = $false; keyCreates = 0; foundryUnavailable = $false
+    quotaCoreUsage = 2; quotaFamilyUsage = 2; quotaCoreLimit = 150; quotaFamilyLimit = 100
+    quotaPowerState = 'VM deallocated'; malformedQuota = $false
     values = @{
         AZURE_ENV_NAME = 'staged-test'; AZURE_SUBSCRIPTION_ID = '11111111-1111-1111-1111-111111111111'
         AZURE_TENANT_ID = '22222222-2222-2222-2222-222222222222'; AZURE_LOCATION = 'centralindia'
@@ -90,12 +92,18 @@ function az {
         return '[{"name":"Standard_D2s_v5","family":"standardDSv5Family","restrictions":[],"capabilities":[{"name":"vCPUs","value":"2"}]}]'
     }
     if ($a[0] -eq 'vm' -and $a[1] -eq 'list-usage') {
-        $limit = if ($global:stagedState.quotaInsufficient) { 0 } else { 100 }
-        return "[{`"name`":{`"value`":`"cores`"},`"currentValue`":0,`"limit`":$limit},{`"name`":{`"value`":`"standardDSv5Family`"},`"currentValue`":0,`"limit`":$limit}]"
+        $coreLimit = if ($global:stagedState.quotaInsufficient) { '0' } else { [string]$global:stagedState.quotaCoreLimit }
+        $familyLimit = if ($global:stagedState.quotaInsufficient) { '0' } else { [string]$global:stagedState.quotaFamilyLimit }
+        $coreUsage = if ($global:stagedState.malformedQuota) { 'invalid' } else { [string]$global:stagedState.quotaCoreUsage }
+        return (@(
+            @{ name = @{ value = 'cores' }; currentValue = $coreUsage; limit = $coreLimit }
+            @{ name = @{ value = 'standardDSv5Family' }; currentValue = [string]$global:stagedState.quotaFamilyUsage; limit = $familyLimit }
+        ) | ConvertTo-Json -Depth 4)
     }
     if ($command -eq 'vm image show') { return '{"name":"24.04.202610010"}' }
     if ($a[0] -eq 'vm' -and $a[1] -eq 'show') {
-        return '{"publicIps":"","powerState":"VM deallocated","hardwareProfile":{"vmSize":"Standard_D2s_v5"}}'
+        return (@{ publicIps = ''; powerState = $global:stagedState.quotaPowerState
+            hardwareProfile = @{ vmSize = 'Standard_D2s_v5' } } | ConvertTo-Json -Depth 4)
     }
     if ($a[0] -eq 'vm' -and $a[1] -in @('start', 'deallocate')) {
         if ($a[1] -eq 'deallocate' -and $global:stagedState.cleanupFailed) {
@@ -199,6 +207,28 @@ try {
     if ($global:stagedState.provisions) { throw 'Insufficient quota must stop before provisioning.' }
     $global:stagedState.quotaInsufficient = $false
     & $script -Stage Initialize @common -SubscriptionId '11111111-1111-1111-1111-111111111111' | Out-Null
+    $global:stagedState.quotaCoreUsage = 148
+    $global:stagedState.quotaFamilyUsage = 98
+    & $script -Stage Initialize @common -SubscriptionId '11111111-1111-1111-1111-111111111111' | Out-Null
+    $global:stagedState.quotaCoreUsage = 149
+    Assert-Refused { & $script -Stage Initialize @common -SubscriptionId '11111111-1111-1111-1111-111111111111' } 'used=149, limit=150, available=1, additional=2'
+    $global:stagedState.quotaCoreUsage = 2
+    $global:stagedState.quotaFamilyUsage = 99
+    Assert-Refused { & $script -Stage Initialize @common -SubscriptionId '11111111-1111-1111-1111-111111111111' } 'used=99, limit=100, available=1, additional=2'
+    $global:stagedState.quotaFamilyUsage = 2
+    $global:stagedState.malformedQuota = $true
+    Assert-Refused { & $script -Stage Initialize @common -SubscriptionId '11111111-1111-1111-1111-111111111111' } 'invalid nonnegative'
+    $global:stagedState.malformedQuota = $false
+    $global:stagedState.quotaCoreUsage = -1
+    Assert-Refused { & $script -Stage Initialize @common -SubscriptionId '11111111-1111-1111-1111-111111111111' } 'invalid nonnegative'
+    $global:stagedState.quotaCoreUsage = 2
+    $global:stagedState.quotaCoreLimit = 2
+    $global:stagedState.quotaFamilyLimit = 2
+    $global:stagedState.quotaPowerState = 'VM running'
+    & $script -Stage Initialize @common -SubscriptionId '11111111-1111-1111-1111-111111111111' | Out-Null
+    $global:stagedState.quotaCoreLimit = 150
+    $global:stagedState.quotaFamilyLimit = 100
+    $global:stagedState.quotaPowerState = 'VM deallocated'
     if ($global:stagedState.values.APP_PROFILE -ne 'ai' -or
         $global:stagedState.values.FOUNDRY_LOCATION -ne 'eastus2' -or
         $global:stagedState.values.APP_ENABLE_CHAT_RUNTIME -ne 'true' -or
@@ -320,6 +350,7 @@ try {
         failedBootstrapBlocksRelease = $true; staleBuildAttestationRejected = $true
         stagesAreExplicit = $true; provisioningCallsStubbed = $global:stagedState.provisions
         oneCommandCompletes = $true; checkpointResumeVerified = $true; failureCleanupVerified = $true
+        numericQuotaValidationVerified = $true
     } | ConvertTo-Json -Compress
 } finally {
     Remove-Item -LiteralPath $testRoot -Recurse -Force

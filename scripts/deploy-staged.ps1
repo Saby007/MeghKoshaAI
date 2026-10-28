@@ -101,8 +101,20 @@ function Check-Compute {
     $usage = @(Azure @('vm', 'list-usage', '--location', $region))
     foreach ($quota in @('cores', [string]$matches[0].family)) {
         $entry = @($usage | Where-Object { $_.name.value -eq $quota })
-        if ($entry.Count -ne 1 -or $entry[0].currentValue + $needed -gt $entry[0].limit) {
-            throw "VM quota $quota is unavailable or insufficient. No provisioning started."
+        if ($entry.Count -ne 1) {
+            throw "VM quota $quota in $region could not be read uniquely. No provisioning started."
+        }
+        $used = 0L
+        $limit = 0L
+        if (-not [long]::TryParse([string]$entry[0].currentValue, [Globalization.NumberStyles]::Integer,
+                [Globalization.CultureInfo]::InvariantCulture, [ref]$used) -or
+            -not [long]::TryParse([string]$entry[0].limit, [Globalization.NumberStyles]::Integer,
+                [Globalization.CultureInfo]::InvariantCulture, [ref]$limit) -or $used -lt 0 -or $limit -lt 0) {
+            throw "VM quota $quota in $region returned invalid nonnegative usage/limit values. No provisioning started."
+        }
+        $available = $limit - $used
+        if ([long]$needed -gt $available) {
+            throw "VM quota $quota in $region is insufficient: used=$used, limit=$limit, available=$available, additional=$needed vCPU(s). No provisioning started."
         }
     }
     $version = Value 'APP_PRIVATE_BUILDER_IMAGE_VERSION'

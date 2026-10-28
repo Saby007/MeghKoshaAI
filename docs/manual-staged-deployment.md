@@ -75,6 +75,13 @@ The script never proceeds past a failed stage. Cleanup errors are reported expli
 It does not automatically migrate an already released environment to a different
 source/schema commit; review that update through individual stages instead.
 
+VM quota checks validate numeric usage and limits even when Azure CLI serializes
+them as strings. A genuine shortage reports the quota name, region, used, limit,
+available and additional vCPUs. Invalid/missing quota responses stop explicitly;
+they are not reported as a confirmed quota shortage. Pull the latest feature
+branch before retrying an older generic `VM quota cores is unavailable or insufficient`
+error; do not request an increase solely from that old message.
+
 To see the complete plan without sign-in, Azure calls or resource changes:
 
 ```powershell
