@@ -60,6 +60,14 @@
     One or more subscriptions to assess, as separate values or a single comma-separated string,
     for example -TargetSubscriptionId '1111...,2222...'. Defaults to the subscription you deploy into.
 
+.PARAMETER MaxAttempts
+    Maximum provisioning attempts per stage, including the private PostgreSQL path. Defaults to 3.
+    Private PostgreSQL mode retries only supported transient conditions; permanent failures stop.
+
+.PARAMETER SettleSeconds
+    Initial settlement delay before a provisioning retry. Defaults to 120 seconds. The private
+    PostgreSQL path then waits up to 10 minutes for the owned deployment/resources to settle.
+
 .PARAMETER ServiceManagementReference
     Service Tree ID put on the two sign-in app registrations, for tenants that refuse registrations
     without one. When it is omitted and the tenant asks for one, the script asks in the terminal and
@@ -155,6 +163,7 @@ if ($AssessmentMode -eq 'postgres') {
         Location = $Location; FoundryLocation = $FoundryLocation; Repository = $RepoUrl; TargetSubscriptionId = $targetIds
         ServiceManagementReference = $ServiceManagementReference
         BuilderVmSize = $BuilderVmSize; BuilderSshPublicKeyPath = $BuilderSshPublicKeyPath
+        MaxAttempts = $MaxAttempts; SettleSeconds = $SettleSeconds
         SkipLogin = $SkipLogin; ApproveAll = $ApproveAll; IncludeLocalhostRedirects = $IncludeLocalhostRedirects
         BlobDataProtection = $BlobDataProtection; AllowNativeExportTrustedServices = $true
         Apply = (-not $PlanOnly); ApproveAzureChanges = (-not $PlanOnly); Confirm = $false

@@ -10,6 +10,10 @@ param(
     [string] $FoundryLocation = 'eastus2',
     [string] $BuilderVmSize = 'Standard_D2s_v5',
     [string] $BuilderSshPublicKeyPath = '',
+    [ValidateRange(1, 10)]
+    [int] $MaxAttempts = 3,
+    [ValidateRange(0, 900)]
+    [int] $SettleSeconds = 120,
     [ValidatePattern('^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git$')]
     [string] $Repository = 'https://github.com/Saby007/MeghKoshaAI.git',
     [ValidatePattern('^([a-f0-9]{40})?$')]
@@ -59,6 +63,7 @@ if (-not $Apply -or $WhatIfPreference) {
         location = $Location; privateRegistry = $true; privateDatabase = $true
         ai = @{ enabled = $true; foundryLocation = $FoundryLocation; model = 'model-router'; hostedNarratorEnabled = $false }
         privateBuilder = @{ vmSize = $BuilderVmSize; publicVmIp = $false; inboundAccess = $false; outboundNat = $true }
+        provisionRetry = @{ maxAttempts = $MaxAttempts; settleSeconds = $SettleSeconds; settlementTimeoutSeconds = 600 }
         source = @{ repository = $Repository; commit = $SourceCommit }
         stages = $(if ($Stage -eq 'All') { @('Initialize', 'Foundation', 'Build', 'Bootstrap', 'Identity', 'Permissions', 'Release', 'Verify', 'StopBuilder') } else { @($Stage) })
         targets = $TargetSubscriptionId
@@ -159,18 +164,139 @@ function Check-Foundry {
         }
     }
 }
-function Provision {
-    foreach ($entry in $script:values.GetEnumerator()) {
-        [Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value, 'Process')
+function Invoke-ProvisionCommand([switch] $Preview) {
+    $nativePreference = $PSNativeCommandUseErrorActionPreference
+    try {
+        $PSNativeCommandUseErrorActionPreference = $false
+        $arguments = @('provision', '--environment', $EnvironmentName, '--no-prompt')
+        if ($Preview) { $arguments += '--preview' }
+        $lines = [Collections.Generic.List[string]]::new()
+        & azd @arguments 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            $lines.Add($line)
+            Write-Host $line
+        }
+        return @{ exitCode = $LASTEXITCODE; output = $lines -join "`n" }
+    } finally {
+        $PSNativeCommandUseErrorActionPreference = $nativePreference
     }
-    $env:APP_ALLOW_AZURE_CHANGES = 'true'
-    & (Join-Path $PSScriptRoot 'validate-deployment-inputs.ps1') -Operation Provision | Out-Host
-    & azd provision --environment $EnvironmentName --preview --no-prompt | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'Provision preview failed. No provisioning was started.' }
-    if ($PreviewOnly) { return }
-    & azd provision --environment $EnvironmentName --no-prompt | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'Provisioning failed. Inspect the deployment before retrying.' }
-    Reload
+}
+function Wait-ProvisionRetry {
+    if ($SettleSeconds) {
+        Write-Host "Waiting $SettleSeconds second(s) before checking the previous deployment."
+        Start-Sleep -Seconds $SettleSeconds
+    }
+    $group = Value 'AZURE_RESOURCE_GROUP'
+    if (-not $group) { $group = "rg-$EnvironmentName" }
+    $scope = "/subscriptions/$script:subscription/resourceGroups/$group"
+    $owned = Azure @('group', 'show', '--name', $group)
+    if ($owned.id -ne $scope -or $owned.name -ne $group -or $owned.location -ne (Value 'AZURE_LOCATION' -Required) -or
+        $owned.tags -isnot [Collections.IDictionary] -or $owned.tags['azd-env-name'] -ne $EnvironmentName -or
+        $owned.tags['app-name'] -ne 'cost-assessment') {
+        throw 'Retry requires the exact environment-owned resource group and location.'
+    }
+    $targets = @{}
+    for ($poll = 0; $poll -le 40; $poll++) {
+        $pending = [Collections.Generic.List[string]]::new()
+        $deployments = @(Azure @('deployment', 'sub', 'list') | Where-Object {
+            $_.name -match ('^' + [regex]::Escape($EnvironmentName) + '-\d+$')
+        }) + @(Azure @('deployment', 'group', 'list', '--resource-group', $group))
+        foreach ($deployment in $deployments) {
+            if (-not $deployment.name -or -not $deployment.properties.provisioningState) {
+                throw 'Deployment readiness metadata is incomplete; settlement cannot be confirmed.'
+            }
+            if ($deployment.properties.provisioningState -notin @('Succeeded', 'Failed', 'Canceled')) {
+                $pending.Add("deployment $($deployment.name): $($deployment.properties.provisioningState)")
+            }
+        }
+        if (-not $pending.Count) {
+            if (-not $targets.Count) {
+                $resources = @(Azure @('resource', 'list', '--resource-group', $group))
+                $specifications = @{
+                    postgres = @{ type = 'Microsoft.DBforPostgreSQL/flexibleServers'; pattern = '^pg-[a-z0-9]{13}$'; location = (Value 'AZURE_LOCATION' -Required) }
+                }
+                if ((Value 'APP_PROFILE') -eq 'ai') {
+                    $specifications.foundry = @{ type = 'Microsoft.CognitiveServices/accounts'; pattern = '^ai-[a-z0-9]{13}$'; location = (Value 'FOUNDRY_LOCATION' -Required) }
+                }
+                foreach ($entry in $specifications.GetEnumerator()) {
+                    $matches = @($resources | Where-Object { $_.type -eq $entry.Value.type })
+                    if ($matches.Count -ne 1) { throw "Retry requires one unambiguous owned $($entry.Key) resource." }
+                    $resource = $matches[0]
+                    if ($resource.name -notmatch $entry.Value.pattern -or
+                        $resource.id -ne "$scope/providers/$($entry.Value.type)/$($resource.name)" -or
+                        $resource.location -ne $entry.Value.location -or $resource.tags -isnot [Collections.IDictionary] -or
+                        $resource.tags['azd-env-name'] -ne $EnvironmentName -or $resource.tags['app-name'] -ne 'cost-assessment') {
+                        throw "The $($entry.Key) resource does not match the owned environment, name, scope or region."
+                    }
+                    $targets[$entry.Key] = $resource
+                }
+            }
+            $database = Azure @('postgres', 'flexible-server', 'show', '--resource-group', $group, '--name', $targets.postgres.name)
+            if ($database.id -ne $targets.postgres.id -or $database.tags -isnot [Collections.IDictionary] -or
+                $database.tags['azd-env-name'] -ne $EnvironmentName -or $database.tags['app-name'] -ne 'cost-assessment' -or
+                $database.state -notin @('Ready', 'Creating', 'Updating', 'Starting')) {
+                throw "PostgreSQL readiness is invalid or requires operator action: $($database.state)."
+            }
+            if ($database.state -ne 'Ready') { $pending.Add("PostgreSQL: $($database.state)") }
+            elseif ($database.network.publicNetworkAccess -ne 'Disabled' -or
+                $database.authConfig.passwordAuth -ne 'Disabled' -or $database.authConfig.activeDirectoryAuth -ne 'Enabled') {
+                throw 'Retry requires private, Entra-only PostgreSQL; its security configuration was not confirmed.'
+            }
+            if ($targets.ContainsKey('foundry')) {
+                $account = Azure @('cognitiveservices', 'account', 'show', '--resource-group', $group, '--name', $targets.foundry.name)
+                if ($account.id -ne $targets.foundry.id -or $account.kind -ne 'AIServices' -or
+                    $account.tags -isnot [Collections.IDictionary] -or $account.tags['azd-env-name'] -ne $EnvironmentName -or
+                    $account.tags['app-name'] -ne 'cost-assessment' -or
+                    $account.location -ne (Value 'FOUNDRY_LOCATION' -Required) -or
+                    $account.properties.provisioningState -notin @('Succeeded', 'Accepted', 'Creating', 'Updating', 'Running')) {
+                    throw "Foundry readiness is invalid or requires operator action: $($account.properties.provisioningState)."
+                }
+                if ($account.properties.provisioningState -ne 'Succeeded') {
+                    $pending.Add("Foundry: $($account.properties.provisioningState)")
+                } elseif ($account.properties.publicNetworkAccess -ne 'Disabled' -or
+                    $account.properties.disableLocalAuth -isnot [bool] -or $account.properties.disableLocalAuth -ne $true) {
+                    throw 'Retry requires private, Entra-only Foundry; its security configuration was not confirmed.'
+                }
+            }
+            if (-not $pending.Count) {
+                if ($targets.ContainsKey('foundry')) {
+                    if ((Value 'APP_RESTORE_AI_ACCOUNT') -eq 'true') { Save 'APP_RESTORE_AI_ACCOUNT' 'false' }
+                    if ((Value 'APP_REUSE_AI_ACCOUNT') -ne 'true') { Save 'APP_REUSE_AI_ACCOUNT' 'true' }
+                }
+                return
+            }
+        }
+        if ($poll -eq 40) { throw 'Owned deployments/resources did not settle within 600 seconds. No retry was started.' }
+        if ($poll % 4 -eq 0) { Write-Host "Waiting for settlement: $($pending -join '; ')" }
+        Start-Sleep -Seconds 15
+    }
+}
+function Provision {
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        foreach ($entry in $script:values.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value, 'Process')
+        }
+        $env:APP_ALLOW_AZURE_CHANGES = 'true'
+        & (Join-Path $PSScriptRoot 'validate-deployment-inputs.ps1') -Operation Provision | Out-Host
+        $preview = Invoke-ProvisionCommand -Preview
+        if ($preview.exitCode -ne 0) { throw "Provision preview failed. No provisioning was started.`n$($preview.output)" }
+        if ($PreviewOnly) { return }
+        Write-Host "Provisioning attempt $attempt of $MaxAttempts."
+        $result = Invoke-ProvisionCommand
+        if ($result.exitCode -eq 0) { Reload; return }
+        $permanent = 'RequestDisallowedByPolicy|QuotaExceeded|QuotaLimitReached|AuthorizationFailed|AuthenticationFailed|InvalidAuthenticationToken|Forbidden|SkuNotAvailable|LocationNotAvailable|InvalidTemplate|MissingSubscriptionRegistration|NoRegisteredProviderFound'
+        $transient = 'AadAuthOperationCannotBePerformedWhenServerIsNotAccessible|AccountProvisioningStateInvalid|DeploymentActive|Another operation is in progress on the resource [^\r\n]*Microsoft\.CognitiveServices/accounts/'
+        if ($result.output -match $permanent -or $result.output -notmatch $transient) {
+            throw "Provisioning failed with a permanent or unsupported error; it was not automatically retried.`n$($result.output)"
+        }
+        if ($attempt -eq $MaxAttempts) {
+            throw "Provisioning failed after $attempt attempt(s). Review the error before resuming.`n$($result.output)"
+        }
+        Write-Warning "Provisioning attempt $attempt of $MaxAttempts reported a supported transient error. Waiting for verified settlement before retrying."
+        try { Wait-ProvisionRetry } catch {
+            throw "Provisioning settlement could not be verified. No retry was started. $($_.Exception.Message)`nOriginal provisioning output:`n$($result.output)"
+        }
+    }
 }
 function Check-Private {
     $registry = Azure @('acr', 'show', '--name', (Value 'AZURE_CONTAINER_REGISTRY_NAME' -Required))
@@ -333,6 +459,7 @@ function Invoke-AllStages {
         Repository = $Repository; SourceCommit = $commit; Apply = $true; ApproveAzureChanges = $true
         Confirm = $false; AllowNativeExportTrustedServices = $AllowNativeExportTrustedServices
         BlobDataProtection = $BlobDataProtection; IncludeLocalhostRedirects = $IncludeLocalhostRedirects
+        MaxAttempts = $MaxAttempts; SettleSeconds = $SettleSeconds
     }
     if ($ApproveOwnedRegistrationMigration) {
         $common.ApproveOwnedRegistrationMigration = $true

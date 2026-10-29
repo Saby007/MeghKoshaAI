@@ -251,8 +251,18 @@ unattended execution.
 
 **Do not use raw `azd up`, `azd deploy`, the Blob-mode helper or mutable `:latest`
 images for this PostgreSQL flow.** Legacy compatibility flags such as
-`-SkipProcessor`, `-SkipIdentityBootstrap`, `-SkipPreview`, `-MaxAttempts` and
-`-SkipModelAvailabilityCheck` are not a PostgreSQL retry/skip mechanism.
+`-SkipProcessor`, `-SkipIdentityBootstrap`, `-SkipPreview` and
+`-SkipModelAvailabilityCheck` cannot skip required PostgreSQL stages.
+
+Provisioning uses `-MaxAttempts 3 -SettleSeconds 120` by default, including in
+PostgreSQL mode and its individual provisioning stages. Supported transient
+PostgreSQL Entra-admin/Foundry provisioning-state conflicts and active deployments
+wait for the owned ARM deployment graphs to finish and for private PostgreSQL
+`Ready` / Foundry `Succeeded` before a fresh preview and retry. Settlement polling
+is bounded to ten minutes after the configured delay. Only a verified owned
+Foundry account is switched to reuse; its failed project/model children are still
+deployed. Preview, policy, quota, authorization and unsupported failures stop
+explicitly; these controls are not an unlimited retry or a recovery bypass.
 
 The script resumes verified checkpoints for the same source; it does not guarantee
 automatic recovery from every provider-settlement error or perform an implicit
@@ -495,8 +505,8 @@ guarded recovery is performed or the next eligible daily cycle begins.
 | GitHub source validation fails | Current source checks use authenticated `gh api` requests to github.com, retaining public-repository and exact-commit validation. Verify `gh auth status --hostname github.com` and the reported authentication/rate/network error. No anonymous fallback is attempted. Older application-baseline scripts used the shared-IP anonymous quota; update to the reviewed preflight fix rather than repeatedly waiting or injecting global HTTP authorization headers. |
 | AZD advertises a patch but WinGet returns `0x8A15002B` | No applicable package upgrade was found. AZD 1.37.1 meets this deployment's requirement; do not reinstall or disable deployment error handling just to remove the notice. |
 | Quota, SKU, model, policy or consent failure | Stop for capacity/administrator approval. Do not open endpoints or silently change regions/roles/models. |
-| Foundry `Accepted` / `RequestConflict` | Inspect the owned account and wait for provider settlement before resuming the same-source stages. Restore and reuse are different states; do not set flags blindly or purge resources. |
-| PostgreSQL admin operation while inaccessible | Verify the server is Ready and privately reachable before retrying bootstrap. Never attest success manually. |
+| Foundry `Accepted` / `RequestConflict` | Supported provisioning-state conflicts receive bounded, ownership-checked settlement/retry. If exhausted or blocked, inspect the reported account/state before resuming. Restore and reuse differ; never set flags blindly or purge resources. |
+| PostgreSQL admin operation while inaccessible | Provisioning waits for the owned private server to be Ready before retrying this known Entra-admin race. A stopped/failed server requires operator review; this is not a database-bootstrap success attestation. |
 | `AccessToStorageAccountDenied` | Check both monthly/daily identities, exact destination, data roles, trusted-service settings and propagation. Repeated starts do not repair access. |
 | Old completed run history after a Storage rebuild | Generate fresh output after rechecking grants. Old history does not prove files exist in recreated storage. |
 | Partial foundation failure before builder outputs are saved | Inspect and deallocate only the owned idle builder; verify cleanup rather than assuming it happened. |

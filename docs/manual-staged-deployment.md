@@ -76,6 +76,22 @@ The script never proceeds past a failed stage. Cleanup errors are reported expli
 It does not automatically migrate an already released environment to a different
 source/schema commit; review that update through individual stages instead.
 
+The PostgreSQL entry point forwards `-MaxAttempts` and `-SettleSeconds` to every
+provisioning stage (Foundation, Bootstrap and Release); the defaults are 3 attempts
+and a 120-second settlement delay. Known PostgreSQL Entra-admin-before-accessible,
+Foundry account provisioning conflicts and active-deployment errors are eligible
+for retry, not every failure. Before another attempt, the script verifies the
+environment-owned resource group, waits for its subscription/nested deployments
+to finish, and confirms private PostgreSQL `Ready` and Foundry `Succeeded`.
+Polling is bounded to ten minutes after the initial delay. Only the exact owned,
+private account is switched from restore/create to reuse; its project/models and
+other children are still provisioned. Each attempt validates inputs and previews
+the current configuration again. Preview/input, quota, policy, authorization and
+unsupported errors stop explicitly, as do readiness failures or an exhausted
+budget. Strict native-command error handling is restored after output capture.
+Do not delete the partial environment, change regions/permissions or bypass
+checkpoints simply to make a retry proceed.
+
 VM quota checks validate numeric usage and limits even when Azure CLI serializes
 them as strings. A genuine shortage reports the quota name, region, used, limit,
 available and additional vCPUs. Invalid/missing quota responses stop explicitly;

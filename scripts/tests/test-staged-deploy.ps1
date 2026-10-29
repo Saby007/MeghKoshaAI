@@ -307,6 +307,9 @@ try {
     if ($plan.stage -ne 'All' -or $plan.appliesChanges) { throw 'End-to-end default must describe every private stage without execution.' }
     $regionalPlan=& $driver -EnvironmentName staged-test -FoundryLocation northeurope -PlanOnly | ConvertFrom-Json
     if ($regionalPlan.ai.foundryLocation -ne 'northeurope' -or -not $regionalPlan.ai.enabled) { throw 'FoundryLocation was not forwarded through the PostgreSQL end-to-end entry point.' }
+    $retryPlan=& $driver -EnvironmentName staged-test -MaxAttempts 5 -SettleSeconds 45 -PlanOnly | ConvertFrom-Json
+    if ($retryPlan.provisionRetry.maxAttempts -ne 5 -or $retryPlan.provisionRetry.settleSeconds -ne 45 -or
+        $retryPlan.provisionRetry.settlementTimeoutSeconds -ne 600) { throw 'Provisioning retry controls were not forwarded through the PostgreSQL end-to-end entry point.' }
     function Reset-Rollout {
         $global:stagedState.values=$initialValues.Clone()
         $global:stagedState.calls.Clear()
