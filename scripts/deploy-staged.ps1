@@ -203,6 +203,28 @@ function Check-Build {
     }
 }
 
+function GitHub([string] $Path) {
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        throw 'GitHub CLI (gh) is required for authenticated source validation. Install it and run: gh auth login --hostname github.com --web. GitHub credentials stay on this management machine.'
+    }
+    $nativeErrors = $PSNativeCommandUseErrorActionPreference
+    try {
+        $PSNativeCommandUseErrorActionPreference = $false
+        $output = & gh api --hostname github.com --method GET $Path
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $PSNativeCommandUseErrorActionPreference = $nativeErrors
+    }
+    if ($exitCode -ne 0) {
+        throw "GitHub source validation failed for $Path (gh exit $exitCode). Resolve the GitHub error above; if authentication is missing or expired, run: gh auth login --hostname github.com --web. No anonymous fallback or token copying is used."
+    }
+    $json = $output -join "`n"
+    if ([string]::IsNullOrWhiteSpace($json)) { throw "GitHub returned an empty response for $Path." }
+    $result = $json | ConvertFrom-Json -AsHashtable
+    if ($result -isnot [Collections.IDictionary]) { throw "GitHub did not return a JSON object for $Path." }
+    return $result
+}
+
 function Check-Source {
     $head = (& git rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or (& git status --porcelain)) { throw 'Build only a reviewed clean checkout.' }
@@ -210,9 +232,13 @@ function Check-Source {
         throw 'SourceCommit must equal the reviewed local HEAD.'
     }
     $repoPath = $Repository -replace '^https://github.com/', '' -replace '\.git$', ''
-    $metadata = Invoke-RestMethod "https://api.github.com/repos/$repoPath"
+    $metadata = GitHub "repos/$repoPath"
+    if (-not $metadata.Contains('private') -or $metadata['private'] -isnot [bool] -or
+        -not $metadata.Contains('visibility') -or $metadata['visibility'] -isnot [string]) {
+        throw 'GitHub repository metadata is incomplete; public source was not verified.'
+    }
     if ($metadata.private -or $metadata.visibility -ne 'public') { throw 'This builder accepts public source only; no GitHub credentials are copied.' }
-    $published = Invoke-RestMethod "https://api.github.com/repos/$repoPath/commits/$head"
+    $published = GitHub "repos/$repoPath/commits/$head"
     if ($published.sha -ne $head) { throw 'The reviewed commit is not published in the selected public repository.' }
     return $head
 }

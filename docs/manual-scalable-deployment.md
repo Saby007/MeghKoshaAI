@@ -4,6 +4,11 @@ These are **operator-run steps**, not an automatic deployment workflow. The assi
 does not execute them. Review the cost, network, identity and policy changes first.
 No step enables public ACR access or uses registry/database passwords.
 
+The staged runner's source check additionally requires a local authenticated
+GitHub CLI (`gh auth login --hostname github.com --web`). It checks public source
+and exact commits through authenticated GitHub API requests; it never extracts
+or copies the GitHub credential to the private builder.
+
 If you do not already have private Docker/VPN connectivity, use the
 [one-command script with a private build VM](manual-staged-deployment.md) instead:
 `scripts\deploy-end-to-end.ps1 -EnvironmentName meghkoshaai-scalable-dev -SubscriptionId '<uuid>'`.

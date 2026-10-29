@@ -14,6 +14,7 @@ From the reviewed feature-branch checkout, use PowerShell 7.4+:
 
 ```powershell
 git pull --ff-only
+gh auth login --hostname github.com --web
 .\scripts\deploy-end-to-end.ps1 `
     -EnvironmentName meghkoshaai-scalable-dev `
     -SubscriptionId '<hosting-subscription-uuid>' `
@@ -100,6 +101,12 @@ the PostgreSQL end-to-end flow.
 
 - PowerShell 7.4+, Git, Azure CLI with Container Apps support, AZD 1.35+, and an
   OpenSSH public key. No Docker or VPN is needed on your management laptop.
+- GitHub CLI (`gh`) authenticated to github.com on the management machine. Source
+  validation uses `gh api` for public-repository metadata and the exact published
+  commit, avoiding the shared-IP anonymous quota. Existing authenticated sessions
+  can be checked with `gh auth status --hostname github.com`; resolve a failure
+  before retrying. No token is extracted or copied to the private VM or Azure.
+  `-SkipLogin` skips only Azure/AZD checks; it does not skip this prerequisite.
 - An approved **new parallel** environment, default `meghkoshaai-scalable-dev`.
   The existing `meghkoshaai-dev` layout hold is not bypassed.
 - Hosting permissions to create resources/assign scoped roles and run Azure VM

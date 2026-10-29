@@ -187,10 +187,19 @@ function git {
     if ($args[0] -eq 'status') { return }
     throw 'Unexpected offline Git call.'
 }
+function gh {
+    $a = @($args); $global:LASTEXITCODE = 0
+    if ($a.Count -ne 6 -or ($a[0..4] -join '|') -ne 'api|--hostname|github.com|--method|GET') {
+        throw 'Source validation must use an authenticated GitHub CLI GET.'
+    }
+    $global:stagedState.calls.Add("gh api $($a[5])")
+    if ($a[5] -match '^repos/[^/]+/[^/]+/commits/[a-f0-9]{40}$') { return (@{ sha = 'c' * 40 } | ConvertTo-Json -Compress) }
+    if ($a[5] -match '^repos/[^/]+/[^/]+$') { return '{"private":false,"visibility":"public"}' }
+    throw 'Unexpected offline GitHub endpoint.'
+}
 function Invoke-RestMethod {
     param([string] $Uri, [int] $TimeoutSec)
-    if ($Uri -match '/commits/') { return @{ sha = 'c' * 40 } }
-    if ($Uri -match '^https://api.github.com/repos/') { return @{ private = $false; visibility = 'public' } }
+    if ($Uri -match '^https://api.github.com/') { throw 'Anonymous GitHub REST calls must not be used by source validation.' }
     if ($Uri -match '^https://web.example.test/api/(health|ready)$') { return @{ status = 'ok' } }
     throw "Unexpected offline HTTP call: $Uri"
 }

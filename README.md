@@ -125,8 +125,9 @@ new PostgreSQL deployment.
 
 ### Required tools and permissions
 
-- PowerShell **7.4+**, Git, Azure CLI with Container Apps support, AZD **1.35+**
-  and OpenSSH `ssh-keygen`. No Docker installation or VPN is required on the
+- PowerShell **7.4+**, Git, an authenticated GitHub CLI (`gh`), Azure CLI with
+  Container Apps support, AZD **1.35+** and OpenSSH `ssh-keygen`.
+  No Docker installation or VPN is required on the
   management laptop for the VM build path.
 - An operator authorized to create hosting resources and assign roles at the
   approved hosting and target-subscription scopes.
@@ -194,20 +195,24 @@ Set-Location .\MeghKoshaAI-customer-pg
 git rev-parse HEAD
 git status --short
 
+gh auth login --hostname github.com --web
+gh auth status --hostname github.com
 az login --tenant $TenantId
 az account set --subscription $HostingSubscriptionId
 azd auth login --tenant-id $TenantId
 azd auth login --check-status
 ```
 
-Review the exact published commit. The builder requires a clean checkout and a
-public repository; documentation-only branch updates need not change an existing
-customer test pinned to the application baseline. To select that baseline in a
-new clean checkout, use:
+Review the exact published feature commit. The builder requires a clean checkout
+and a public repository. The historical application baseline predates the
+authenticated GitHub preflight fix; use the reviewed feature revision containing
+the fix for new customer deployments. This changes source validation, not
+application/UI, database or infrastructure behavior.
 
-```powershell
-git switch --detach 78233051bdfcb2b75cdbba7ed1a5cc07ed08f690
-```
+`gh` authentication is local to the management machine; no GitHub token is
+extracted by the script or copied to Azure/the builder. Use an organization-approved
+GitHub session; public-source validation does not require repository write access.
+`-SkipLogin` only affects Azure/AZD checks, not GitHub authentication.
 
 ### 2. Review and execute the existing entry point
 
@@ -487,7 +492,7 @@ guarded recovery is performed or the next eligible daily cycle begins.
 
 | Symptom | Action |
 |---|---|
-| GitHub API rate limit in `Check-Source` | This release uses anonymous GitHub REST calls before rollout approval/Initialize. Read `X-RateLimit-Reset`, wait and retry once. GitHub CLI login alone does not authenticate these calls. Do not bypass source validation or inject global HTTP authorization headers. |
+| GitHub source validation fails | Current source checks use authenticated `gh api` requests to github.com, retaining public-repository and exact-commit validation. Verify `gh auth status --hostname github.com` and the reported authentication/rate/network error. No anonymous fallback is attempted. Older application-baseline scripts used the shared-IP anonymous quota; update to the reviewed preflight fix rather than repeatedly waiting or injecting global HTTP authorization headers. |
 | AZD advertises a patch but WinGet returns `0x8A15002B` | No applicable package upgrade was found. AZD 1.37.1 meets this deployment's requirement; do not reinstall or disable deployment error handling just to remove the notice. |
 | Quota, SKU, model, policy or consent failure | Stop for capacity/administrator approval. Do not open endpoints or silently change regions/roles/models. |
 | Foundry `Accepted` / `RequestConflict` | Inspect the owned account and wait for provider settlement before resuming the same-source stages. Restore and reuse are different states; do not set flags blindly or purge resources. |
