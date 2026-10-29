@@ -1,719 +1,598 @@
 # MeghKoshaAI
 
-**MeghKoshaAI** is a self-hosted Azure cost-assessment and FinOps dashboard. It turns native Azure Cost Management FOCUS exports into an executive-ready cost report, a rolling cost history (3–6 closed months plus the current month through yesterday), resource-level optimization recommendations, and an optional AI narrative — all running on your own infrastructure, in your own Azure subscription, under your own identity.
+MeghKoshaAI is a self-hosted Azure cost-assessment and FinOps dashboard for a single
+organization. It combines native FOCUS cost exports with resource inventory,
+Advisor recommendations and operational metrics.
 
-You deploy it once into a subscription of your choice, grant it three read/cost-management role assignments on the subscriptions you want it to analyze, and it takes care of the rest: creating the native cost exports, scheduling the rolling monthly and daily pulls, and rendering the dashboards below.
+**This branch is `feature/private-postgres-assessments`.** Its recommended deployment
+keeps the original dashboard and uses **Blob export landing, private PostgreSQL
+serving and isolated background processing**. The customer service-principal/no-login
+proposal is not implemented here; Microsoft Entra sign-in remains required.
 
-> This is a reference deployment intended for a single organization/tenant to run for itself. It is not a multi-tenant SaaS product — every deployment is isolated to the Azure subscription it's installed into.
+Application baseline verified on 28 October 2026:
+`78233051bdfcb2b75cdbba7ed1a5cc07ed08f690`. Later documentation-only changes do not
+represent a new application deployment or a new customer-load certification.
 
 ## Contents
 
-- [What it does](#what-it-does)
+- [Features](#features)
 - [Architecture](#architecture)
-- [Scalable assessments](#scalable-assessments)
-- [System design](#system-design)
-- [Dashboards and tabs](#dashboards-and-tabs)
-- [Prerequisites](#prerequisites)
-- [Deploying to Azure](#deploying-to-azure)
-- [The three manual role assignments](#the-three-manual-role-assignments)
-- [Local development](#local-development)
-- [Security notes](#security-notes)
+- [Before deployment](#before-deployment)
+- [Deploy the PostgreSQL configuration](#deploy-the-postgresql-configuration)
+- [Access and export onboarding](#access-and-export-onboarding)
+- [Configuration](#configuration)
+- [Verification and recovery](#verification-and-recovery)
+- [Scale validation](#scale-validation)
+- [Local development and tests](#local-development-and-tests)
+- [Security and operating boundaries](#security-and-operating-boundaries)
 
-## What it does
+## Features
 
-- **Reads, never writes billing data.** All cost figures come from Azure's own native FOCUS 1.2-preview cost export — the same export format used by FinOps toolkit customers — so the numbers reconcile with your Azure invoice.
-- **Sets itself up.** Once the required roles are visible to its managed identity, the app creates the native exports (closed months plus a daily month-to-date export) and a rolling schedule of 3–6 months; you do not hand-configure Cost Management exports yourself.
-- **Assesses resources, not just spend.** It cross-references billed cost with resource inventory, Azure Advisor, Azure Monitor metrics, and SQL/compute/storage/network signals to flag idle and overprovisioned resources.
-- **Explains itself.** The one-command AI rollout includes the Microsoft Foundry Model Router-backed chatbot, grounded in deterministic report evidence. The separate hosted-agent executive-summary narrator remains optional and disabled by default.
-- **Stays inside your tenant.** Authentication is delegated Microsoft Entra ID sign-in; the API validates a bearer token issued for itself. The browser never receives an Azure Resource Manager token, and the app never requests Entra admin consent.
+- **Original report UI:** 19 pages with shared scope, date, currency, theme and
+  density controls; search, charts and resource drilldowns remain available.
+- **Billing evidence:** FOCUS 1.2-preview exports, daily resource costs, 3-6 closed
+  months of history and a daily month-to-date pull through yesterday. EffectiveCost
+  is the assessment basis; it is not an unconditional invoice-reconciliation claim.
+- **Optimization evidence:** compute, storage, network, Azure SQL and AI findings,
+  with verified costs, estimates and missing evidence distinguished.
+- **Exports and reports:** operator-controlled native export setup/scheduling,
+  full/executive/chargeback/compliance/FinOps downloads, custom reports and filtered
+  cost downloads. Email links require separately configured email delivery.
+- **Budgets and actions:** budget reads and authorized create/update/delete
+  operations, plus versioned FinOps action tracking. This full-feature mode is not
+  a read-only deployment.
+- **Chat:** the recommended deployment includes a private Foundry Model Router
+  chatbot grounded in bounded report evidence. The separate hosted-agent executive
+  narrator remains disabled unless explicitly configured and approved.
+
+### Navigation
+
+The top-level views are **Report**, **Chat** and **Schedules**.
+
+| Report area | Pages |
+|---|---|
+| Dashboard | Executive Summary |
+| Cost Management | Subscription Breakdown; History; Cost by Hour; Cost by Tags/Application; EA Pricing; Rate Optimization; Cost Anomalies; Budgets |
+| Resources | Stale Resources; Governance & Risk |
+| Analytics | Advisor Reconciliation |
+| Recommendations | Savings Roadmap; Compute Optimization; Storage Optimization; Network Optimization; Azure SQL Optimization; AI Optimization |
+| Reports | Action Plan |
 
 ## Architecture
 
-The diagram below describes the Blob compatibility path. New infrastructure
-configurations default to the private PostgreSQL/background path described next.
-
 ```mermaid
 flowchart TB
-    subgraph User["Your organization"]
-        Browser["Browser (Entra-signed-in user)"]
-    end
-
-    subgraph Azure["Your Azure subscription"]
-        subgraph CAE["Container Apps environment"]
-            Web["Web container<br/>(static SPA + nginx, public HTTPS)"]
-            API["API container<br/>(FastAPI, internal ingress only)"]
-        end
-        Processor["Processor container<br/>(scheduled export runner, opt-in)"]
-
-        subgraph Identities["Managed identities"]
-            ApiMI["API identity"]
-            ProcMI["Processor identity"]
-        end
-
-        ADLS["ADLS Gen2 storage<br/>control-state + cost-exports containers"]
-        CM["Azure Cost Management<br/>native FOCUS export"]
-        Foundry["Microsoft Foundry project<br/>(AI narration + chat, opt-in)"]
-        Targets["Target subscriptions<br/>(Reader / Cost Management Contributor)"]
-    end
-
-    Entra["Microsoft Entra ID"]
-
-    Browser -- "delegated access_as_user token" --> Web
-    Web -- "/api reverse proxy" --> API
-    Browser -. "sign-in" .-> Entra
-    API -. "validate bearer token" .-> Entra
-    API == "ManagedIdentityCredential" ==> ApiMI
-    ApiMI -- "Reader + Cost Mgmt Contributor" --> Targets
-    ApiMI -- "read/write schedule metadata" --> ADLS
-    ApiMI -- "create/verify export" --> CM
-    Processor == "ManagedIdentityCredential" ==> ProcMI
-    ProcMI -- "Cost Mgmt Contributor" --> Targets
-    ProcMI -- "run monthly export + checkpoints" --> ADLS
-    CM -- "FOCUS CSV/gzip files" --> ADLS
-    API -- "stream + parse FOCUS files" --> ADLS
-    API -. "optional narration/chat" .-> Foundry
+    Browser["Browser / Entra-signed-in user"] --> Web["Public HTTPS web / nginx"]
+    Web --> API["Internal FastAPI service"]
+    API --> SQL["Private PostgreSQL / serving + durable jobs"]
+    API --> ARM["Authorized Azure reads and explicit controls"]
+    API --> Foundry["Private Foundry / Model Router Chat"]
+    Scheduler["Scheduled processor / every 5 minutes"] --> Exports["Native monthly + daily FOCUS exports"]
+    Scheduler --> SQL
+    Exports --> Blob["Private Blob endpoint / raw exports + archives"]
+    Worker["Isolated assessment worker"] --> Blob
+    Worker --> ARM
+    Worker --> SQL
+    Builder["Private build VM / deployment only"] --> ACR["Private Premium ACR"]
+    ACR --> Web
+    ACR --> API
+    ACR --> Worker
 ```
 
-**Deployable profiles.** The Bicep template is additive across three profiles, so you only provision what you plan to use:
+### Serving and processing
 
-| Profile | Adds | Use it when |
-| --- | --- | --- |
-| `core` | Network, Container Apps environment, registry, logging, API/web managed identities | You just want the foundation up, or you're not ready to run exports yet |
-| `data` | HNS-enabled ADLS Gen2 storage, private Blob/DFS endpoints, container-scoped data roles, the processor identity | You want the app to create exports and run the rolling monthly and daily pulls |
-| `ai` | A private Foundry account/project and model deployments | You want the executive-summary narrative and the Chat tab |
+1. Native Cost Management exports land in Blob Storage. Blob remains the raw-data
+   and archive layer; it is not the normal dashboard report-serving path.
+2. The API queues durable PostgreSQL jobs instead of building large assessments in
+   a request. The worker streams/spools inputs and runs assessments in supervised
+   subprocesses with row, byte, time and memory safeguards.
+3. Only complete, lease-fenced publications become visible. PostgreSQL stores
+   summaries, normalized daily costs, indexed detail records and bounded Chat
+   evidence. Existing completed reports remain available during refresh.
+4. The original UI uses bounded SQL projections. Financial totals and counts cover
+   the complete authorized result, not just the visible detail page.
+5. Full/custom/filtered report generation runs in background jobs using SQL
+   snapshots. The API streams stored output chunks rather than rendering a large
+   workbook in a dashboard request.
 
-Each profile is a superset of the previous one. Application containers only deploy once you supply built image references (see [Deploying to Azure](#deploying-to-azure)); the AI runtime and processor stay disabled until you explicitly enable them, even after the underlying infrastructure exists.
+The API separates dashboard-read and work admission/connection budgets. Immutable
+projection caches are bounded; authorization is checked before cached responses
+are returned. Full queues and capacity failures return explicit errors rather than
+partial financial totals or a synchronous Blob-processing fallback.
 
-## Scalable assessments
+### Identity and networking
 
-**Operator-run deployment:** use the
-[private-ACR/private-PostgreSQL manual rollout](docs/manual-scalable-deployment.md).
-For Central India without an existing private Docker host, use
-[the one-command end-to-end script with a private build VM](docs/manual-staged-deployment.md):
+The browser obtains a delegated token for this API, not an ARM access token.
+The API validates the token and checks the signed-in user's supported subscription
+access. Backend Azure calls use explicit user-assigned managed identities.
+
+- PostgreSQL, ACR and Foundry use private endpoints. PostgreSQL password
+  authentication and public network access are disabled.
+- A dedicated manual bootstrap job holds the PostgreSQL Entra administrator
+  identity. API and worker database roles are not administrators.
+- The web service is public HTTPS; API ingress is internal and the assessment
+  worker has no ingress. Private dependencies do not make the entire website private.
+- The build VM exists to build/push images to private ACR. It is not required for
+  dashboard requests or assessments and has no VM public IP or inbound access.
+  Its NAT gateway provides approved outbound connectivity.
+
+## Before deployment
+
+Use the [staged deployment guide](docs/manual-staged-deployment.md) for individual
+stages or the [existing private-builder alternative](docs/manual-scalable-deployment.md)
+when using your own approved build host. The procedure below is the recommended
+new PostgreSQL deployment.
+
+### Required tools and permissions
+
+- PowerShell **7.4+**, Git, Azure CLI with Container Apps support, AZD **1.35+**
+  and OpenSSH `ssh-keygen`. No Docker installation or VPN is required on the
+  management laptop for the VM build path.
+- An operator authorized to create hosting resources and assign roles at the
+  approved hosting and target-subscription scopes.
+- Entra authority to configure the two single-tenant app registrations and
+  federation. Tenant policy may require administrator consent or an approved
+  Service Tree ID; the script cannot bypass either requirement.
+- Test the intended users' subscription authorization. Group-only, custom-role or
+  management-group grants are not a blanket guarantee of support by the app's
+  conservative authorization checks.
+- Hosting and target subscriptions in the supported single-tenant configuration.
+  Check Cost Management export eligibility and billing access for each subscription.
+- Sufficient Central India PostgreSQL/ACA/VM capacity and East US 2 quota for the
+  exact approved Model Router deployment. Check current availability, policy and
+  data-residency requirements; do not assume another tenant has the same quota.
+
+Register `Microsoft.CostManagementExports` in the subscription hosting the export
+destination if it is not already registered. Other required providers must also
+be registered through the customer's approved provisioning process:
 
 ```powershell
-.\scripts\deploy-end-to-end.ps1 -EnvironmentName meghkoshaai-scalable-dev -SubscriptionId '<hosting-subscription-uuid>'
+az provider show --namespace Microsoft.CostManagementExports `
+    --subscription '<hosting-subscription-uuid>' --query registrationState --output tsv
+
+# Authorized administrator only, if registration is missing:
+az provider register --namespace Microsoft.CostManagementExports `
+    --subscription '<hosting-subscription-uuid>'
 ```
 
-It handles sign-in, one upfront scope/cost approval, local builder-key creation,
-private provisioning/build/bootstrap, identity/grants, release, verification and
-builder deallocation. Individual stage commands are optional, not required.
-It also retains the **Model Router chatbot**: the AI profile is provisioned with
-`-FoundryLocation eastus2` by default, private endpoints and managed-identity model
-access. Foundry region/model availability is checked before provisioning. The
-separate hosted-agent narrator remains opt-in and disabled by default.
-The assistant does not execute provisioning, deployment, bootstrap, permission
-changes or workflow runs. Review the published feature branch and exact commit
-before following the operator-run rollout.
+### Operating approvals
 
-**Deployment hold:** this feature is prepared on
-`feature/private-postgres-assessments`. It does not lift the existing Dev
-environment-layout hold or authorize provisioning, identity changes, or deployment.
+Review network/address-space policies, private DNS, builder outbound feeds, Blob
+trusted-service ingress and ongoing costs before proceeding.
 
-The new path is **Blob exports -> isolated assessment worker -> private PostgreSQL
-summaries and indexed detail records -> bounded API/dashboard reads**. PostgreSQL
-is also the durable job queue; no assessment uses FastAPI in-process background
-tasks. Existing completed results remain available while their replacement runs.
+**Resolve automatic shutdown rules before customer handover.** A governance
+application can explicitly stop PostgreSQL even while the containers remain
+running. Obtain an approved always-on exception if needed; do not invent exemption
+tags, remove governance access or implement an unapproved restart loop.
 
-| AZD environment setting | Default | Purpose |
-| --- | --- | --- |
-| `APP_ASSESSMENT_MODE` | `postgres` | `postgres` or explicit `blob` compatibility mode |
-| `APP_PRIVATE_REGISTRY` | `true` in PostgreSQL mode | Private ACR is enforced for scalable deployments; admin access and public network access stay disabled |
-| `APP_REGISTRY_BUILD_MODE` | `private-runner` in PostgreSQL mode | Private Docker build host, or explicitly selected `managed-pool` in a supported region |
-| `APP_POSTGRES_SKU` / `APP_POSTGRES_TIER` | `Standard_D2ds_v5` / `GeneralPurpose` | Database sizing; validate regional SKU capacity before deployment |
-| `APP_POSTGRES_VERSION` / `APP_POSTGRES_STORAGE_GB` | `16` / `128` | Database version and storage |
-| `APP_ASSESSMENT_WORKER_CPU` | `4.0` | `1.0`, `2.0`, or `4.0`; paired with 2, 4, or 8 GiB |
-| `APP_ASSESSMENT_WORKER_REPLICAS` | `1` | Fixed bounded concurrency, 1-4 isolated replicas |
-| `APP_ASSESSMENT_POOL_SIZE` / `APP_ASSESSMENT_QUEUE_CAPACITY` | `5` / `50` | Total API connection budget (read 3/work 2 by default), per-worker-process pool limit, and total active-job admission limit |
-| `APP_ASSESSMENT_LIMITS` | `{}` | Numeric overrides: `inputBytes`, `spoolBytes`, `expandedBytes`, `csvRows`, `historyRows`, `inventoryRows`, `timeoutSeconds`, `leaseSeconds`, `maxAttempts`, `pageSize`, `responseBytes`, `recordBytes`, `inlineRows`, `apiConcurrency`, `interactiveRows`, `workConcurrency`, `readPoolSize`, `armIntervalMs`, `graphIntervalMs`, `metricsIntervalMs`, `costIntervalMs`, `azureGetRetries`, `detailRows`, `detailPoints` |
-| `SERVICE_ASSESSMENT_IMAGE_NAME` | API image | Reviewed immutable image used by worker and bootstrap job |
-| `APP_ASSESSMENT_FOUNDATION_ONLY` | `false` | Stage database/bootstrap without changing application resources |
-| `APP_ASSESSMENT_DB_BOOTSTRAPPED` | `false` | Explicit operator attestation required before application release |
+The default PostgreSQL server is not configured for high availability. Review
+backup, recovery, availability and retention requirements before treating this
+reference configuration as a production service.
 
-Enabling PostgreSQL adds data infrastructure even with the `core` profile; use
-`APP_ASSESSMENT_MODE=blob` for the original foundation-only footprint. Unconfigured
-existing API runtimes continue in Blob mode until deliberately redeployed with
-`ASSESSMENT_MODE=postgres`; no existing AZD environment is modified automatically.
+## Deploy the PostgreSQL configuration
 
-### Private networking and passwordless bootstrap
+### 1. Use the correct branch and customer context
 
-PostgreSQL public network access and password authentication are disabled.
-Its private endpoint and private DNS zone are linked to the Container Apps VNet.
-Connections validate TLS hostname/certificates and request an Entra token through
-the selected managed identity for every new pooled connection.
-
-The dedicated bootstrap identity is the Entra database administrator and is attached
-only to a **manual** bootstrap job, never to the API or assessment worker. The API
-uses `meghkosha_api`; the worker/scheduler uses `meghkosha_worker`. Bootstrap verifies
-principal object IDs and creates schema/least-privilege database grants.
-
-After separate deployment approval:
-
-1. Preview and provision the private foundation with
-   `APP_ASSESSMENT_FOUNDATION_ONLY=true`, leaving application images unset for a new
-   environment. ACR Premium/private endpoint and PostgreSQL are created first.
-2. From the approved private build path, publish reviewed images containing this
-   branch's source and dependencies. Set the immutable assessment image digest and
-   provision the manual bootstrap job, still in foundation-only mode.
-3. Explicitly start the `ASSESSMENT_BOOTSTRAP_JOB` from inside the existing ACA
-   environment. Verify completion, private DNS resolution, TLS, and both runtime
-   identity permissions. No public database firewall exception is required.
-4. Grant the worker identity Reader and the required cost-read permissions on each
-   assessed subscription through the existing governed onboarding process. The
-   shared export processor additionally retains its existing cost-export grants.
-5. Only after verification set `APP_ASSESSMENT_DB_BOOTSTRAPPED=true`, clear the
-   foundation-only flag, and release the reviewed API/web/worker images through
-   the Bicep provisioning flow. Direct `azd deploy` remains disabled by existing
-   preflight policy. Re-run manual bootstrap for reviewed schema migrations.
-
-The API readiness probe checks the database schema independently of liveness.
-Database unavailability produces a retryable service error, never a zero-cost
-success or a fallback to synchronous assessment generation.
-
-### Large-data behavior and compatibility
-
-- `POST /api/report` returns **202** with a durable job ID. Same-scope requests
-  coalesce; full queues return **429** with `Retry-After`.
-- Jobs use atomic claims, expiring leases, fenced publication, bounded retries,
-  cancellation, and a supervised subprocess per worker. Only complete assessments
-  become visible. Browser reconnects resume job-status observation.
-- Worker CSV downloads are chunked to temporary files. CSV decompression is
-  streamed and the two-pass tag-attribution buffer is disk-spooled. Row, byte,
-  history, inventory, elapsed-time, and worker-memory safety budgets fail explicitly.
-  The supervisor owns and cleans each job workspace, including after child
-  termination. Cumulative spooling is capped at 2/4/6 GiB for 1/2/4 CPU workers.
-- Retained history uses bounded JSONL segments per billing period and replayable
-  sequences, not a raw-row list spanning all months. Commitment calculations
-  replay closed periods instead of retaining another full copy. PostgreSQL detail
-  defaults allow 50,000 output series/5,000,000 daily points; beyond configured
-  output capacity, detail availability is explicit and headline totals stay complete.
-- Fast summary/job metadata reads have separate admission from new work and
-  expensive operations. The API reserves three of its five database connections
-  for those reads by default; work cannot consume that reserved pool.
-- Worker Azure calls share PostgreSQL pacing/cooldown state across replicas:
-  Resource Graph is identity-scoped, metrics and other ARM classes are
-  conservatively subscription-scoped. Safe GET retries honor provider Retry-After
-  headers with jitter; mutating POSTs are not blindly replayed. These cadences
-  are configurable safeguards, not guarantees of Azure quota availability.
-- Detail search uses `pg_trgm`/GIN with literal substring matching and requires
-  three characters. Scope/ID lookups use explicit indexed predicates instead of
-  generic nullable-filter plans; history catalogs bound candidates per scope.
-- Dashboard startup reads a bounded complete summary, not raw FOCUS or a full
-  snapshot. Detail collections use stable cursor pagination and bounded responses.
-  Complete totals are never recomputed from only the visible page.
-  PostgreSQL reports retain all positive-cost resource rows for pagination rather
-  than inheriting the Blob renderer's historical top-200 cost-hierarchy limit.
-- Immutable SQL projection responses use a per-API-process LRU capped at 16 MiB
-  and 256 entries. Tenant/snapshot/query keys are separate, authorization is
-  rechecked before every hit, and responses remain private/no-store. This bounds
-  memory while avoiding repeated million-row aggregation for warm dashboard reads.
-- PostgreSQL mode keeps the original dashboard, all 19 report pages, navigation,
-  styling, filters, charts, drilldowns, budgets, actions and Chat. There is no
-  replacement workspace or small-report-only classic mode. The same components
-  use bounded SQL projections for complete totals, filtered groups, daily series
-  and progressively loaded resource evidence. They never calculate financial
-  totals from only the visible page or hydrate a complete large report in the browser.
-- Original full/custom/filtered report downloads run as durable background jobs.
-  Only the isolated worker reconstructs complete report models, from PostgreSQL.
-  Files are published as SQL chunks and streamed by the API; existing download
-  controls wait for completion. Anomaly evidence, audited actions and schedule
-  control state are also served from PostgreSQL. The rejected alternate
-  `/api/assessments/snapshots/{snapshotId}/interactive` endpoint returns HTTP 410.
-- Native FOCUS files and immutable snapshots remain in Blob Storage. PostgreSQL
-  publication does not advance Blob compatibility pointers for cancelled/unfinished
-  jobs.
-- The worker precomputes compact Chat evidence with complete score/history/
-  subscription facts, exact top-25 positive-cost resources and complete unattached-
-  disk totals plus at most 25 details. The API checks the snapshot's tenant/scope
-  before retrieving that bounded SQL payload. The model never generates SQL or
-  calculates financial amounts. Chat labels limited resource listings and explicit
-  deterministic fallback if the model is unavailable.
-- Schema upgrades require private bootstrap plus a new background assessment for
-  versioned SQL dashboard and Chat evidence. Old snapshots return an explicit rebuild message rather
-  than loading all data into the API.
-
-The initial acceptance workload is **15,000 resources and 1,000,000 FOCUS rows per
-subscription, 10 concurrent readers, warm summary p95 <= 2 seconds**. Local synthetic
-tests are not evidence of Azure end-to-end latency or deployed crash freedom.
-Regional quota/SKU availability, private connectivity, real Entra token renewal,
-worker restart recovery, and container restart counts require a separately approved
-Dev deployment/load test. There is no unlimited-load guarantee.
-
-UI-preserving correction checks use PostgreSQL 16.15 and the original main UI.
-All 19 pages match the original fixture-driven report in dark/light browser
-checks; captured executive, subscription and SQL views are pixel-identical.
-The million-row/15,000-resource retained-history gate publishes **915,000 daily
-points** atomically while ten readers remain active: **9,090 reads**, summary
-p95 **0.059 seconds**, and pipeline peak working set approximately **412 MiB**.
-Complete SQL cost metrics over that actual snapshot measured **1.42 seconds**
-uncached and **0.20 seconds p95** with ten warm readers, using a two-connection
-operation pool; authorization was rechecked on every request.
-The separate million-row anomaly gate preserves the original detector results
-with peak working set approximately **176 MiB**. Bulk facts use bounded COPY
-batches inside one fenced atomic publication.
-The bootstrap-owned fixed statistics-maintenance function is executable only by
-the worker, not the API or PUBLIC. It analyzes new rows before bulk foreign-key
-checks and before publication, preventing empty/stale-table estimates from
-selecting a prefix-only index for every daily charge. Runtime identities still
-have no schema/table-ownership or DDL rights.
-These synthetic checks do not replace authenticated Azure/customer-data acceptance.
-
-The backend regression suite passed 826 tests; the two opt-in PostgreSQL/scale
-tests passed separately. All 270 available frontend tests and the production
-build passed. One pre-existing unavailable untracked sidebar test was excluded
-only in temporary local validation configuration, not removed from the project.
-
-The private-ACR/throttling follow-up passed **837 backend tests**, **271 available
-frontend tests**, template/type/production-build checks, and **four separately
-enabled PostgreSQL/scale gates**. A retained-history fixture with one million rows
-over 61 days kept all 15,000 resource series and 915,000 daily points; local read
-p95 during publication was about 0.07 seconds, with a pipeline working-set peak
-around 425 MiB. Azure authorization/ARM were mocked. These results do not replace
-the operator-run private-network and ACA load/restart checks in the manual guide.
-
-To run the isolated SQL/scale gates, set `ASSESSMENT_TEST_DSN` to a **dedicated
-loopback database named `meghkosha_test`**, set `ASSESSMENT_RUN_SCALE_TESTS=1`, and run
-`python -m pytest tests\test_assessment_postgres.py -q -s` from the API directory.
-These tests reset their fixture tables; never point them at customer data.
-
-The subsequent Chat-restoration regression cycle passed 855 backend tests and
-272 available frontend tests. The focused real-PostgreSQL checks also verified
-15,000-resource bounded Chat evidence, tenant/scope isolation and no Blob download.
-Actual Foundry inference/private connectivity remains an operator-run check;
-the model tests used fake responses and no Azure deployment was executed.
-
-## System design
-
-**Identity and authorization.** The single-page app requests only its own API's `access_as_user` delegated scope from Entra ID — never an Azure Resource Manager scope. The API independently validates that bearer token's issuer, audience, tenant, and client before trusting it. Azure-side calls (discovering subscriptions, reading resources, creating exports) are made with the API's own **user-assigned managed identity** via `ManagedIdentityCredential`, then filtered against the signed-in user's own Azure RBAC role on each subscription — so a user only ever sees subscriptions they themselves have access to, not everything the identity can reach.
-
-**Export creation and scheduling.** Once a target subscription's Reader and Cost Management Contributor grants are visible to the API identity, opening **Schedules** automatically creates two native FOCUS exports (CSV/gzip, partitioned, overwrite-enabled) in the deployment's own storage account — closed months under `cost-exports/focus/` and daily month-to-date snapshots under `cost-exports/focus-daily/` — and saves an active schedule — no manual export configuration step is required. Each schedule keeps 3–6 closed months of history (default 6; anomaly detection needs at least 60 days). **Export** re-pulls that whole window. On the schedule's monthly day the worker pulls only closed months that have no copy taken after Azure finalized them (Azure adds late charges for up to 72 hours after a month ends), which is normally just the month that closed. Every day after the schedule's UTC daily-pull time it also pulls the current month through yesterday, plus last month during the first five days. A separate **processor** identity (kept intentionally distinct from the API identity) runs these export executions every 5 minutes (`APP_PROCESSOR_CRON`), checkpointing progress per subscription so a restart or a missed tick doesn't re-run months that already succeeded. A month that finishes is followed by the next one in the same tick; throttled requests wait as long as Azure asks (1–15 minutes) without counting as failures, and `APP_EXPORT_PARALLEL_MONTHS` (default 1) sets how many months run at once.
-
-**Retention.** Storage lifecycle rules delete daily snapshots after 60 days (`APP_DAILY_EXPORT_RETENTION_DAYS`) and closed-month files after 214 days (`APP_CLOSED_MONTH_RETENTION_DAYS`, at least 190 so the longest 6-month window is always covered). Reports read history from the files that remain: the month to date appears in daily views as an estimate and is left out of monthly totals until the month closes.
-
-**Report generation.** The API streams each month's compressed FOCUS CSV directly from ADLS, validates its schema and row shape against the delivery manifest, and reconciles it with a live resource inventory, Azure Advisor recommendations, and (where enabled) Azure Monitor metrics before rendering the dashboards below.
-
-**Foundry AI (optional).** The `ai` profile provisions a private Foundry account/project. `APP_ENABLE_CHAT_RUNTIME=true` uses that app's own approved `model-router` deployment to narrate grounded Chat answers from deterministic API and FOCUS evidence; amounts and rankings remain application-computed. The separate `APP_ENABLE_AI_RUNTIME` switch controls only the hosted-agent Executive Summary narrator. Either path can fall back without blocking the dashboard.
-
-**No silent write access.** The app's managed identities only ever hold Reader and Cost Management Contributor roles that you grant explicitly (see below). It has no ability to modify budgets, resources, or IAM outside of the one disclosed, narrowly-scoped side effect of creating its own cost export.
-
-## Dashboards and tabs
-
-The app has three top-level views — **Report**, **Chat**, and **Schedules** — reachable from the top navigation bar. **Report** has a left navigation rail fixed beneath the app header: it stays in place while the report scrolls and runs from just below the logo to the bottom of the window. Every area starts open (a closed area stays closed until its own page opens), **Find a page** searches every page by name or area, and the rail collapses to icons (remembered between visits). Below 900px it becomes one **Report pages** menu above the report. The grouped pages are:
-
-| Group | Pages | What you'll find there |
-| --- | --- | --- |
-| **Dashboard** | Executive Summary | The narrated (or plain, if AI is disabled) top-line summary: total spend, trend, and the highest-priority findings across the whole assessment. |
-| **Cost Management** | Subscription Breakdown, History, Cost by Hour, Cost by Tags, EA Pricing, Rate Optimization, Cost Anomalies, Budgets | Where the money actually went: cost split by subscription, historical trend, hourly granularity, tag-based cost attribution, EA/negotiated pricing context, Reservation/Savings Plan coverage, anomaly detection against expected spend, and budget tracking. |
-| **Resources** | Stale Resources, Governance & Risk | Inventory-driven findings: unattached disks, stopped VMs, idle gateways, orphaned NICs, and similar candidates for cleanup, plus governance/policy and tagging risk signals. |
-| **Analytics** | Advisor Reconciliation | Cross-checks the app's own findings against Azure Advisor's own recommendations, so you can see where the two agree (or don't) and why. |
-| **Recommendations** | Savings Roadmap, Compute Optimization, Storage Optimization, Network Optimization, Azure SQL Optimization, AI Optimization | Domain-specific rightsizing and elimination recommendations, each backed by either verified billed cost, Advisor's own estimate, or Azure Monitor-verified idle metrics — the evidence type is always shown next to the number. |
-| **Reports** | Action Plan | A consolidated, exportable list of every recommended action across all domains, prioritized and ready to hand to whoever owns remediation. |
-
-The **Executive Summary** keeps monthly headline metrics separate from the selected-period comparison. **Spend Distribution** shows the monthly trend, subscription treemap and regional map together, with subscription drilldown available directly. **Operational signals**, **Top Azure services** and **Prioritised findings** are visible front-page sections, not disclosures. The resource-type donut and anomaly preview are omitted; the dedicated **Cost Anomalies** page remains available. **Daily subscription amounts** starts expanded on this page, with each subscription's ID beneath its name. Selecting a day reveals its resource detail in Cost Comparison. Report context remains available without repeating the headline figures; the separate **Report details** disclosure has been removed.
-
-The shared presentation finish lives in `web/src/polish.css`: layered surfaces, quiet structural borders, consistent segmented controls and navigation, and stronger headline figures. Tables share compact rows, sticky headers and row highlighting; the Executive Summary budget table can be searched and filtered by status, and flags budgets still within limit that Azure forecasts to overrun. It uses the existing brand and theme tokens, supports both density settings, and respects reduced motion and touch targets without changing report calculations.
-
-The landing page follows a single layout rhythm: overview, comparison, distribution, evidence, budgets and daily detail. The overview combines selected-period spend, previous-period spend, assessed-month wastage, assessed-month savings and cost spikes into five financial cards; the comparison chart does not repeat them. Period figures follow the filters, with assessed-month context shown when the selection differs. Services sit beside a compact signals/findings stack on wide screens; populated findings tables receive the full width. All sections share aligned headers and gutters, and the layout stacks on smaller screens.
-
-Comparison-chart dots show the subscription, selected and previous dates/costs, and absolute change on hover or keyboard focus. Escape dismisses the tooltip; clicking or pressing Enter/Space still opens the selected day's detail where available. Missing previous evidence stays explicitly unavailable.
-
-Two other top-level views round out the app:
-
-- **Chat** — ask follow-up questions about the current report in natural language (enabled by the `ai` profile and `APP_ENABLE_CHAT_RUNTIME=true`).
-- **Schedules** — see per-subscription export/schedule status, trigger the automatic setup described above, and pause, resume, or manually run a subscription's monthly cycle.
-
-## Prerequisites
-
-The subscription you deploy MeghKoshaAI **into** must have the [`Microsoft.CostManagementExports` resource provider](https://learn.microsoft.com/azure/azure-resource-manager/management/resource-providers-and-types) registered. Azure Cost Management uses it to reach the export destination storage account that this deployment creates. Register it once, before your first deployment:
+Run in PowerShell 7.4+. Replace every placeholder and use a new environment name.
+Do not copy another deployment's `.azure` directory, identities or credentials.
 
 ```powershell
-az provider register --namespace Microsoft.CostManagementExports --subscription <subscription-id>
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+
+$TenantId = '<customer-tenant-uuid>'
+$HostingSubscriptionId = '<hosting-subscription-uuid>'
+$TargetSubscriptionIds = @(
+    '<assessed-subscription-uuid-1>'
+    '<assessed-subscription-uuid-2>'
+)
+$EnvironmentName = 'meghkoshaai-customer-pg'
+
+git clone --branch feature/private-postgres-assessments --single-branch `
+    https://github.com/Saby007/MeghKoshaAI.git MeghKoshaAI-customer-pg
+Set-Location .\MeghKoshaAI-customer-pg
+git rev-parse HEAD
+git status --short
+
+az login --tenant $TenantId
+az account set --subscription $HostingSubscriptionId
+azd auth login --tenant-id $TenantId
+azd auth login --check-status
 ```
 
-Registration usually completes in under a minute. Confirm it reports `Registered` before deploying:
+Review the exact published commit. The builder requires a clean checkout and a
+public repository; documentation-only branch updates need not change an existing
+customer test pinned to the application baseline. To select that baseline in a
+new clean checkout, use:
 
 ```powershell
-az provider show --namespace Microsoft.CostManagementExports --subscription <subscription-id> --query registrationState -o tsv
+git switch --detach 78233051bdfcb2b75cdbba7ed1a5cc07ed08f690
 ```
 
-**Register the subscription that hosts the export destination storage account** — that is, the subscription you deploy this app into. The subscriptions you only *assess* do not need it, so a deployment can happily export cost data for an unregistered subscription as long as its own storage account lives in a registered one. Registering requires **Contributor** or **Owner** on that subscription.
-
-> Creating an export in the Azure portal registers this provider for you automatically, but MeghKoshaAI creates its export through the [Cost Management REST API](https://learn.microsoft.com/rest/api/cost-management/exports/create-or-update), which does not. If the provider is missing, Azure rejects the export-creation call with `400 Bad Request`, the **Schedules** tab shows **Export status unavailable** with *"FOCUS export configuration could not be confirmed"*, and no export is ever created — regardless of how correct your role assignments and storage firewall settings are. Registering the provider and then using **Refresh schedules** resolves it; nothing needs redeploying.
-
-## Deploying to Azure
-
-**New PostgreSQL deployments use private ACR and the
-[one-command private-builder rollout](docs/manual-staged-deployment.md).**
-The default `deploy-end-to-end.ps1` runs its stages automatically. Do not call
-`azd up` or `azd deploy` directly. The sections below describe the separate Blob
-compatibility workflow, selected explicitly with `-AssessmentMode blob`.
-
-There are three ways to deploy: one command that does the whole thing, the step-by-step Azure Developer CLI workflow, or a portal-button path (ARM/Bicep templates can only reference already-built container images — they cannot build code from a repository by themselves).
-
-### Option 1 — One command, end to end (recommended)
-
-`scripts/deploy-end-to-end.ps1` is this entire page in a single self-contained script: clone, sign in, environment settings, preview, the repeated `azd up` passes with automatic retries, the scheduled processor, `bootstrap-identity.ps1` plus the client-ID redeploy, and the three role assignments on every subscription you name. When it finishes, the app is deployed, sign-in works, and the subscriptions you listed are ready to assess — no manual follow-up steps.
-
-Requires [git](https://git-scm.com/), the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/), the [Azure CLI](https://learn.microsoft.com/cli/azure/), **PowerShell 7+** (`pwsh`), and the [provider registration above](#prerequisites).
+### 2. Review and execute the existing entry point
 
 ```powershell
-git clone https://github.com/Saby007/MeghKoshaAI.git
-cd MeghKoshaAI
-azd auth login
-pwsh ./scripts/deploy-end-to-end.ps1 `
-  -EnvironmentName my-environment `
-  -Location centralindia `
-  -FoundryLocation eastus2 `
-  -TargetSubscriptionId '<subscription-id>,<another-subscription-id>'
+$deployment = @{
+    EnvironmentName = $EnvironmentName
+    AssessmentMode = 'postgres'
+    SubscriptionId = $HostingSubscriptionId
+    TargetSubscriptionId = ($TargetSubscriptionIds -join ',')
+    Location = 'centralindia'
+    FoundryLocation = 'eastus2'
+    PrivateRegistry = $true
+    BlobDataProtection = $true
+    BuilderVmSize = 'Standard_D2s_v5'
+}
+
+# Add only if the tenant requires an approved Service Tree ID:
+# $deployment.ServiceManagementReference = '<approved-service-tree-uuid>'
+
+.\scripts\deploy-end-to-end.ps1 @deployment -PlanOnly
+
+# Run only after reviewing the plan, customer context, permissions and costs:
+.\scripts\deploy-end-to-end.ps1 @deployment
 ```
 
-`-TargetSubscriptionId` takes a comma-separated list (or several values) so one run can grant access to every subscription you want to assess; omit it and only the subscription you deploy into is granted. The deployment subscription itself defaults to the Azure CLI's current one — pass `-SubscriptionId` to deploy somewhere else. The script pins that subscription into the azd environment and into every `az` lookup, so no step stops to prompt you halfway through a long run.
+`PlanOnly` makes no Azure calls: it is not a quota, policy or ARM what-if check.
+The execution path previews provisioning and asks for one explicit rollout
+approval. It then initializes, provisions, builds/pushes private images, bootstraps
+the database, configures sign-in and target grants, releases immutable images,
+verifies basic readiness and deallocates the builder.
 
-**Expect the run to take roughly 30–60 minutes, and expect it to retry itself.** A brand-new environment reliably hits one or more of [the four known transient errors](#known-transient-azd-up-errors) — the Foundry account still settling in `Accepted`, the container images landing after infrastructure planning, a still-active ARM deployment, or the ACR data plane lagging behind its AcrPull grant. The script recognizes each one, applies the documented fix (including switching to `APP_REUSE_AI_ACCOUNT=true`), waits, and retries. Warnings like *"The AI Foundry account is still settling"* are normal progress, not failures. Raise `-MaxAttempts` (default 3) if a slow subscription needs more passes.
+`-SkipLogin` is optional and is omitted above. Without it, existing Azure/AZD
+sessions are checked and login is requested when needed; it does not affect the
+application's sign-in screen. `-ApproveAll` is only for separately approved
+unattended execution.
 
-Every phase is idempotent, so a run that stops partway can simply be rerun — it redeploys the current code once and then skips whatever is already settled, without deleting the environment. Because the run is long, prefer a terminal that won't be closed or recycled underneath it.
+**Do not use raw `azd up`, `azd deploy`, the Blob-mode helper or mutable `:latest`
+images for this PostgreSQL flow.** Legacy compatibility flags such as
+`-SkipProcessor`, `-SkipIdentityBootstrap`, `-SkipPreview`, `-MaxAttempts` and
+`-SkipModelAvailabilityCheck` are not a PostgreSQL retry/skip mechanism.
 
-**The run never waits on a question you can't see.** Every `azd` command runs with `--no-prompt`, so a new environment is created and becomes the folder's default azd environment without asking. If `azd` still needs an answer, the script reruns that command in the terminal so you can answer it. If your tenant requires a Service Tree ID on the sign-in app registrations, the script asks for it there too.
+The script resumes verified checkpoints for the same source; it does not guarantee
+automatic recovery from every provider-settlement error or perform an implicit
+upgrade of a released environment to a different source/schema. It also refuses
+the separately held `meghkoshaai-dev` environment. Do not copy restore/reuse or
+registration-migration flags into a fresh customer deployment.
 
-| Switch | Use it when |
-| --- | --- |
-| `-PlanOnly` | Print exactly what would happen without touching Azure. |
-| `-SubscriptionId` | Deploy into a subscription other than the Azure CLI's current one. |
-| `-Location` | Choose the region for the app, data and networking resources. |
-| `-FoundryLocation` | Choose the region for the AI Foundry account, project and Model Router. |
-| `-SkipModelAvailabilityCheck` | Deploy anyway when you are certain the regional catalogue is wrong. |
-| `-MaxAttempts` | Allow more `azd up` retries (default 3). |
-| `-SkipIdentityBootstrap` | A separate Entra administrator creates the app registrations. |
-| `-ServiceManagementReference` | Your tenant requires a Service Tree ID on app registrations. If you leave it out, the script asks when the tenant refuses, suggests the ID your existing registrations use, and remembers your answer. |
-| `-SkipRoleAssignments` | A subscription Owner grants the three roles separately. |
-| `-SkipProcessor` | Scheduled exports are intentionally out of scope. |
-| `-SkipPreview` | Skip `azd provision --preview` on a rerun you have already reviewed. |
+### 3. Complete export onboarding and acceptance
 
-#### Choosing regions
+Successful provisioning is not successful data ingestion. Complete the next
+section before running exports, then follow [verification](#verification-and-recovery).
+No new Azure deployment was performed to produce this README.
 
-The application and the Foundry account are placed independently, because **the approved Model Router deployment is not offered in every region** — `centralindia` runs the app perfectly well but offers no `model-router` at all, which is why `-FoundryLocation` defaults to `eastus2`.
+## Access and export onboarding
 
-Before provisioning anything, the script checks that the exact approved model, version and SKU exist in `-FoundryLocation`. If they don't, it stops immediately, names what is missing, lists what that region does offer instead, and creates nothing — rather than failing deep inside the Bicep run after the account and networking already exist. Check a region yourself with:
+### Required access
+
+| Identity or caller | Access | Scope / responsibility |
+|---|---|---|
+| Signed-in user | Supported subscription read access; operation-specific permission for controls | Subscriptions they are authorized to view/manage |
+| API MI | Reader **and** Cost Management Contributor | Each assessed subscription |
+| Processor/assessment MI | Reader **and** Cost Management Contributor | Each assessed subscription |
+| Monthly native export MI | Storage Blob Data Contributor | Owned `cost-exports` container |
+| Daily native export MI | Storage Blob Data Contributor, separately | Same owned `cost-exports` container |
+| API/web/processor/bootstrap MI | Appropriate AcrPull and Blob/Foundry grants | Owned resources, declared by infrastructure |
+| Builder MI | AcrPush | Owned ACR |
+| Dedicated DB bootstrap MI | PostgreSQL Entra administrator | Owned PostgreSQL server only |
+| API / worker SQL roles | Serving/control / background-publication grants | `meghkosha` database; no runtime DDL ownership |
+
+The staged Permissions step grants both runtime identities Reader and Cost
+Management Contributor: **four runtime assignments per assessed subscription**.
+It is not the old three-assignment setup. Creating budgets or exports is a write
+operation; this deployment must not be presented as Reader-only.
+
+The API also has explicitly provisioned setup permissions on its owned Storage
+scope. Review these grants. Subscription access, storage setup and native-export
+writer permissions are different authorization boundaries.
+
+### Configure, verify access, then run
+
+1. Sign in as an authorized setup operator and open **Schedules**.
+2. Use **Configure export**, review the fixed destination and explicitly approve
+   destination-role assignment. Verify both closed-month and daily definitions.
+   Merely opening or refreshing Schedules does **not** create them or a schedule.
+3. Before starting a schedule or pressing Export, verify both native identities'
+   destination grants. There must be **2 x N export writer bindings** for N
+   assessed subscriptions, in addition to the runtime assignments above.
+4. Allow propagation and verify a fresh native execution reaches **Completed**.
+   A role assignment appearing in ARM, an active schedule or a queued run is not
+   proof that Azure can deliver the files.
+5. Enable the app schedule with an understood UTC daily time and approved monthly
+   start. Use Export to request the closed-month backfill.
+
+Monthly and daily exports have different system-assigned identities. They are
+created in the assessed subscriptions, outside the app resource group. Deleting
+and recreating the app's Storage account can remove their destination grants
+while leaving the export definitions and old run history intact.
+
+**Re-audit both identities after any rebuild.** Configure export verifies existing
+definitions; it is not a blanket repair of missing grants on retained definitions.
+
+### Audit the actual customer bindings
+
+After both definitions exist, use the customer variables from the deployment
+session. This example is read-only and refuses a mismatched tenant/destination:
 
 ```powershell
-az cognitiveservices model list --location <region> --query "[?model.name=='model-router']"
+$state = azd env get-values --environment $EnvironmentName --output json |
+    ConvertFrom-Json -AsHashtable
+$StorageId = [string]$state.COST_EXPORT_STORAGE_RESOURCE_ID
+$ContainerScope = "$StorageId/blobServices/default/containers/cost-exports"
+$WriterRole = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+$exportNames = @([string]$state.COST_EXPORT_NAME, [string]$state.COST_EXPORT_DAILY_NAME)
+
+if (-not $TargetSubscriptionIds.Count -or
+    $state.AZURE_SUBSCRIPTION_ID -ne $HostingSubscriptionId -or
+    $state.AZURE_TENANT_ID -ne $TenantId -or
+    $StorageId -notmatch "^/subscriptions/$HostingSubscriptionId/resourceGroups/[^/]+/providers/Microsoft.Storage/storageAccounts/[a-z0-9]+$" -or
+    $exportNames[0] -eq $exportNames[1]) {
+    throw 'Environment or export destination does not match the approved customer.'
+}
+
+$bindings = @(
+    foreach ($subscription in $TargetSubscriptionIds) {
+        $subscription = ([guid]$subscription).ToString()
+        foreach ($exportName in $exportNames) {
+            if ($exportName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') {
+                throw 'Invalid environment-generated export name.'
+            }
+            $exportId = "/subscriptions/$subscription/providers/Microsoft.CostManagement/exports/$exportName"
+            $export = az rest --subscription $subscription --method get `
+                --url "https://management.azure.com$exportId`?api-version=2025-03-01" `
+                --output json | ConvertFrom-Json
+            $principal = [guid]$export.identity.principalId
+            if ($principal -eq [guid]::Empty -or $export.id -ne $exportId -or
+                $export.identity.type -ne 'SystemAssigned' -or
+                $export.identity.tenantId -ne $TenantId -or
+                $export.properties.deliveryInfo.destination.resourceId -ne $StorageId -or
+                $export.properties.deliveryInfo.destination.container -ne 'cost-exports') {
+                throw "Export identity or destination mismatch: $subscription / $exportName"
+            }
+            [pscustomobject]@{
+                Subscription = $subscription
+                Export = $exportName
+                PrincipalId = $principal.ToString()
+            }
+        }
+    }
+)
+if ($bindings.Count -ne 2 * $TargetSubscriptionIds.Count) {
+    throw 'Both export identities were not verified for every target subscription.'
+}
+$assignments = @(az role assignment list --subscription $HostingSubscriptionId `
+    --scope $ContainerScope --output json | ConvertFrom-Json)
+$missing = @($bindings | Where-Object {
+    $binding = $_
+    -not @($assignments | Where-Object {
+        $_.principalId -eq $binding.PrincipalId -and $_.scope -eq $ContainerScope -and
+        $_.roleDefinitionId -like "*/$WriterRole" -and
+        [string]::IsNullOrWhiteSpace([string]$_.condition)
+    }).Count
+})
+$bindings | Format-Table Subscription, Export, PrincipalId
+if ($missing.Count) {
+    $missing | Format-Table Subscription, Export, PrincipalId
+    throw 'Missing container writer grants. Repair approved bindings before running exports.'
+}
+Write-Host "Verified $($bindings.Count) monthly/daily container writer bindings."
 ```
 
-#### Deploying into a policy-restricted subscription
-
-Some subscriptions carry policies that the default template deliberately does not satisfy — most commonly ones that **deny public access to the container registry** and **audit blob versioning and soft delete**. Two opt-in switches adapt the deployment without changing anything for subscriptions that don't need them:
+If a grant is missing, an authorized administrator must review and approve the
+verified principal and exact container scope before applying:
 
 ```powershell
-pwsh ./scripts/deploy-end-to-end.ps1 `
-  -EnvironmentName my-environment `
-  -PrivateRegistry `
-  -BlobDataProtection `
-  -TargetSubscriptionId '<subscription-id>'
+az role assignment create --subscription $HostingSubscriptionId `
+    --assignee-object-id '<verified-monthly-or-daily-export-principal-id>' `
+    --assignee-principal-type ServicePrincipal `
+    --role 'Storage Blob Data Contributor' --scope $ContainerScope
 ```
 
-| Switch | Effect |
-| --- | --- |
-| `-PrivateRegistry` | Registry moves to the **Premium** tier behind a private endpoint with a `privatelink.azurecr.io` zone, and `publicNetworkAccess` becomes `Disabled`. |
-| `-BlobDataProtection` | Blob versioning plus blob and container soft delete are enabled on the export storage account (`APP_BLOB_RETENTION_DAYS`, default 7). |
+Repeat the audit afterward. Do not copy another deployment's principal IDs,
+substitute broad Owner grants, or disable strict command-error handling.
 
-**`-PrivateRegistry` changes how the images are built.** `azd`'s remote build submits to the registry's *public* endpoint, so it cannot reach a registry that denies public access — [Microsoft's own guidance](https://learn.microsoft.com/azure/container-registry/container-registry-private-link) is explicit that `az acr build` stops working once public access is disabled. The deployment therefore splits in two: `azd provision` creates the infrastructure (including a **dedicated build agent pool** in its own undelegated `build-agents` subnet), the images are built on that pool so they reach the registry over the private endpoint, and a second `azd provision` creates the Container Apps from them. `azd up` is never used in this mode.
+### Blob network posture
 
-> Build agent pools are a **preview** feature offered only in certain regions, and they add cost on top of the Premium registry. If the pool cannot be created in your region, the run stops and tells you how to verify it. The Premium tier is not optional — private endpoints are a Premium-only capability.
+The template's native-export option requests Storage public network access Enabled
+with **default Deny + AzureServices bypass**; public blobs and shared keys remain
+disabled. The reference environment's effective posture is public access Disabled
+with the same Deny/bypass settings.
 
-Neither switch affects a normal deployment: both default to off, every added resource is conditional, and with them off the template compiles to the same registry tier, the same public access and the same blob settings as before.
-
-### Option 2 — Azure Developer CLI, step by step
-
-Use this when you want to drive each stage yourself. Requires the same tooling as Option 1, plus the [provider registration above](#prerequisites). Clone the repo first — `azd` reads `azure.yaml`/`infra/`/`api/`/`web/` from your local copy, it doesn't deploy directly from GitHub:
+To match that stricter posture, an approved operator can apply this after the final
+provisioning stage, before export setup:
 
 ```powershell
-git clone https://github.com/Saby007/MeghKoshaAI.git
-cd MeghKoshaAI
-azd auth login
-pwsh ./scripts/deploy-ai.ps1 -EnvironmentName my-environment -Location centralindia
+$state = azd env get-values --environment $EnvironmentName --output json |
+    ConvertFrom-Json -AsHashtable
+$StorageId = [string]$state.COST_EXPORT_STORAGE_RESOURCE_ID
+$ResourceGroup = [string]$state.AZURE_RESOURCE_GROUP
+if ($state.AZURE_SUBSCRIPTION_ID -ne $HostingSubscriptionId -or
+    $StorageId -notmatch "^/subscriptions/$HostingSubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Storage/storageAccounts/[a-z0-9]+$") {
+    throw 'Storage does not belong to the approved deployment environment.'
+}
+$StorageName = ($StorageId -split '/')[-1]
+az storage account update --subscription $HostingSubscriptionId `
+    --resource-group $ResourceGroup --name $StorageName `
+    --public-network-access Disabled --default-action Deny --bypass AzureServices
+az storage account show --subscription $HostingSubscriptionId `
+    --resource-group $ResourceGroup --name $StorageName `
+    --query '{publicNetworkAccess:publicNetworkAccess,defaultAction:networkRuleSet.defaultAction,bypass:networkRuleSet.bypass,sharedKeys:allowSharedKeyAccess,publicBlobs:allowBlobPublicAccess}' `
+    --output json
 ```
 
-The helper previews before deploying, configures the recommended `ai` profile, deploys the app-local Model Router, builds remotely in ACR, retries only the known Foundry-readiness and first-image-handoff conditions, enables the scheduled processor after the API image exists, and verifies `/api/health`. Use `-SkipProcessor` only when schedules are intentionally out of scope.
+Expected result: Disabled / Deny / AzureServices / false / false.
+This is a post-deployment operator step, not a new template parameter. A subsequent
+provision can request Enabled again; recheck after each provision. Configured
+trusted-service exceptions can remain effective with public access Disabled,
+as documented in the [Storage firewall limitations](https://learn.microsoft.com/azure/storage/common/storage-network-security-limitations).
+Do not open ACR/PostgreSQL/Foundry or add broad network exceptions to repair RBAC.
 
-Unlike Option 1, this helper stops once the app is running — you still do [step 4 (sign-in)](#4-configure-sign-in) and [step 5 (role assignments)](#5-grant-access-to-the-subscriptions-you-want-to-assess) yourself.
+## Configuration
 
-The equivalent settings applied by the helper are:
+These are AZD environment inputs, not browser settings. The staged runner sets
+the AI/PostgreSQL/private-builder profile; use overrides only after reviewing
+capacity and policy. See [infra/main.bicepparam](infra/main.bicepparam) for mappings.
+
+| Setting | Recommended/default value | Purpose |
+|---|---|---|
+| `APP_ASSESSMENT_MODE` | `postgres` | Explicit `blob` is legacy compatibility, not the recommended scalable deployment |
+| `APP_POSTGRES_SKU` / `APP_POSTGRES_TIER` | `Standard_D2ds_v5` / `GeneralPurpose` | PostgreSQL sizing |
+| `APP_POSTGRES_VERSION` / `APP_POSTGRES_STORAGE_GB` | `16` / `128` | Database version and storage; autogrow enabled |
+| `APP_MIN_REPLICAS` | `2` in the staged flow | API/web minimum replicas |
+| `APP_ASSESSMENT_WORKER_CPU` / `APP_ASSESSMENT_WORKER_REPLICAS` | `4.0` / `1` | 8 GiB worker; bounded background concurrency |
+| `APP_ASSESSMENT_POOL_SIZE` / `APP_ASSESSMENT_QUEUE_CAPACITY` | `5` / `50` | Per-process SQL pool and durable queue budgets |
+| `APP_ASSESSMENT_LIMITS` | `{}` | Validated overrides for row, byte, time, response, read/work and Azure pacing budgets |
+| `APP_PRIVATE_REGISTRY` / `APP_REGISTRY_BUILD_MODE` | `true` / `private-runner` | Private ACR and private build host |
+| `APP_ENABLE_PRIVATE_BUILDER` / `APP_PRIVATE_BUILDER_VM_SIZE` | `true` / `Standard_D2s_v5` | Default VM build path |
+| `FOUNDRY_LOCATION` | `eastus2` | Separate approved model region |
+| `APP_MODEL_DEPLOYMENTS` | Model Router `2025-11-18`, GlobalStandard, capacity 20 | Exact model contract set by the staged runner |
+| `APP_ENABLE_CHAT_RUNTIME` / `APP_ENABLE_AI_RUNTIME` | `true` / `false` | Chat enabled; separate hosted narrator disabled |
+| `APP_EXPORT_TRUSTED_SERVICES` | `true` in the end-to-end flow | Explicit Blob trusted-service exception |
+| `APP_BLOB_DATA_PROTECTION` | `true` when `-BlobDataProtection` is supplied | Versioning and blob/container soft delete |
+| `APP_PROCESSOR_CRON` / `APP_EXPORT_PARALLEL_MONTHS` | `*/5 * * * *` / `1` | Scheduler tick and monthly per-subscription concurrency |
+| `APP_DAILY_EXPORT_RETENTION_DAYS` / `APP_CLOSED_MONTH_RETENTION_DAYS` | `60` / `214` | Raw export lifecycle retention, not PostgreSQL snapshot retention |
+
+`APP_ASSESSMENT_FOUNDATION_ONLY` and `APP_ASSESSMENT_DB_BOOTSTRAPPED` are staged
+release controls, not toggles to bypass failed bootstrap. Schema/image updates,
+Foundry account restoration and owned-registration migration require reviewed
+individual stages.
+
+## Verification and recovery
+
+### Acceptance checklist
+
+- Correct reviewed commit and immutable API/web/worker image digests.
+- Root, `/api/health`, `/api/ready` and `/api/auth/config` respond as intended;
+  unauthenticated report access is denied. Running is not the same as Ready.
+- Two API and two web replicas ready, one assessment worker, no restart loop.
+- Private ACR/PG/Foundry; password-disabled Entra-only PostgreSQL.
+- Correct runtime grants, both export writer bindings on every subscription,
+  and a fresh Completed daily/monthly output for the intended periods.
+- Completed background assessment published to PostgreSQL, then verified original
+  UI, filters, downloads and Model Router Chat for the authorized scope.
+- Governance/always-on approval and builder deallocation verified.
 
 ```powershell
-$modelRouter = '[{"name":"model-router","modelFormat":"OpenAI","modelName":"model-router","modelVersion":"2025-11-18","sku":"GlobalStandard","capacity":20}]'
-
-azd env new my-environment
-azd env set AZURE_LOCATION centralindia
-azd env set APP_PROFILE ai
-azd env set APP_EXPORT_TRUSTED_SERVICES true
-azd env set APP_MODEL_DEPLOYMENTS $modelRouter
-azd env set MODEL_ROUTER_DEPLOYMENT_NAME model-router
-azd env set APP_ENABLE_CHAT_RUNTIME true
-azd env set APP_AI_VALIDATED true
-azd env set APP_ENABLE_AI_RUNTIME false
-azd provision --preview
-azd up
+.\scripts\deploy-staged.ps1 -Stage Verify -EnvironmentName $EnvironmentName `
+    -Apply -ApproveAzureChanges
 ```
 
-Set every value above before the first `azd up`. `APP_PROFILE=ai` includes the data/export infrastructure and adds the deployment's own private Foundry project and Model Router. `APP_ENABLE_AI_RUNTIME=false` keeps the separate hosted-agent Executive Summary narrator disabled; Chat still uses Model Router, while deterministic API/FOCUS code remains responsible for rankings, amounts, and other quantitative facts.
+That stage checks basic runtime/image/private readiness, not all signed-in data
+flows. Native Queued/DataReady states are not Completed. Monthly/daily scheduling
+and retries run separately; failed months can wait while later eligible months run.
+A daily cycle that exhausts retries stays failed for that day unless an approved
+guarded recovery is performed or the next eligible daily cycle begins.
 
-`azd up` provisions the infrastructure, including the app-specific `cost-agent-project` and `model-router` deployment for the `ai` profile, builds both container images **remotely in Azure Container Registry** (no local Docker or Podman needed — [azd's `remoteBuild` option](https://learn.microsoft.com/azure/developer/azure-developer-cli/azd-schema#docker) is enabled in this repo's [azure.yaml](azure.yaml)), pushes them, and deploys the running app.
+### Known deployment caveats
 
-#### Known transient `azd up` errors
+| Symptom | Action |
+|---|---|
+| GitHub API rate limit in `Check-Source` | This release uses anonymous GitHub REST calls before rollout approval/Initialize. Read `X-RateLimit-Reset`, wait and retry once. GitHub CLI login alone does not authenticate these calls. Do not bypass source validation or inject global HTTP authorization headers. |
+| AZD advertises a patch but WinGet returns `0x8A15002B` | No applicable package upgrade was found. AZD 1.37.1 meets this deployment's requirement; do not reinstall or disable deployment error handling just to remove the notice. |
+| Quota, SKU, model, policy or consent failure | Stop for capacity/administrator approval. Do not open endpoints or silently change regions/roles/models. |
+| Foundry `Accepted` / `RequestConflict` | Inspect the owned account and wait for provider settlement before resuming the same-source stages. Restore and reuse are different states; do not set flags blindly or purge resources. |
+| PostgreSQL admin operation while inaccessible | Verify the server is Ready and privately reachable before retrying bootstrap. Never attest success manually. |
+| `AccessToStorageAccountDenied` | Check both monthly/daily identities, exact destination, data roles, trusted-service settings and propagation. Repeated starts do not repair access. |
+| Old completed run history after a Storage rebuild | Generate fresh output after rechecking grants. Old history does not prove files exist in recreated storage. |
+| Partial foundation failure before builder outputs are saved | Inspect and deallocate only the owned idle builder; verify cleanup rather than assuming it happened. |
+| PostgreSQL Stopped overnight | Identify the stop caller and obtain the governance owner's approved shutdown exception. This is not a database-memory or UI failure. |
+| `JobStartOverrideAuthorizationFailed` | Intentional container/init-container overrides require the manual caller's `Microsoft.App/jobs/start/action` and `Microsoft.App/jobs/write` on that job. Omit override fields entirely on trigger-only starts; empty arrays count. Scheduled executions are unchanged. |
 
-> **A brand-new environment can require repeated `azd up` runs. Do not delete the environment between retries.** These are all transient — both helpers detect and retry all four automatically; if you're running raw `azd up`, three of them just need a plain rerun, but the Foundry `Accepted` race needs one extra manual step from its **second** failure onward:
->
-> | Error you see | Cause | What to do |
-> | --- | --- | --- |
-> | `resource not found: unable to find a resource with name 'ca-api-...'`/`'ca-web-...'` | The first pass provisions infrastructure and builds images in parallel; [main.bicep](infra/main.bicep) creates `ca-api-*`/`ca-web-*` only after those image names exist, and provisioning usually finishes before the remote image build does. | Just rerun `azd up`. The image names are now persisted in `azd env`, so this time Bicep creates the apps. |
-> | `RequestConflict`/`AccountProvisioningStateInvalid` (`Accepted`) — **first occurrence** | The new AI Foundry account briefly stays `Accepted` while Azure finishes provisioning it. | Just rerun `azd up` once it reaches `Succeeded` (`az cognitiveservices account show -n <account> -g <resource-group> --query properties.provisioningState`). |
-> | Same `RequestConflict`/`AccountProvisioningStateInvalid` — **still failing on the second+ retry** | Plain `azd up` re-declares (re-PUTs) the Cognitive Services account on **every** attempt, even with no changes — that PUT itself resets an already-`Succeeded` account back into a brief `Accepted` window right before the project/private-endpoint steps run, so a bare rerun can fail the same way indefinitely. | Run `azd env set APP_REUSE_AI_ACCOUNT true` once for this environment, then rerun `azd up`. This switches the project/model/private-endpoint resources to *reference* the existing account instead of re-declaring it, so it's never PUT again. |
-> | `... cannot be saved, because this would overwrite an existing deployment which is still active` (`DeploymentActive`) | ARM keeps executing the previous `azd up`'s deployment graph even after its CLI process reported an error; retrying immediately can collide with that still-finishing deployment. | Wait roughly a minute for the prior deployment to finish, then rerun. |
-> | `unable to pull image using Managed identity ... for registry ...` (usually on `Container App Job`) | The AcrPull role assignment for the processor's managed identity is granted in ARM immediately, but the registry's own data-plane authorization cache can lag behind by up to ~2 minutes. | Wait roughly 1–2 minutes for the role assignment to propagate, then rerun. |
->
-> None of these require deleting the environment, the resource group, or setting `APP_RESTORE_AI_ACCOUNT=true` — that flag is unrelated (see the Troubleshooting section below) and setting it here makes things worse, not better.
+The private builder is deallocated after the rollout; its disk, NAT gateway and
+public egress IP remain billable. ACR Premium, PostgreSQL, replicas, private
+endpoints, logging and model usage also incur charges. This footprint is not an
+automatically deleted or cost-free environment.
 
-If deploying with raw `azd up` instead of the helper, verify image handoff after a failed or partial first pass:
+## Scale validation
 
-```powershell
-azd env get-value SERVICE_API_IMAGE_NAME
-azd env get-value SERVICE_WEB_IMAGE_NAME
-azd up
-```
+Local synthetic checks at the application baseline used real PostgreSQL 16.15:
 
-If either image key is not set yet, rerun `azd up`; remote packaging will populate it.
+| Workload / measurement | Observed result |
+|---|---|
+| Resources / input FOCUS rows | 15,000 / 1,000,000 |
+| Retained daily history | 61 days / 915,000 normalized points |
+| Readers during atomic publication | 10 concurrent; 9,090 requests |
+| Summary p95 during publication | About 0.06 seconds |
+| Complete cost metrics on the persisted fixture | About 1.42 seconds cold; 0.20 seconds warm p95 with 10 readers |
+| Pipeline peak working set | About 412 MiB |
+| Separate million-row anomaly detector peak | About 176 MiB |
 
-If you intentionally want exports without Foundry chat, set `APP_PROFILE=data` and omit the five Model Router/chat settings. That is an opt-out path, not the recommended MeghKoshaAI/CloudLens deployment.
+All 19 pages were compared against the original fixture-driven UI in dark/light
+browser checks; six executive/subscription/SQL screenshot pairs were identical.
+The baseline had 876 API and 330 frontend test passes, with separately enabled
+native-SQL, scale and browser gates.
 
-For both `data` and `ai`, keep `APP_EXPORT_TRUSTED_SERVICES=true` — [modules/data.bicep](infra/modules/data.bicep) otherwise leaves the storage account's `networkAcls.bypass` at `'None'`, which blocks Cost Management's export-creation call (it always shows **Export status unavailable**, regardless of subscription type or RBAC grants, until this is set).
+These are not customer Azure latency guarantees or proof of unlimited-load crash
+freedom. Test representative billing history, tag/meter cardinality, concurrent
+users, worker publication and restart recovery in the customer's approved
+environment. Five subscriptions with 15,000 resources each exceed the tested
+single-scope resource count.
 
-> This grants Azure's own "trusted Microsoft services" exception (`Microsoft.CostManagementExports`) on the storage account's firewall — it's scoped to first-party Azure services, not a public network opening, and is required for native FOCUS exports to reach a firewalled/private-endpoint-only storage account at all. If your environment already exists without this set, apply it directly: `az storage account update -n <storage-account> -g <resource-group> --bypass AzureServices --default-action Deny`, then reload the Schedules tab.
+## Local development and tests
 
-> The export storage account is plain Blob storage (`isHnsEnabled: false`), not ADLS Gen2 — this matches every prior environment (Dev, Phase1) that has reliably created FOCUS exports. An earlier revision of this repo briefly enabled the hierarchical namespace and fully disabled `publicNetworkAccess`; that combination is untested with Cost Management's export-creation call and is not required by Microsoft's own documented firewall setup (`networkAcls.defaultAction: Deny` + `bypass: AzureServices` is sufficient). Note that in tenants with central governance policies (for example `StorageAccount_PublicNetwork_Modify`), `publicNetworkAccess` may still end up `Disabled` regardless of `APP_EXPORT_TRUSTED_SERVICES` — that's expected and fine; the `AzureServices` bypass is what actually matters, not the `publicNetworkAccess` value itself.
-
-The helper enables the scheduled FOCUS worker automatically once `SERVICE_API_IMAGE_NAME` exists. When using raw `azd up`, point the processor at the **same image `azd` built for the API service** after the first image publication:
-
-```powershell
-azd env set APP_ENABLE_PROCESSOR true
-azd env set SERVICE_PROCESSOR_IMAGE_NAME (azd env get-value SERVICE_API_IMAGE_NAME)
-azd up
-```
-
-Re-running `azd up` (or `azd deploy` alone) later picks up any code changes and updates the deployment in place.
-
-> If `azd up`/`azd provision` crashes with a Go panic mentioning `HooksMiddleware`, that's a known `azd` bug ([azure-dev#10037](https://github.com/Azure/azure-dev/issues/10037)) unrelated to this repo — try upgrading `azd` (`azd version` to check, then reinstall the latest). If it persists, use Option 3 below instead.
-
-### Troubleshooting: `azd up` fails on the AI Foundry account
-
-These two errors are opposites of each other — only act on whichever one you actually see, and only for the environment name that's currently failing:
-
-- **`FlagMustBeSetForRestore`** (`Microsoft.CognitiveServices/accounts` soft-deleted): a prior `azd down` on this *same* environment name left the AI Foundry account soft-deleted instead of purged. Fix it and retry:
-  ```powershell
-  azd env set APP_RESTORE_AI_ACCOUNT true
-  azd up
-  ```
-- **`CanNotRestoreANonExistingResource`**: `APP_RESTORE_AI_ACCOUNT` is set to `true` on an environment that has nothing to restore — almost always because it was left set from a previous environment, or copied from another `.env`. Fix it and retry:
-  ```powershell
-  azd env set APP_RESTORE_AI_ACCOUNT false
-  azd up
-  ```
-
-`APP_RESTORE_AI_ACCOUNT` defaults to `false` and is **not** part of the normal setup sequence above — it only matters when one of these two specific errors shows up, and it's scoped per environment (`azd env new` does not carry it over), so re-check it explicitly rather than assuming its value from a prior environment.
-
-### Option 3 — Azure portal button (no CLI tooling required)
-
-
-> **The Deploy to Azure button below only provisions infrastructure** — a resource group, network, Container Apps environment, container registry, and managed identities. It does **not** build or run the application by itself. You click the button **twice** in total (steps 1 and 3 — step 2 is just two terminal commands, no portal interaction): the second click reuses the **same environment name**, so it updates your existing deployment instead of creating a new one.
-
-#### 1. Deploy the foundation
-
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FSaby007%2FMeghKoshaAI%2Fmain%2Finfra%2Fmain.json)
-
-Clicking the button opens the Azure portal's subscription-scope custom deployment experience against this repo's [ARM template](infra/main.json) (compiled from [main.bicep](infra/main.bicep)). Pick the target subscription, choose an **environment name** (write it down — you'll reuse it in step 3) and a **profile** (`core`, `data`, or `ai`), leave `apiImage`/`webImage` blank, and provision. If you picked `data` or `ai`, also set **`allowNativeExportTrustedServices`** to `true` — otherwise the storage account's firewall never grants Cost Management's export-creation call an exception, and the Schedules tab will permanently show **Export status unavailable** no matter what subscription or RBAC grants you have.
-
-When it finishes, open the deployment's **Outputs** tab and note:
-
-- `AZURE_RESOURCE_GROUP`
-- `AZURE_CONTAINER_REGISTRY_NAME`
-- `AZURE_CONTAINER_REGISTRY_ENDPOINT`
-
-#### 2. Push the code as container images
-
-Step 1 created an Azure Container Registry (ACR) but left it empty — this step builds [api/Dockerfile](api/Dockerfile) and [web/Dockerfile](web/Dockerfile) from this repo and pushes them into it.
-
-**No local Docker needed — build directly in ACR:**
+Use Python 3.12+, Node 24+ and PowerShell 7.4+. Runtime container images use their
+own pinned Python/base-image versions; do not infer them from the local interpreter.
 
 ```powershell
-az acr build --registry <AZURE_CONTAINER_REGISTRY_NAME> --image cost-app/api:latest --file api/Dockerfile ./api
-az acr build --registry <AZURE_CONTAINER_REGISTRY_NAME> --image cost-app/web:latest --file web/Dockerfile ./web
-```
-
-**Or, with local Docker installed:**
-
-```powershell
-az acr login --name <AZURE_CONTAINER_REGISTRY_NAME>
-docker build -t <AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/api:latest -f api/Dockerfile ./api
-docker build -t <AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/web:latest -f web/Dockerfile ./web
-docker push <AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/api:latest
-docker push <AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/web:latest
-```
-
-#### 3. Point the deployment at your images
-
-Re-run the **same** deployment — same `environmentName` (and `resourceGroupName`, if you set one) as step 1 — this time supplying the images you just pushed, so it updates the existing resources in place rather than creating new ones.
-
-**Portal:** Use the Deploy to Azure button again with identical `environmentName`/`profile`, and fill in:
-
-- `apiImage`: `<AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/api:latest`
-- `webImage`: `<AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/web:latest`
-
-**CLI:**
-
-```powershell
-az deployment sub create --location <location> --template-file infra/main.json `
-  --parameters environmentName=<same-environment-name> profile=<same-profile> `
-  apiImage=<AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/api:latest `
-  webImage=<AZURE_CONTAINER_REGISTRY_ENDPOINT>/cost-app/web:latest
-```
-
-Both containers only start once **both** image parameters are non-empty. Wait for the two Container Apps (`ca-api-*`, `ca-web-*`) to report **Running** before continuing.
-
-### Then, for Options 2 and 3
-
-> Option 1 already did both of these steps for you. Continue here only if you deployed with Option 2 or Option 3.
-
-#### 4. Configure sign-in
-
-This step creates two Microsoft Entra ID app registrations: a **public-client SPA** (what users sign into in the browser) and a **confidential-client API** (what validates their token). `scripts/bootstrap-identity.ps1` creates both for you — redirect URI, API scope, and the federated credential the API's managed identity needs — instead of you clicking through the Entra portal by hand.
-
-> [`scripts/deploy-end-to-end.ps1`](#option-1--one-command-end-to-end-recommended) runs this entire step for you, including feeding the two client IDs back into `azd` and redeploying. Follow the manual steps below when you want to review the plan first, or when a separate Entra administrator runs the bootstrap.
-
-> Run this with **PowerShell 7+** (`pwsh`), not Windows PowerShell 5.1 — the `-Apply` path uses `ConvertFrom-Json -AsHashtable`, which doesn't exist in 5.1. If you're on Windows and typed `./scripts/bootstrap-identity.ps1` directly, check `$PSVersionTable.PSVersion` first; if it's below 7, launch `pwsh` and run the command again from there.
-
-**Gather the values the script needs.** If you deployed with `azd`, load them straight into PowerShell variables with `azd env get-value` (the singular form — it prints one raw, unquoted value per call, so it's safe to assign directly; the plural `azd env get-values` only *prints* everything to the terminal, it does **not** create variables for you):
-
-```powershell
-$AZURE_TENANT_ID = azd env get-value AZURE_TENANT_ID
-$AZURE_SUBSCRIPTION_ID = azd env get-value AZURE_SUBSCRIPTION_ID
-$AZURE_ENV_NAME = azd env get-value AZURE_ENV_NAME
-$APP_WEB_ORIGIN = azd env get-value APP_WEB_ORIGIN
-$MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID = azd env get-value MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID
-```
-
-If you deployed via the portal button instead, get the equivalent values from the deployment's **Outputs** tab and the resource group's `id-obo-*` managed identity resource ID, and set the four PowerShell variables above manually.
-
-**Preview first — this is always safe and creates nothing:**
-
-```powershell
-./scripts/bootstrap-identity.ps1 `
-  -TenantId $AZURE_TENANT_ID `
-  -SubscriptionId $AZURE_SUBSCRIPTION_ID `
-  -EnvironmentName $AZURE_ENV_NAME `
-  -WebOrigin $APP_WEB_ORIGIN `
-  -OboManagedIdentityResourceId $MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID
-```
-
-This prints a JSON plan (the redirect URI, API scope, etc.) without creating anything. Review it, then apply it — this needs permission to create app registrations in your tenant (e.g. **Application Administrator**). The script requires its own explicit safety switch in addition to `-Apply`, so nothing is ever created by accident:
-
-```powershell
-$env:APP_ALLOW_AZURE_CHANGES = 'true'
-./scripts/bootstrap-identity.ps1 -TenantId $AZURE_TENANT_ID -SubscriptionId $AZURE_SUBSCRIPTION_ID -EnvironmentName $AZURE_ENV_NAME -WebOrigin $APP_WEB_ORIGIN -OboManagedIdentityResourceId $MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID -Apply
-```
-
-If the script stops because the tenant requires a Service Tree ID (`serviceManagementReference`) on new app registrations, add `-ServiceManagementReference <service-tree-id>` and rerun.
-
-If Azure CLI reports `AADSTS530004` for an external/guest administrator, the resource tenant is requiring a compliant device without accepting the user's home-tenant compliance claim. A resource-tenant Entra administrator must enable the appropriate inbound cross-tenant **Trust compliant devices** setting (External Identities > Cross-tenant access settings) or adjust the applicable Conditional Access policy. Alternatively, run the bootstrap as an authorized member of the resource tenant from a compliant device. After the policy/account issue is resolved, refresh the Graph login and rerun:
-
-```powershell
-az logout
-az login --tenant $AZURE_TENANT_ID --scope 'https://graph.microsoft.com/.default'
-```
-
-The output includes the two client IDs it just created. Feed them back into the deployment and redeploy:
-
-```powershell
-azd env set MEGHKOSHA_API_CLIENT_ID <api-app-client-id>
-azd env set MEGHKOSHA_WEB_CLIENT_ID <web-app-client-id>
-azd up
-```
-
-(Using the portal button instead? Redeploy with `apiClientId`/`webClientId` filled in with those same two values.) Reload the app afterward — it should show a real Microsoft sign-in screen instead of an identity-configuration error.
-
-#### 5. Grant access to the subscriptions you want to assess
-
-See [the three manual role assignments](#the-three-manual-role-assignments) below — this is the only manual, per-subscription step in the whole flow.
-
-#### 6. Open the app
-
-Sign in, open **Schedules**, and use **Refresh schedules**. Once the roles above are visible, the app finishes export and schedule setup on its own. After the first export cycle completes, open **Report** and select **Run report**.
-
-If **Schedules** keeps reporting **Export status unavailable** or *"FOCUS export configuration could not be confirmed"* even though all three role assignments are in place, re-check the [`Microsoft.CostManagementExports` registration](#prerequisites) on the subscription you deployed into — that is the most common cause, and it is not something role assignments or a redeploy can fix.
-
-## The three manual role assignments
-
-Subscription access is deliberately kept **outside** the application — there is no in-app subscription-onboarding flow, and the app can never grant itself access. For every subscription you want it to assess, a user with **Owner** (or **User Access Administrator**) on that subscription must add three role assignments:
-
-| Managed identity | Role to assign | Why |
-| --- | --- | --- |
-| API identity | **Reader** | Lets the app discover the subscription and read its resources, tags, policy, and Advisor data for the dashboards. |
-| API identity | **Cost Management Contributor** | Lets the app create the native FOCUS export and save the schedule — a write action that Cost Management **Reader** cannot perform. |
-| Processor identity | **Cost Management Contributor** | Lets the separate scheduled worker actually execute each export run. Without this, the schedule can look "active" while monthly and daily pulls silently fail to advance. |
-
-**Portal:** find both identities in **Azure portal → your resource group → id-api-\* / id-processor-\*** (their names start with those prefixes), then **Subscriptions → target subscription → Access control (IAM) → Add role assignment** for each role/identity pair above.
-
-**CLI:** the identity names/principal IDs aren't in `azd`'s top-level outputs (only the OBO identity's are) — list them from the resource group instead:
-
-```powershell
-$RG = azd env get-value AZURE_RESOURCE_GROUP
-az identity list -g $RG --query "[].{name:name, principalId:principalId}" -o table
-
-$apiPrincipalId = az identity list -g $RG --query "[?starts_with(name,'id-api-')].principalId | [0]" -o tsv
-$processorPrincipalId = az identity list -g $RG --query "[?starts_with(name,'id-processor-')].principalId | [0]" -o tsv
-$targetSubscriptionId = "<subscription-id-you-want-to-assess>"
-
-az role assignment create --assignee-object-id $apiPrincipalId --assignee-principal-type ServicePrincipal --role "Reader" --scope "/subscriptions/$targetSubscriptionId"
-az role assignment create --assignee-object-id $apiPrincipalId --assignee-principal-type ServicePrincipal --role "Cost Management Contributor" --scope "/subscriptions/$targetSubscriptionId"
-az role assignment create --assignee-object-id $processorPrincipalId --assignee-principal-type ServicePrincipal --role "Cost Management Contributor" --scope "/subscriptions/$targetSubscriptionId"
-```
-
-Allow a few minutes for RBAC propagation, then use **Refresh schedules** in the app.
-
-> [`scripts/deploy-end-to-end.ps1`](#option-1--one-command-end-to-end-recommended) performs exactly these three assignments for every subscription passed to `-TargetSubscriptionId` (comma-separated), skipping any that already exist. It still needs a signed-in user with **Owner** or **User Access Administrator** on each target subscription — the script cannot grant itself that.
-
-> Use **Cost Management Contributor**, not **Cost Management Reader**, on both identities — creating and running a native export are both write actions (`.../exports/write` and `.../exports/run/action`), which Reader's `*/read` permissions do not cover.
-
-## Local development
-
-Requires Python 3.12+, Node 24+, and PowerShell 7.4+.
-
-```powershell
-# Backend
-cd api
+# Backend terminal, from the repository root:
+Set-Location .\api
 python -m venv .venv
-./.venv/Scripts/Activate.ps1
-pip install -r requirements-dev.txt
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
 python -m uvicorn main:app --host 127.0.0.1 --port 8002
+```
 
-# Frontend (separate terminal)
-cd web
+```powershell
+# Separate frontend terminal, from the repository root:
+Set-Location .\web
 npm ci
 npm run dev
 ```
 
-Copy [api/.env.example](api/.env.example) to `api/.env` and [web/.env.example](web/.env.example) to `web/.env.local`, and fill in your own Entra tenant/client IDs. Without a real Entra configuration, the app will fail closed on identity — this is expected; it does not fall back to an unauthenticated mode.
+Use [api/.env.example](api/.env.example) and [web/.env.example](web/.env.example)
+as configuration references. Supply approved variables to the API process;
+copying a file alone does not load it. Live Azure calls require an appropriate
+managed-identity/private-connectivity runtime. A local `az login` is not a fallback
+for this explicit managed-identity implementation. Without valid API identity
+configuration, sign-in fails closed.
 
-Run the test suites with:
+For synthetic regression tests:
 
 ```powershell
-./scripts/test-baseline.ps1 -Suite All
+.\scripts\test-baseline.ps1 -Suite All
 ```
 
-Individual suites are `Backend`, `Frontend`, `Build`, and `Browser`. The runner uses synthetic settings and restricts backend sockets to loopback — no live Azure credentials are required to run the tests.
+The runner supports `Backend`, `Frontend`, `Build` and `Browser` separately.
+Install the project's locked dependencies first. Browser tests use the configured
+Edge channel; live identity checks need their separately approved environment.
 
-## Security notes
+Opt-in SQL/scale tests require `ASSESSMENT_TEST_DSN` pointing to a **dedicated
+loopback database named `meghkosha_test`** and, for the million-row gates,
+`ASSESSMENT_RUN_SCALE_TESTS=1`. Tests reset fixture tables: never target a customer,
+shared or deployed application database. See
+[the PostgreSQL tests](api/tests/test_assessment_postgres.py).
 
-- The app never requests Entra admin consent, never requests an Azure Resource Manager scope from the browser, and never persists user bearer tokens.
-- Its managed identities hold only the roles you explicitly grant (see above) plus whatever the deployment itself provisions (scoped ADLS container roles for reading/writing its own control-state and export data).
-- Container images run as a non-root user on a minimal, digest-pinned base with no shell or package manager in the production image.
-- All API responses that could contain cost or identity data are marked private/no-store.
-- This is a reference implementation, not an audited commercial product — review the Bicep templates and RBAC grants before deploying into a production tenant.
+## Security and operating boundaries
+
+- Single-organization reference deployment, not a multi-tenant SaaS service.
+- Independently validated Entra API tokens and tenant/subscription authorization;
+  no anonymous/no-login mode or browser client secrets.
+- Explicit managed identities, verified TLS for PostgreSQL and least-privilege
+  runtime database grants. Only bootstrap has database-administrator authority.
+- Budget/export changes and destination-role assignment require their explicit
+  controls and authorized operators; they are not automatic side effects of
+  opening a report.
+- Secretless app-registration federation does not bypass tenant consent or
+  Conditional Access. The one-command path does not automatically grant
+  administrator consent.
+- Runtime images are immutable, digest-pinned and non-root. Public source checks
+  do not justify copying GitHub tokens, Azure sign-in state or private keys to a VM.
+- Do not commit `.azure`, `.env`, credentials, auth caches or customer billing data.
+  Cost/identity responses remain private/no-store.
+- Infrastructure and readiness success are prerequisites, not a substitute for
+  signed-in feature, data, privacy, availability and load acceptance.
+
+Review [the infrastructure](infra/main.bicep),
+[staged deployment controls](docs/manual-staged-deployment.md) and
+[manual private-network verification](docs/manual-scalable-deployment.md)
+before deploying or upgrading a customer environment.
