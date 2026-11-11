@@ -1,4 +1,5 @@
 import asyncio
+import calendar
 import csv
 import gzip
 import io
@@ -58,7 +59,7 @@ def _content(subscription_id: str, period: str, missing_day: int | None = None) 
     from services.focus_cost_reader import _REQUIRED_COLUMNS
 
     start = date.fromisoformat(f"{period}-01")
-    days = 30 if period == "2026-06" else 31
+    days = calendar.monthrange(start.year, start.month)[1]
     columns = sorted(_REQUIRED_COLUMNS | {"ChargePeriodStart"})
     stream = io.StringIO()
     writer = csv.DictWriter(stream, fieldnames=columns)
@@ -245,6 +246,53 @@ def test_history_ends_where_retention_removed_older_files(monkeypatch):
     monkeypatch.setattr(focus_history_reader.focus_cost_reader, "_download_run_files", files)
     result = focus_history_reader._parse_history_files([SUB_1], selected)
     assert result.periods == ["2026-07"] and result.history_start == "2026-07-01" and result.partial_period is None
+
+
+def _header_only_content() -> bytes:
+    # What Cost Management delivers for a month it has no cost rows for.
+    from services.focus_cost_reader import _REQUIRED_COLUMNS
+
+    columns = sorted(_REQUIRED_COLUMNS | {"ChargePeriodStart"})
+    stream = io.StringIO()
+    csv.DictWriter(stream, fieldnames=columns).writeheader()
+    return gzip.compress(stream.getvalue().encode())
+
+
+@pytest.mark.parametrize("older_month", ["empty", "missing_day"])
+def test_history_ends_at_an_older_month_exported_without_every_day(monkeypatch, older_month):
+    runs = {SUB_1: [_period_run("june", "2026-06-01", "2026-06-30"), _period_run("july", "2026-07-01", "2026-07-31")]}
+    selected = focus_history_reader._select_available_history_runs([SUB_1], runs, 12)
+
+    def files(subscription_ids, selected_runs, period_path):
+        if period_path.startswith("202606"):
+            return {"june.csv.gz": _header_only_content() if older_month == "empty" else _content(SUB_1, "2026-06", 15)}
+        return _files_for_runs(subscription_ids, selected_runs, period_path)
+
+    monkeypatch.setattr(focus_history_reader.focus_cost_reader, "_download_run_files", files)
+    result = focus_history_reader._parse_history_files([SUB_1], selected)
+    assert result.periods == ["2026-07"] and result.history_start == "2026-07-01" and result.complete_days == 31
+    assert {record.date[:7] for record in result.records} == {"2026-07"}
+
+
+def test_older_month_gap_drops_every_month_before_it(monkeypatch):
+    runs = {SUB_1: [_period_run("june", "2026-06-01", "2026-06-30"), _period_run("july", "2026-07-01", "2026-07-31"),
+                    _period_run("august", "2026-08-01", "2026-08-31")]}
+    selected = focus_history_reader._select_available_history_runs([SUB_1], runs, 12)
+
+    def files(subscription_ids, selected_runs, period_path):
+        month = f"{period_path[:4]}-{period_path[4:6]}"
+        return {f"{month}.csv.gz": _header_only_content() if month == "2026-07" else _content(SUB_1, month)}
+
+    monkeypatch.setattr(focus_history_reader.focus_cost_reader, "_download_run_files", files)
+    result = focus_history_reader._parse_history_files([SUB_1], selected)
+    # August is the newest month and complete; the empty July ends the history, so June is not used either.
+    assert result.periods == ["2026-08"] and result.history_start == "2026-08-01" and result.complete_days == 31
+
+
+def test_newest_month_without_every_day_still_fails(monkeypatch):
+    monkeypatch.setattr(focus_history_reader.focus_cost_reader, "_download_run_files", lambda *args: {"part.csv.gz": _content(SUB_1, "2026-07", 31)})
+    with pytest.raises(FocusCostDataError, match="missing 1 day"):
+        focus_history_reader._parse_history_files([SUB_1], [("2026-07", {SUB_1: _run("2026-07", "run")}, "20260701-20260731")])
 
 
 def test_daily_export_runs_are_tagged_and_a_missing_daily_export_is_ignored(monkeypatch):

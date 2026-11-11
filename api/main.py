@@ -1407,6 +1407,11 @@ async def run_report(request: AssessmentRequest, http_request: Request):
     return await _build_and_publish_report(request.subscription_ids, request.stale_days)
 
 
+def _worker_computes_anomalies(focus_history) -> bool:
+    # The history is None when it could not be loaded; the report then publishes without anomaly evidence.
+    return focus_history is not None and scalable_mode() and os.environ.get("ASSESSMENT_WORKER_PROCESS") == "true"
+
+
 async def _build_and_publish_report(subscription_ids: list[str], stale_days: int, *, publish: bool = True) -> FullReport:
     try:
         focus_cost_data = await load_latest_complete_focus_costs(subscription_ids)
@@ -1552,7 +1557,7 @@ async def _build_and_publish_report(subscription_ids: list[str], stale_days: int
         detail_max_rows=assessment_settings().detail_rows if scalable_mode() else 20000,
         detail_max_points=assessment_settings().detail_points if scalable_mode() else 500000,
     )
-    if scalable_mode() and os.environ.get("ASSESSMENT_WORKER_PROCESS") == "true":
+    if _worker_computes_anomalies(focus_history):
         report._anomaly_evidence = await asyncio.to_thread(detect_anomalies, focus_history.records, focus_history.currency)
     previous_snapshot = await _previous_report_snapshot(
         subscription_ids,

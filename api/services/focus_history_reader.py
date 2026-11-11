@@ -192,6 +192,7 @@ def _parse_history_files(
             continue
         budget = active_budget.get()
         period_records: list[DailyCostRecord] | HistorySegment = HistorySegment(budget) if budget else []
+        period_observed: dict[str, set[str]] = {value: set() for value in subscription_ids}
         for blob_name, content in sorted(files.items()):
             for row in focus_cost_reader._csv_reader(content, blob_name):
                 subscription_id = focus_cost_reader._subscription_id(row["SubAccountId"])
@@ -215,7 +216,7 @@ def _parse_history_files(
                 if currency:
                     currencies.add(currency)
                 subscription_names[subscription_id] = row.get("SubAccountName") or subscription_id
-                observed_days[subscription_id].add(charge_date)
+                period_observed[subscription_id].add(charge_date)
                 resource_tags = focus_cost_reader._tags(row.get("Tags"))
                 group_tags = resource_group_tags.get((subscription_id, str(row.get("x_ResourceGroupName") or "").strip().lower()), {})
                 inherited = {key: value for key, value in group_tags.items() if not resource_tags.get(key)}
@@ -244,6 +245,14 @@ def _parse_history_files(
                         tag_attribution_source="exported_resource_tags_with_current_group_fallback" if inherited else "exported_resource_tags",
                     )
                 )
+        period_days = set(_calendar_days(month_start, period_end))
+        if parsed and any(period_days - period_observed[value] for value in subscription_ids):
+            # Like retention, an older month Azure delivered without every day ends the usable history
+            # here instead of failing the newer months. The newest month stays strict (checked below).
+            logger.warning("FOCUS history ends before %s: its export is missing days for a selected subscription", period)
+            break
+        for value in subscription_ids:
+            observed_days[value] |= period_observed[value]
         parsed.append((period, period_records, month_start, period_end))
 
     parsed.reverse()

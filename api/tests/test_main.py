@@ -897,6 +897,17 @@ def _snapshot_request():
     return FakeRequest()
 
 
+def test_worker_skips_anomaly_evidence_when_history_could_not_load(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("ASSESSMENT_MODE", "postgres")
+    monkeypatch.setenv("ASSESSMENT_WORKER_PROCESS", "true")
+    assert main._worker_computes_anomalies(None) is False
+    assert main._worker_computes_anomalies(SimpleNamespace(records=[], currency="USD")) is True
+    monkeypatch.delenv("ASSESSMENT_WORKER_PROCESS")
+    assert main._worker_computes_anomalies(SimpleNamespace(records=[], currency="USD")) is False
+
+
 def test_report_fails_closed_when_focus_collection_fails(monkeypatch):
     inventory_calls = []
 
