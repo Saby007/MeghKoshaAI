@@ -10,7 +10,7 @@ from azure.core.exceptions import AzureError
 
 from findings.models import SqlMetricEvidence, SqlWorkloadEvidence
 from findings.sql_inventory import SQL_INVENTORY_TYPES, classify_sql_resource, is_system_sql_database
-from services import arm_client
+from services import arm_client, target_connection
 
 
 _DATABASE_METRICS = ("cpu_percent", "physical_data_read_percent", "log_write_percent", "sessions_percent", "workers_percent")
@@ -121,7 +121,7 @@ async def enrich_sql_inventory(rows_by_category: dict[str, list[dict]], subscrip
     async def collect(key: tuple[str, tuple[str, ...]], rows: list[dict]) -> None:
         resource_id, names = key
         evidence = summarize_metrics(resource_id, names, {}, now)
-        cache_key = (resource_id, evidence.window_end, names)
+        cache_key = (target_connection.cache_key(resource_id), evidence.window_end, names)
         cached = _CACHE.get(cache_key)
         if cached and time.monotonic() - cached[0] < 300:
             evidence = cached[1].model_copy(deep=True)

@@ -1,9 +1,4 @@
-"""Cost assessment API with independently validated Entra bearer authentication.
-
-Azure calls use the runtime managed identity with separate per-user authorization.
-Subscription access is configured manually outside the application. AI is optional
-and disabled by default; this core does not depend on a Static Web Apps session.
-"""
+"""Manual FOCUS dashboards in isolated, no-login browser workspaces."""
 
 import asyncio
 import logging
@@ -18,6 +13,7 @@ from uuid import UUID
 import httpx
 import asyncpg
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, StrictBool
 from pydantic import field_validator
@@ -44,7 +40,7 @@ from reports.models import (
 )
 from services import arm_client
 from services import user_arm_client
-from services import access_control
+from services import manual_access as access_control
 from services import chat_responder
 from services import exchange_rates as exchange_rate_service
 from services import focus_export_download
@@ -61,6 +57,8 @@ from services import sql_metrics
 from services import resource_uptime
 from services import service_retirements
 from services import assessment_store
+from services import focus_uploads, target_connection, workspace
+from manual_api import router as manual_router
 from services import assessment_queries
 from services import assessment_records
 from services import assessment_projection_cache
@@ -78,6 +76,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    if not scalable_mode():
+        raise RuntimeError("Manual FOCUS workspaces require ASSESSMENT_MODE=postgres.")
     try:
         yield
     finally:
@@ -86,37 +86,59 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(AssessmentHTTPBudget)
+app.include_router(manual_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(_request: Request, error: RequestValidationError):
+    return JSONResponse(status_code=422, content={"detail": [
+        {"loc": item["loc"], "msg": item["msg"], "type": item["type"]} for item in error.errors()
+    ]})
+
+
+@app.exception_handler(target_connection.EnrichmentNotConfigured)
+async def unavailable_enrichment(_request: Request, error: target_connection.EnrichmentNotConfigured):
+    return JSONResponse(status_code=409, content={"detail": str(error)})
 
 
 @app.middleware("http")
 async def verify_api_identity(request: Request, call_next):
-    public_paths = {"/api/health", "/api/ready", "/api/auth/config", "/api/storage-onboarding/template"}
+    public_paths = {"/api/health", "/api/ready", "/api/auth/config", "/api/session"}
     if request.url.path.startswith("/api/") and request.url.path not in public_paths:
         try:
-            request.state.verified_principal = await asyncio.to_thread(
-                require_tenant_principal, request, _expected_tenant_id(),
-            )
+            session = await workspace.resolve(request)
+            request.state.verified_principal = session.principal
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+                workspace.require_csrf(request, session)
+            async with target_connection.context(session.workspace_id):
+                await target_connection.load(required=False)
+                response = await call_next(request)
         except HTTPException as error:
             return JSONResponse(status_code=error.status_code, content={"detail": error.detail},
-                                headers={"Cache-Control": "no-store", "Vary": "Authorization",
-                                         **({"WWW-Authenticate": "Bearer"} if error.status_code == 401 else {}),
+                                headers={"Cache-Control": "private, no-store", "Vary": "Cookie",
                                          **(error.headers or {})})
-    response = await call_next(request)
-    if request.url.path.startswith(("/api/auth/", "/api/subscriptions", "/api/schedules")):
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Vary"] = "Authorization"
+        except (asyncpg.PostgresError, AzureError, ConnectionError, TimeoutError,
+                assessment_store.DatabaseConfigurationError):
+            logger.exception("Workspace persistence is unavailable")
+            return JSONResponse({"detail": "Report workspace storage is unavailable. Retry later."}, status_code=503,
+                                headers={"Cache-Control": "private, no-store", "Retry-After": "10"})
+    else:
+        response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Vary"] = "Cookie"
     return response
+
+
+@app.get("/api/session")
+async def initialize_workspace(request: Request, response: Response):
+    return await workspace.initialize(request, response)
 
 
 @app.get("/api/auth/config")
 def get_identity_configuration():
-    configuration = identity_configuration(_expected_tenant_id())
-    return JSONResponse({
-        "tenantId": configuration.tenant_id,
-        "apiClientId": configuration.api_client_id,
-        "webClientId": configuration.web_client_id,
-        "scope": f"api://{configuration.api_client_id}/{REQUIRED_SCOPE}",
-    }, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"mode": "anonymous-workspace", "manualFocus": True},
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/auth/me")
@@ -125,7 +147,7 @@ def get_verified_identity(request: Request):
     return JSONResponse({"userId": principal.user_id, "userDetails": principal.user_details,
                          "tenantId": principal.tenant_id,
                          "features": {"aiNarration": narration_status() == "configured",
-                                      **({"assessmentMode": "postgres"} if scalable_mode() else {})}},
+                                      "manualFocus": True, "assessmentMode": "postgres"}},
                         headers={"Cache-Control": "no-store"})
 
 
@@ -523,14 +545,12 @@ def _control_principal(request: Request) -> ClientPrincipal:
         verified = getattr(request.state, "verified_principal", None)
         if isinstance(verified, ClientPrincipal):
             return verified
-    return require_tenant_principal(request, _expected_tenant_id())
+    raise HTTPException(401, "Initialize a report workspace before accessing uploaded data.")
 
 
 async def _authorized_onboarded_subscription_ids(principal: ClientPrincipal) -> list[str]:
-    all_subs = await arm_client.list_subscriptions()
-    return await access_control.authorized_subscription_ids(
-        principal.entra_object_id, [s["subscriptionId"] for s in all_subs]
-    )
+    configuration = await target_connection.load(required=False)
+    return [configuration.subscription_id] if configuration else []
 
 
 async def _authorized_scope(
@@ -550,14 +570,12 @@ async def _authorized_scope(
 async def _require_onboarded_subscription(principal: ClientPrincipal, subscription_id: str) -> str:
     try:
         normalized = focus_export_control.normalize_subscription_id(subscription_id)
-        await arm_client.get_subscription(normalized)
-    except (ValueError, httpx.HTTPStatusError) as error:
+    except ValueError as error:
         raise HTTPException(status_code=404, detail="Onboarded subscription was not found") from error
     await access_control.require_subscription_access(principal.entra_object_id, normalized)
     return normalized
 
 
-@app.get("/api/focus-exports")
 async def list_focus_exports(request: Request, subscription_id: str = Query(alias="subscriptionId")):
     principal = _control_principal(request)
     subscription_id = await _require_onboarded_subscription(principal, subscription_id)
@@ -577,7 +595,6 @@ async def list_focus_exports(request: Request, subscription_id: str = Query(alia
     }
 
 
-@app.get("/api/focus-exports/download")
 async def download_focus_export(
     request: Request,
     subscription_id: str = Query(alias="subscriptionId"),
@@ -690,23 +707,10 @@ def _storage_onboarding_template() -> dict:
 
 @app.get("/api/subscriptions")
 async def get_subscriptions(request: Request):
-    principal = _control_principal(request)
-    try:
-        subs = await arm_client.list_subscriptions()
-    except Exception as e:
-        logger.exception("Listing subscriptions failed")
-        raise HTTPException(status_code=502, detail="Listing subscriptions failed") from e
-    authorized = set(
-        await access_control.authorized_subscription_ids(
-            principal.entra_object_id,
-            [s["subscriptionId"] for s in subs],
-        )
-    )
-    return [
-        {"subscriptionId": s["subscriptionId"], "displayName": s["displayName"], "state": s.get("state")}
-        for s in subs
-        if s["subscriptionId"] in authorized
-    ]
+    _control_principal(request)
+    configuration = await target_connection.load(required=False)
+    return [{"subscriptionId": configuration.subscription_id,
+             "displayName": configuration.subscription_name, "state": "Configured"}] if configuration else []
 
 
 @app.get("/api/storage-onboarding/template", include_in_schema=False)
@@ -728,7 +732,6 @@ async def get_storage_onboarding_guidance(request: Request):
     }
 
 
-@app.get("/api/schedules")
 async def get_schedules(request: Request):
     principal = _control_principal(request)
     try:
@@ -761,7 +764,6 @@ async def _verified_schedule_subscription(
     return selected[0]
 
 
-@app.get("/api/schedules/{subscription_id}/export")
 async def get_export_configuration(request: Request, subscription_id: str):
     principal = _control_principal(request)
     try:
@@ -772,7 +774,6 @@ async def get_export_configuration(request: Request, subscription_id: str):
         raise HTTPException(status_code=503, detail="FOCUS export setup checks timed out. No export was created.") from None
 
 
-@app.put("/api/schedules/{subscription_id}/export")
 async def configure_schedule_export(request: Request, subscription_id: str, body: ExportConfigureRequest):
     principal = _control_principal(request)
     try:
@@ -785,7 +786,6 @@ async def configure_schedule_export(request: Request, subscription_id: str, body
         raise HTTPException(status_code=503, detail="FOCUS export configuration timed out. Refresh its status before trying again; no automatic retry was performed.") from None
 
 
-@app.post("/api/schedules", status_code=201)
 async def create_schedule(request: Request, body: ScheduleCreateRequest):
     principal = _control_principal(request)
     subscription = await _verified_schedule_subscription(principal, body.subscription_id)
@@ -796,7 +796,6 @@ async def create_schedule(request: Request, body: ScheduleCreateRequest):
         raise HTTPException(status_code=422, detail=str(error)) from None
 
 
-@app.patch("/api/schedules/{subscription_id}")
 async def update_schedule(request: Request, subscription_id: str, body: ScheduleStateRequest):
     principal = _control_principal(request)
     subscription = await _verified_schedule_subscription(principal, subscription_id)
@@ -809,7 +808,6 @@ async def update_schedule(request: Request, subscription_id: str, body: Schedule
         raise HTTPException(status_code=422, detail=str(error)) from None
 
 
-@app.delete("/api/schedules/{subscription_id}", status_code=204)
 async def delete_schedule(request: Request, subscription_id: str):
     principal = _control_principal(request)
     subscription = await _verified_schedule_subscription(principal, subscription_id)
@@ -829,7 +827,6 @@ async def _ensure_export_and_schedule(subscription: dict, actor: str) -> None:
             raise
 
 
-@app.post("/api/schedules/{subscription_id}/run", status_code=202)
 async def run_schedule_now(request: Request, subscription_id: str):
     principal = _control_principal(request)
     subscription = await _verified_schedule_subscription(principal, subscription_id, operation="export_write", probe_cost=False)
@@ -837,7 +834,6 @@ async def run_schedule_now(request: Request, subscription_id: str):
     return await focus_schedules.advance(subscription["subscriptionId"], force=True)
 
 
-@app.post("/api/schedules/run-all", status_code=202)
 async def run_all_schedules(request: Request, body: RunAllExportsRequest):
     principal = _control_principal(request)
     selected = await user_arm_client.discover_schedule_subscriptions(principal, body.subscription_ids, probe_cost=False)
@@ -855,7 +851,6 @@ async def run_all_schedules(request: Request, body: RunAllExportsRequest):
     return results
 
 
-@app.get("/api/schedules/{subscription_id}/runs")
 async def get_schedule_runs(request: Request, subscription_id: str):
     principal = _control_principal(request)
     subscription = await _verified_schedule_subscription(principal, subscription_id)
@@ -1137,7 +1132,7 @@ class CostDetailExportRequest(BaseModel):
     filters: dict[str, str] = Field(default_factory=dict, max_length=8)
     previous_start: date | None = Field(default=None, alias="previousStart")
     previous_end: date | None = Field(default=None, alias="previousEnd")
-    selected_dates: list[date] | None = Field(default=None, alias="selectedDates", min_length=1, max_length=366)
+    selected_dates: list[date] | None = Field(default=None, alias="selectedDates", min_length=1, max_length=10000)
 
 
 @app.post("/api/report/cost-details/export")
@@ -1260,7 +1255,6 @@ async def update_finops_action(
     return state
 
 
-@app.get("/api/budgets", response_model=list[NativeBudgetSummary], response_model_by_alias=True)
 async def get_budgets(
     request: Request,
     subscription_ids: list[str] = Query(alias="subscriptionId"),
@@ -1286,7 +1280,6 @@ async def get_budgets(
     return summaries
 
 
-@app.post("/api/budgets", response_model=NativeBudgetSummary, response_model_by_alias=True, status_code=201)
 async def create_budget(request: Request, body: BudgetWriteRequest):
     principal = _control_principal(request)
     try:
@@ -1301,7 +1294,6 @@ async def create_budget(request: Request, body: BudgetWriteRequest):
     return _native_budget_summary(subscription_id, result)
 
 
-@app.put("/api/budgets/{subscription_id}/{budget_name}", response_model=NativeBudgetSummary, response_model_by_alias=True)
 async def update_budget(request: Request, subscription_id: str, budget_name: str, body: BudgetWriteRequest):
     principal = _control_principal(request)
     try:
@@ -1324,7 +1316,6 @@ async def update_budget(request: Request, subscription_id: str, budget_name: str
     return _native_budget_summary(normalized, result)
 
 
-@app.delete("/api/budgets/{subscription_id}/{budget_name}", status_code=204)
 async def remove_budget(request: Request, subscription_id: str, budget_name: str):
     principal = _control_principal(request)
     try:
@@ -1394,9 +1385,7 @@ async def run_report(request: AssessmentRequest, http_request: Request):
     principal = _control_principal(http_request)
     if scalable_mode():
         await access_control.require_all_subscription_access(principal.entra_object_id, request.subscription_ids)
-        job = await assessment_store.enqueue(
-            principal.tenant_id, principal.entra_object_id, request.subscription_ids, request.stale_days,
-        )
+        job = await focus_uploads.queue_active(request.stale_days)
         return JSONResponse(job, status_code=202, headers={"Location": f"/api/assessments/jobs/{job['jobId']}",
                                                          "Retry-After": "2", "Cache-Control": "no-store"})
     request.subscription_ids = await access_control.authorized_subscription_ids(
@@ -1774,7 +1763,9 @@ async def readiness():
     if scalable_mode():
         try:
             await asyncio.wait_for((await assessment_store.pool(for_read=True)).fetchval(
-                "SELECT 1 FROM assessments.jobs LIMIT 0"
+                "SELECT w.workspace_id FROM assessments.workspaces w "
+                "LEFT JOIN assessments.workspace_connections c ON c.workspace_id=w.workspace_id "
+                "LEFT JOIN assessments.uploads u ON u.workspace_id=w.workspace_id LIMIT 0"
             ), timeout=3)
         except (assessment_store.DatabaseConfigurationError, TimeoutError, ConnectionError, AzureError) as error:
             logger.warning("Assessment database readiness failed: %s", type(error).__name__)

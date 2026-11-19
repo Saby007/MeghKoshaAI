@@ -6,9 +6,20 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from brand import BRAND_NAME
+from anomalies.models import DailyCostRecord
 from services.focus_history_reader import FocusHistoryData
 
 from .models import CostDetailRow, CostDetailSummary, ReportSnapshot
+
+
+def record_dimensions(record: DailyCostRecord) -> dict:
+    return {
+        "subscriptionId": record.subscription_id, "subscriptionName": record.subscription_name,
+        "resourceId": record.resource_id, "resourceName": record.resource_name,
+        "resourceType": record.resource_type, "resourceGroup": record.resource_group,
+        "serviceName": record.service_name, "region": record.region or "Unassigned",
+        "tags": record.tags, "tagAttributionSource": record.tag_attribution_source,
+    }
 
 
 def build_cost_details(
@@ -32,18 +43,7 @@ def build_cost_details(
         amount = Decimal(str(record.effective_cost))
         if not amount.is_finite():
             return CostDetailSummary(statusMessage="Daily cost detail contains invalid financial evidence and is unavailable.")
-        dimensions = {
-            "subscriptionId": record.subscription_id,
-            "subscriptionName": record.subscription_name,
-            "resourceId": record.resource_id,
-            "resourceName": record.resource_name,
-            "resourceType": record.resource_type,
-            "resourceGroup": record.resource_group,
-            "serviceName": record.service_name,
-            "region": record.region or "Unassigned",
-            "tags": record.tags,
-            "tagAttributionSource": record.tag_attribution_source,
-        }
+        dimensions = record_dimensions(record)
         key = json.dumps(dimensions, sort_keys=True, separators=(",", ":"))
         if key not in series:
             series[key] = (dimensions, {})
@@ -110,8 +110,8 @@ def build_cost_detail_export(
     from .exports import ReportArtifact, _sheet
 
     count = (end_date - start_date).days + 1
-    if count < 1 or count > 366:
-        raise ValueError("Select a valid cost window of at most 366 days")
+    if count < 1:
+        raise ValueError("Select an ordered cost window.")
     if set(filters) - {"subscriptionId", "resourceId", "resourceGroup", "region", "serviceName", "tagKey", "tagValue", "requiredTagKeys"}:
         raise ValueError("Unsupported cost filter")
     if "requiredTagKeys" in filters:
@@ -153,7 +153,6 @@ def build_cost_detail_export(
         ["Filters", json.dumps(filters, sort_keys=True)],
         ["Granularity", "Daily FOCUS charges; hourly values are daily cost / 24, not measured usage or uptime"],
         ["Tags and owner", "Exported resource tags, with current resource-group fallback only where labelled"],
-        ["Budget comparison", "Native budgets use their own current billing period and ActualCost basis, not this historical EffectiveCost window"],
     ])
     daily_rows = []
     for row in rows:

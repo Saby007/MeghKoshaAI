@@ -8,8 +8,6 @@ param privateEndpointSubnetId string
 param apiPrincipalId string
 @allowed(['Standard_LRS', 'Standard_ZRS'])
 param storageSku string = 'Standard_LRS'
-@description('Explicitly approved native-export ingress exception; never bypass an Azure Policy denial.')
-param allowNativeExportTrustedServices bool = false
 @description('Enable blob versioning and blob/container soft delete for subscriptions that audit data-protection settings.')
 param blobDataProtection bool = false
 @minValue(1)
@@ -38,10 +36,10 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowSharedKeyAccess: false
     allowCrossTenantReplication: false
     defaultToOAuthAuthentication: true
-    publicNetworkAccess: allowNativeExportTrustedServices ? 'Enabled' : 'Disabled'
+    publicNetworkAccess: 'Disabled'
     networkAcls: {
       defaultAction: 'Deny'
-      bypass: allowNativeExportTrustedServices ? 'AzureServices' : 'None'
+      bypass: 'None'
       ipRules: []
       virtualNetworkRules: []
     }
@@ -64,7 +62,7 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01'
   }
 }
 
-resource containers 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = [for name in ['cost-exports', 'report-snapshots', 'control-state']: {
+resource containers 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = [for name in ['focus-uploads', 'report-snapshots', 'control-state']: {
   parent: blobService
   name: name
   properties: { publicAccess: 'None' }
@@ -109,7 +107,7 @@ resource processorIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@202
   tags: tags
 }
 
-resource apiReaders 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for containerIndex in range(0, 2): {
+resource apiReaders 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for containerIndex in range(1, 1): {
   name: guid(containers[containerIndex].id, apiPrincipalId, 'blob-reader')
   scope: containers[containerIndex]
   properties: {
@@ -129,11 +127,9 @@ resource apiMetadataWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   }
 }
 
-// /api/report POSTs a new snapshot under the API's own identity (not the worker's); the
-// blob-reader grant above is not sufficient for that write.
-resource apiReportWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(containers[1].id, apiPrincipalId, 'report-writer')
-  scope: containers[1]
+resource apiUploadsWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(containers[0].id, apiPrincipalId, 'focus-upload-writer')
+  scope: containers[0]
   properties: {
     principalId: apiPrincipalId
     principalType: 'ServicePrincipal'
@@ -141,58 +137,17 @@ resource apiReportWriter 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   }
 }
 
-// Azure's own native FOCUS export creation grants Storage Blob Data Contributor to the export's
-// system-assigned identity on the destination container as a side effect - but only if the caller
-// creating the export (the API identity) itself has role-assignment write on this account. This
-// custom role is scoped to only this app's own storage account, never customer resources.
-resource storageSetupRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
-  name: guid(storage.id, 'export-storage-setup')
+resource workerUploadReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(containers[0].id, processorIdentity.id, 'focus-upload-reader')
+  scope: containers[0]
   properties: {
-    roleName: 'Cost Assessment Export Storage Setup ${resourceToken}'
-    description: 'Lets the API identity complete the native FOCUS export destination role assignment on this account only. No keys, deletion or data actions.'
-    type: 'CustomRole'
-    assignableScopes: [storage.id]
-    permissions: [{
-      actions: [
-        'Microsoft.Storage/storageAccounts/read'
-        'Microsoft.Storage/storageAccounts/write'
-        'Microsoft.Storage/storageAccounts/blobServices/containers/read'
-        'Microsoft.Authorization/permissions/read'
-        'Microsoft.Authorization/roleAssignments/read'
-        'Microsoft.Authorization/roleAssignments/write'
-      ]
-      notActions: []
-      dataActions: []
-      notDataActions: []
-    }]
-  }
-}
-
-resource apiStorageSetupAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storage.id, apiPrincipalId, storageSetupRole.id)
-  scope: storage
-  properties: {
-    principalId: apiPrincipalId
+    principalId: processorIdentity.properties.principalId
     principalType: 'ServicePrincipal'
-    roleDefinitionId: storageSetupRole.id
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')
   }
 }
 
-// Cost Management's export creation validates the destination storage account's management-plane
-// configuration (network rules, blob service properties) as part of the same request that creates
-// the role assignment above - the narrow custom role alone is not sufficient for that validation.
-// Matches Phase1's proven working grant (services/arm_client.py + infra/modules/costcontrolrbac.bicep).
-resource apiStorageAccountContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(storage.id, apiPrincipalId, 'storage-account-contributor')
-  scope: storage
-  properties: {
-    principalId: apiPrincipalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '17d1049b-9a84-46fb-8f53-869881c3d3ab')
-  }
-}
-
-resource processorWriters 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for containerIndex in range(0, 3): {
+resource processorWriters 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for containerIndex in range(1, 2): {
   name: guid(containers[containerIndex].id, processorIdentity.id, 'processor-writer')
   scope: containers[containerIndex]
   properties: {

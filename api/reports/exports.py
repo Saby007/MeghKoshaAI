@@ -16,7 +16,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 from brand import BRAND_NAME
-from reports.models import FinOpsActionState, ReportSnapshot
+from reports.models import FinOpsActionState, FullReport, ReportSnapshot
 
 CUSTOM_REPORT_MODULES = {
     "summary",
@@ -46,6 +46,10 @@ def _money(value: float, currency: str) -> str:
     return f"{currency} {value:,.0f}"
 
 
+def _live_value(report: FullReport, value: float | int | None) -> float | int | None:
+    return value if report.report_metadata.has_live_azure_evidence else None
+
+
 def build_executive_pdf(snapshot: ReportSnapshot) -> ReportArtifact:
     report = snapshot.report
     metadata = report.report_metadata
@@ -73,10 +77,10 @@ def build_executive_pdf(snapshot: ReportSnapshot) -> ReportArtifact:
 
     metrics = [
         ("Monthly spend", _money(summary.current_monthly_spend, metadata.currency), dark),
-        ("Estimated wastage", _money(summary.estimated_wastage_month, metadata.currency), orange),
-        ("Potential savings", _money(summary.potential_savings_month, metadata.currency), green),
-        ("Other billed resources" if summary.idle_review_candidates is not None else "Active resources", f"{summary.active_resources:,}", dark),
-        ("Confirmed idle" if summary.idle_review_candidates is not None else "Idle (legacy)", f"{summary.idle_resources:,}", orange),
+        ("Estimated wastage", _money(summary.estimated_wastage_month, metadata.currency) if metadata.has_live_azure_evidence else "Unavailable", orange),
+        ("Potential savings", _money(summary.potential_savings_month, metadata.currency) if metadata.has_live_azure_evidence else "Unavailable", green),
+        ("Other billed resources" if summary.idle_review_candidates is not None else "Active resources", f"{summary.active_resources:,}" if metadata.has_live_azure_evidence else "Unavailable", dark),
+        ("Confirmed idle" if summary.idle_review_candidates is not None else "Idle (legacy)", f"{summary.idle_resources:,}" if metadata.has_live_azure_evidence else "Unavailable", orange),
         ("Advisor score", f"{report.advisor_score.score:.0f} / 100" if report.advisor_score.score is not None else "Unavailable", dark),
     ]
     top = height - 110
@@ -256,6 +260,16 @@ def build_full_xlsx(snapshot: ReportSnapshot, subscription_id: str | None = None
         ["Idle review candidates", report.executive_summary.idle_review_candidates],
         ["Advisor score (all subscriptions)", report.advisor_score.score],
     ]
+    if not metadata.has_live_azure_evidence:
+        for row in summary_rows:
+            if row[0] in {
+                "Estimated wastage", "Potential savings / month", "Potential savings / year",
+                "Other billed resources (all subscriptions)", "Active resources (legacy)",
+                "Confirmed idle resources", "Idle resources (legacy)", "Idle review candidates",
+            }:
+                row[1] = None
+    summary_rows.extend([["Azure enrichment", metadata.enrichment_status],
+                         ["Azure evidence note", metadata.enrichment_message]])
     summary = _sheet(workbook, "Summary", ["Measure", "Value"], summary_rows)
     summary.column_dimensions["A"].width = 28
     summary.column_dimensions["B"].width = 70
@@ -462,7 +476,7 @@ def build_custom_xlsx(snapshots: list[ReportSnapshot], modules: list[str]) -> Re
                 ["Snapshot ID", snapshot.snapshot_id], ["Period", period], ["Period start", metadata.period_start],
                 ["Period end", metadata.period_end], ["Subscriptions", len(snapshot.subscription_ids)],
                 ["Currency", currency], ["Cost basis", cost_basis], ["Monthly spend", report.executive_summary.current_monthly_spend],
-                ["Potential savings", report.executive_summary.potential_savings_month],
+                ["Potential savings", _live_value(report, report.executive_summary.potential_savings_month)],
             ])
         if "subscriptions" in selected:
             _sheet(workbook, _custom_title(period, "Subscriptions", multiple), ["Subscription", "Subscription ID", f"Spend ({currency})", f"Verified saving ({currency})", "% recoverable"], [
@@ -539,7 +553,7 @@ def build_finops_monthly_xlsx(
         ["Period", metadata.period, previous_report.report_metadata.period if previous_report else None],
         ["Monthly spend", current_spend, previous_spend],
         ["Month-over-month spend change", spend_change, None],
-        ["Potential savings / month", report.executive_summary.potential_savings_month, previous_report.executive_summary.potential_savings_month if previous_report else None],
+        ["Potential savings / month", _live_value(report, report.executive_summary.potential_savings_month), _live_value(previous_report, previous_report.executive_summary.potential_savings_month) if previous_report else None],
         ["Tracked actions", len(states), None],
         ["Completed actions", sum(1 for state in states if state.status == "completed"), None],
         ["Realized saving / month", sum(state.realized_saving_month or 0 for state in states if state.status == "completed"), None],
@@ -555,10 +569,10 @@ def build_finops_monthly_xlsx(
             value.report_metadata.period_start,
             value.report_metadata.period_end,
             value.executive_summary.current_monthly_spend,
-            value.executive_summary.potential_savings_month,
-            value.executive_summary.estimated_wastage_month,
-            value.executive_summary.active_resources,
-            value.executive_summary.idle_resources,
+            _live_value(value, value.executive_summary.potential_savings_month),
+            _live_value(value, value.executive_summary.estimated_wastage_month),
+            _live_value(value, value.executive_summary.active_resources),
+            _live_value(value, value.executive_summary.idle_resources),
         ])
     _sheet(workbook, "Monthly Trend", ["Period", "Start", "End", f"Spend ({metadata.currency})", f"Potential savings ({metadata.currency})", f"Estimated wastage ({metadata.currency})", "Active resources", "Idle resources"], trend_rows)
     _sheet(workbook, "Actions", ["Action ID", "Action", "Subscriptions", f"Potential saving ({metadata.currency}/mo)", "Status", "Owner", "Due date", "Completed at", f"Realized saving ({metadata.currency}/mo)", "Note", "Updated at", "Updated by"], [

@@ -1,9 +1,11 @@
 """Bounded SQL cost projections for the original report components."""
 
 import calendar
+import hashlib
 import json
 import re
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Literal
 
 import asyncpg
@@ -11,7 +13,9 @@ from pydantic import BaseModel, Field, JsonValue
 
 from services.assessment_limits import AssessmentLimitError
 from services.assessment_settings import settings
-from reports.models import CostDetailSummary
+from reports.models import CostDetailRow, CostDetailSummary
+from reports.cost_details import record_dimensions
+from services.focus_history_reader import FocusHistoryData
 
 
 class CostWindow(BaseModel):
@@ -36,7 +40,7 @@ class CostSelection(BaseModel):
 
 
 class CostQuery(BaseModel):
-    kind: Literal["groups", "metrics", "daily", "facets", "sources", "budget", "budgetRelations"]
+    kind: Literal["groups", "metrics", "daily", "facets", "sources"]
     window: CostWindow | None = None
     previous: CostWindow | None = None
     filters: dict[str, str] = Field(default_factory=dict, max_length=8)
@@ -63,8 +67,8 @@ def _dates(window: CostWindow) -> list[date]:
     days = (window.end_date - window.start_date).days + 1
     if days < 1:
         raise ValueError("Cost window dates must be ordered.")
-    if days > 366:
-        raise ValueError("Cost windows must contain at most 366 days.")
+    if days * 16 > settings().response_bytes:
+        raise AssessmentLimitError("The daily date axis exceeds the response budget. Select a smaller projection window.")
     return [window.start_date + timedelta(days=index) for index in range(days)]
 
 
@@ -147,6 +151,55 @@ def row_predicate(filters: list[dict[str, str]], arguments: list) -> str:
                     "WHERE btrim(t.value)<>'')"
                 )
     return " AND ".join(predicate)
+
+
+async def persist_history(
+    connection: asyncpg.Connection, tenant: str, snapshot_id: str, history: FocusHistoryData,
+) -> None:
+    await connection.execute(
+        "CREATE TEMP TABLE focus_daily_stage(detail_id text NOT NULL,charge_date date NOT NULL,"
+        "amount numeric NOT NULL) ON COMMIT DROP"
+    )
+    dimensions: dict[str, CostDetailRow] = {}
+    identities: dict[str, str] = {}
+    points = []
+    for record in history.records:
+        metadata = record_dimensions(record)
+        key = json.dumps(metadata, sort_keys=True, separators=(",", ":"))
+        detail_id = hashlib.sha256(key.encode()).hexdigest()[:24]
+        if detail_id not in dimensions:
+            if len(dimensions) >= settings().detail_rows:
+                raise AssessmentLimitError("The report exceeds the configured resource-dimension budget.")
+            dimensions[detail_id] = CostDetailRow(**metadata, detailId=detail_id, dailyCosts={})
+            identities[detail_id] = key
+        elif identities[detail_id] != key:
+            raise ValueError("Two cost dimensions have a conflicting stable identity.")
+        points.append((detail_id, date.fromisoformat(record.date), Decimal(str(record.effective_cost))))
+        if len(points) == 5000:
+            await connection.copy_records_to_table("focus_daily_stage", records=points, timeout=300)
+            points.clear()
+    if points:
+        await connection.copy_records_to_table("focus_daily_stage", records=points, timeout=300)
+    await persist_costs(connection, tenant, snapshot_id, CostDetailSummary(status="complete", rows=list(dimensions.values())))
+    await connection.execute("ANALYZE focus_daily_stage")
+    points = []
+    async for row in connection.cursor(
+        "SELECT detail_id,charge_date,sum(amount)::double precision AS amount "
+        "FROM focus_daily_stage GROUP BY charge_date,detail_id ORDER BY charge_date,detail_id",
+        prefetch=5000, timeout=300,
+    ):
+        points.append((tenant, snapshot_id, row["detail_id"], row["charge_date"], row["amount"]))
+        if len(points) == 5000:
+            await connection.copy_records_to_table(
+                "cost_daily", schema_name="assessments", records=points,
+                columns=("tenant_id", "snapshot_id", "detail_id", "charge_date", "amount"), timeout=300,
+            )
+            points.clear()
+    if points:
+        await connection.copy_records_to_table(
+            "cost_daily", schema_name="assessments", records=points,
+            columns=("tenant_id", "snapshot_id", "detail_id", "charge_date", "amount"), timeout=300,
+        )
 
 
 async def persist_costs(connection: asyncpg.Connection, tenant: str, snapshot_id: str, details: CostDetailSummary) -> None:
@@ -318,6 +371,7 @@ async def cost_groups(connection: asyncpg.Connection, tenant: str, snapshot_id: 
         "count(*) FILTER(WHERE previous>0 AND (current-previous)/nullif(abs(previous),0)>0.3) AS spikes FROM groups", *arguments,
     )
     metadata = {
+        "complete": covered, "previousComplete": previous_covered,
         "total": totals["total"], "currentTotal": totals["current"] if covered else 0,
         "previousTotal": totals["previous"] if previous_covered else 0,
         "largest": totals["largest"] if covered else 0,

@@ -171,7 +171,6 @@ const TABS = [
   'Advisor Reconciliation',
   'Governance & Risk',
   'Cost by Tags/Application',
-  'Budgets',
   'Action Plan',
 ] as const;
 
@@ -211,7 +210,7 @@ const PRIMARY_NAV_ICONS = {
 
 const PRIMARY_NAV_TABS: Record<PrimaryNav, Tab[]> = {
   dashboard: ['Executive Summary'],
-  costManagement: ['Subscription Breakdown', 'History', 'Cost by Hour', 'Cost by Tags/Application', 'EA Pricing', 'Rate Optimization', 'Cost Anomalies', 'Budgets'],
+  costManagement: ['Subscription Breakdown', 'History', 'Cost by Hour', 'Cost by Tags/Application', 'EA Pricing', 'Rate Optimization', 'Cost Anomalies'],
   resources: ['Stale Resources', 'Governance & Risk'],
   analytics: ['Advisor Reconciliation'],
   recommendations: ['Savings Roadmap', 'Compute Optimization', 'Storage Optimization', 'Network Optimization', 'Azure SQL Optimization', 'AI Optimization'],
@@ -616,7 +615,12 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
   useEffect(() => setCostFilters({}), [report]);
   useEffect(() => setUncontrolledCostWindow(defaultCostWindow(report)), [report]);
   const anomalyState = useAnomalySummary(report, report.remote ? snapshotId : undefined);
-  const budgetState = useBudgetSummary(report);
+  const budgetState: BudgetState | undefined = undefined;
+  const liveEvidenceMissing = report.reportMetadata.enrichmentStatus === 'not_configured'
+    || report.reportMetadata.enrichmentStatus === 'failed';
+  const requiresAzure: readonly Tab[] = ['Savings Roadmap', 'Stale Resources', 'Rate Optimization',
+    'Compute Optimization', 'Storage Optimization', 'Network Optimization', 'Azure SQL Optimization',
+    'AI Optimization', 'Advisor Reconciliation', 'Governance & Risk', 'Action Plan'];
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const sourceCurrency = report.reportMetadata.currency.toUpperCase();
   const [displayCurrency, setDisplayCurrency] = useState(sourceCurrency);
@@ -624,7 +628,6 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
   const [exchangeError, setExchangeError] = useState<string | null>(null);
   const [loadingExchangeRates, setLoadingExchangeRates] = useState(true);
   const [activeRemediation, setActiveRemediation] = useState<{ finding: string; plan: RemediationPlan } | null>(null);
-  const [showFocusDownloads, setShowFocusDownloads] = useState(false);
   const [showReportExports, setShowReportExports] = useState(false);
   const [showCustomReportBuilder, setShowCustomReportBuilder] = useState(false);
   const narrativeByCategory = new Map((narration?.prioritized_findings ?? []).map((p) => [p.category, p]));
@@ -742,7 +745,7 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           <div className="page-scope-summary" aria-label="Report scope summary">
             <span>{report.subscriptionBreakdown.length} {report.subscriptionBreakdown.length === 1 ? 'subscription' : 'subscriptions'}</span>
             <span>{reportDate(costWindow.startDate)} – {reportDate(costWindow.endDate)} UTC</span>
-            <span title="Assessment snapshot timestamp, not the freshness of live budget or export data">Snapshot: {new Date(snapshotCreatedAt ?? report.reportMetadata.generatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
+            <span title="Processing snapshot timestamp, not the collection time of live Azure evidence">Snapshot: {new Date(snapshotCreatedAt ?? report.reportMetadata.generatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
           </div>
         </div>
         {/* The period badge ("2026-08") repeated the cost window's From/To,
@@ -783,20 +786,10 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
             {/* On the Executive Summary the overview already carries these
                 figures directly beneath this disclosure, so repeating them here
                 only duplicated the page. Other tabs keep them as context. */}
-            {tab !== 'Executive Summary' && <TopSummaryBar report={report} formatMoney={formatMoney} />}
+            {tab !== 'Executive Summary' && !liveEvidenceMissing && <TopSummaryBar report={report} formatMoney={formatMoney} />}
           </div>
         </details>
       </div>
-        <button
-          className="focus-download-control"
-          type="button"
-          title="Download FocusCost files"
-          aria-label="Download FocusCost files"
-          onClick={() => setShowFocusDownloads(true)}
-        >
-          <Download size={15} aria-hidden="true" />
-          <span className="titlebar-button-label">FOCUS files</span>
-        </button>
         <button
           className="report-download-control"
           type="button"
@@ -831,15 +824,6 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
           onClose={() => setActiveRemediation(null)}
         />
       )}
-      {showFocusDownloads && (
-        <FocusExportDialog
-          subscriptions={report.subscriptionBreakdown.map((item) => ({
-            subscriptionId: item.subscriptionId,
-            subscriptionName: item.subscriptionName,
-          }))}
-          onClose={() => setShowFocusDownloads(false)}
-        />
-      )}
       {showReportExports && snapshotId && (
         <ReportExportDialog
           snapshotId={snapshotId}
@@ -859,7 +843,18 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
         />
       )}
       <div className="dashboard-body">
+        {report.reportMetadata.enrichmentStatus && <aside className="manual-notice" role="status">
+          <strong>{liveEvidenceMissing ? 'FOCUS-only financial dashboard. ' : 'Reader service-principal enrichment. '}</strong>
+          {report.reportMetadata.enrichmentMessage}
+          <p>Uploaded coverage: {report.reportMetadata.uploadStart} through {report.reportMetadata.uploadEnd}.
+            {' '}Monthly optimization basis: {report.reportMetadata.period}{report.reportMetadata.assessmentMonthPartial ? ' (partial uploaded month)' : ''}.</p>
+        </aside>}
         <div className="tab-panel" key={tab}>
+          {liveEvidenceMissing && requiresAzure.includes(tab) ? <section className="panel" role="status">
+            <h2>Azure evidence unavailable</h2>
+            <p>{report.reportMetadata.enrichmentMessage}</p>
+            <p>Use Admin to add optional Reader service-principal credentials and rebuild this report. Financial pages remain available from the uploaded file.</p>
+          </section> : <>
           {tab === 'Executive Summary' && (
             <ExecutiveSummaryTab
               report={report}
@@ -994,10 +989,8 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
               snapshotId={snapshotId}
             />
           )}
-          {tab === 'Budgets' && (
-            <BudgetsTab report={report} costWindow={costWindow} formatMoney={formatMoney} />
-          )}
           {tab === 'Action Plan' && <ActionPlanTab report={report} formatMoney={formatMoney} displayCurrency={displayCurrency} snapshotId={snapshotId} />}
+          </>}
         </div>
       </div>
       </div>
@@ -1005,10 +998,7 @@ export function ReportView({ report, narration, snapshotId, snapshotCreatedAt, c
   );
 }
 
-type FocusExportSubscription = {
-  subscriptionId: string;
-  subscriptionName: string;
-};
+
 
 type ReportExportState = {
   state: 'idle' | 'downloading' | 'done' | 'failed';
@@ -1331,127 +1321,13 @@ function CustomReportDialog({
   );
 }
 
-type FocusExportResult = FocusExportSubscription & {
-  files: FocusExportFile[];
-  error: string | null;
-};
-
 const fileSize = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-function FocusExportDialog({
-  subscriptions,
-  onClose,
-}: {
-  subscriptions: FocusExportSubscription[];
-  onClose: () => void;
-}) {
-  const dialogRef = useDialogFocus(onClose);
-  const [results, setResults] = useState<FocusExportResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [downloads, setDownloads] = useState<Record<string, { state: 'downloading' | 'done' | 'failed'; elapsedMs?: number; error?: string }>>({});
 
-  async function download(result: FocusExportResult, file: FocusExportFile) {
-    setDownloads((current) => ({ ...current, [file.blobName]: { state: 'downloading' } }));
-    try {
-      const completed = await downloadFocusExport(result.subscriptionId, file);
-      setDownloads((current) => ({ ...current, [file.blobName]: { state: 'done', elapsedMs: completed.elapsedMs } }));
-    } catch (error) {
-      setDownloads((current) => ({
-        ...current,
-        [file.blobName]: {
-          state: 'failed',
-          error: error instanceof Error ? error.message : 'Download failed.',
-        },
-      }));
-    }
-  }
-
-  useEffect(() => {
-    const controller = new AbortController();
-    Promise.all(subscriptions.map(async (subscription) => {
-      try {
-        const response = await listFocusExportFiles(subscription.subscriptionId, controller.signal);
-        return { ...subscription, files: response.files, error: null };
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') throw error;
-        return {
-          ...subscription,
-          files: [],
-          error: error instanceof Error ? error.message : 'FocusCost files are unavailable.',
-        };
-      }
-    }))
-      .then(setResults)
-      .catch((error) => {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) {
-          setResults(subscriptions.map((subscription) => ({
-            ...subscription,
-            files: [],
-            error: 'FocusCost files are unavailable.',
-          })));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [subscriptions]);
-
-  return (
-    <div className="remediation-backdrop" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
-      <section ref={dialogRef} tabIndex={-1} className="remediation-dialog focus-export-dialog" role="dialog" aria-modal="true" aria-labelledby="focus-export-title">
-        <header className="remediation-dialog-header">
-          <div>
-            <span>Private cost evidence</span>
-            <h2 id="focus-export-title">FocusCost files</h2>
-            <p>Files are streamed through the authenticated {BRAND_NAME} API.</p>
-          </div>
-          <button autoFocus type="button" onClick={onClose} title="Close" aria-label="Close FocusCost files"><X size={18} /></button>
-        </header>
-        <div className="focus-export-body" aria-live="polite">
-          {loading ? (
-            <p className="focus-export-loading">Checking private export storage...</p>
-          ) : results.map((result) => (
-            <section className="focus-export-subscription" key={result.subscriptionId}>
-              <header>
-                <strong>{result.subscriptionName}</strong>
-                <small>{result.subscriptionId}</small>
-              </header>
-              {result.error ? (
-                <p className="focus-export-empty">{result.error}</p>
-              ) : result.files.length === 0 ? (
-                <p className="focus-export-empty">No FocusCost file is available yet.</p>
-              ) : (
-                <ul className="focus-export-files">
-                  {result.files.map((file) => (
-                    <li key={file.blobName}>
-                      <span>
-                        <strong>{file.fileName}</strong>
-                        <small>{fileSize(file.size)} · {file.lastModified ? new Date(file.lastModified).toLocaleString() : 'Timestamp unavailable'}</small>
-                        {downloads[file.blobName]?.state === 'done' && <small className="download-timing">Downloaded in {((downloads[file.blobName].elapsedMs ?? 0) / 1000).toFixed(2)}s</small>}
-                        {downloads[file.blobName]?.state === 'failed' && <small className="download-error">{downloads[file.blobName].error}</small>}
-                      </span>
-                      <button type="button" onClick={() => void download(result, file)} disabled={downloads[file.blobName]?.state === 'downloading'}>
-                        {downloads[file.blobName]?.state === 'downloading' ? <RefreshCw className="spin" size={15} aria-hidden="true" /> : <Download size={15} aria-hidden="true" />}
-                        {downloads[file.blobName]?.state === 'downloading' ? 'Downloading' : 'Download'}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-}
 
 function RemediationDialog({
   finding,
@@ -1631,6 +1507,7 @@ function ExecutiveSummaryTab({
 }) {
   const s = report.executiveSummary;
   const metadata = report.reportMetadata;
+  const hasLiveEvidence = metadata.enrichmentStatus !== 'not_configured' && metadata.enrichmentStatus !== 'failed';
   const completeness = report.completeness;
   /* One window for the whole page: the report-wide cost window. */
   const takeaways = useMemo(() => buildTakeaways({
@@ -1677,39 +1554,39 @@ function ExecutiveSummaryTab({
             onOpenAnomalies={onOpenAnomalies}
             onOpenHistory={() => onNavigate('History')}
             monthlyContext={s.spendChangePercentage === null
-              ? 'Monthly comparison accrues next month'
+              ? metadata.source === 'Manual FOCUS upload' ? 'Upload prior-month coverage to enable monthly comparison' : 'Monthly comparison accrues next month'
               : <>{s.spendChangePercentage >= 0 ? '▲' : '▼'} {Math.abs(s.spendChangePercentage * 100).toFixed(1)}% vs previous complete month</>}
           >
             <button type="button" className={`kpi-card kpi-link-card ${s.estimatedWastageMonth > 0 ? 'risk' : 'neutral'}`} onClick={() => onNavigate('Stale Resources')} aria-label="Open stale and orphaned resources">
               <div className="kpi-label"><span className="exec-metric-icon"><Gauge size={16} aria-hidden="true" /></span>Estimated wastage</div>
-              <div className="kpi-value"><CountUp value={s.estimatedWastageMonth} format={formatMoney} /></div>
-              <div className="kpi-note">{percent(s.pctWastage)} of assessed month · billed cost at risk</div>
+              <div className="kpi-value">{hasLiveEvidence ? <CountUp value={s.estimatedWastageMonth} format={formatMoney} /> : 'Unavailable'}</div>
+              <div className="kpi-note">{hasLiveEvidence ? `${percent(s.pctWastage)} of assessed month - billed cost at risk` : 'Optional Reader service principal required'}</div>
               <span className="kpi-card-link-label" title="Review waste"><ChevronRight size={16} aria-hidden="true" /></span>
             </button>
             <button type="button" className="kpi-card kpi-link-card positive" onClick={() => onNavigate('Savings Roadmap')} aria-label="Open savings roadmap">
               <div className="kpi-label"><span className="exec-metric-icon"><TrendingDown size={16} aria-hidden="true" /></span>Potential savings</div>
-              <div className="kpi-value"><CountUp value={s.potentialSavingsMonth} format={formatMoney} /></div>
-              <div className="kpi-note">{percent(s.pctRecoverable)} of assessed month · estimated / month</div>
+              <div className="kpi-value">{hasLiveEvidence ? <CountUp value={s.potentialSavingsMonth} format={formatMoney} /> : 'Unavailable'}</div>
+              <div className="kpi-note">{hasLiveEvidence ? `${percent(s.pctRecoverable)} of assessed month - estimated / month` : 'Optional Reader service principal required'}</div>
               <span className="kpi-card-link-label" title="Open roadmap"><ChevronRight size={16} aria-hidden="true" /></span>
             </button>
           </CostWindowMetrics>
 
           <div className="executive-hero-context">
             <div className="kpi-card">
-              <div className="kpi-label">{s.idleReviewCandidates == null ? 'Active resources' : 'Other billed resources'}</div>
-              <div className="kpi-value">{s.activeResources.toLocaleString()}</div>
+              <div className="kpi-label">{!hasLiveEvidence ? 'FOCUS billed resources' : s.idleReviewCandidates == null ? 'Active resources' : 'Other billed resources'}</div>
+              <div className="kpi-value">{(!hasLiveEvidence ? metadata.billedResourceCount ?? 0 : s.activeResources).toLocaleString()}</div>
               <div className="kpi-note">Cost-bearing resources across {completeness.availableSubscriptions} subscriptions</div>
             </div>
             <button type="button" className={`kpi-card kpi-link-card ${s.idleResources > 0 ? 'risk' : 'neutral'}`} onClick={() => onNavigate('Stale Resources')} aria-label="Open confirmed idle resources">
               <div className="kpi-label">{s.idleReviewCandidates == null ? 'Idle resources (legacy)' : 'Confirmed idle resources'}</div>
-              <div className="kpi-value">{s.idleResources.toLocaleString()}</div>
-              {s.idleReviewCandidates != null && <div className="kpi-note">{s.idleReviewCandidates.toLocaleString()} candidates require evidence or owner review</div>}
-              <div className="kpi-note">{percent(s.idleResourcePercentage)} of assessed active + idle resources</div>
+              <div className="kpi-value">{hasLiveEvidence ? s.idleResources.toLocaleString() : 'Unavailable'}</div>
+              {hasLiveEvidence && s.idleReviewCandidates != null && <div className="kpi-note">{s.idleReviewCandidates.toLocaleString()} candidates require evidence or owner review</div>}
+              <div className="kpi-note">{hasLiveEvidence ? `${percent(s.idleResourcePercentage)} of assessed active + idle resources` : 'No inventory or metric API calls were made'}</div>
               <span className="kpi-card-link-label" title="Review resources"><ChevronRight size={16} aria-hidden="true" /></span>
             </button>
             <div className="kpi-card">
               <div className="kpi-label">Advisor score</div>
-              <div className="kpi-value">{report.advisorScore.score === null ? '—' : `${report.advisorScore.score.toFixed(0)} / 100`}</div>
+              <div className="kpi-value">{!hasLiveEvidence ? 'Unavailable' : report.advisorScore.score === null ? '—' : `${report.advisorScore.score.toFixed(0)} / 100`}</div>
               <div className="kpi-note">
                 {report.advisorScore.monthlyChange === null
                   ? report.advisorScore.status
@@ -1719,10 +1596,10 @@ function ExecutiveSummaryTab({
           </div>
         </div>
 
-        <ExecutiveTakeaways
+        {hasLiveEvidence && <ExecutiveTakeaways
           items={takeaways.filter((item) => item.key !== 'spend')}
           onNavigate={onNavigate}
-        />
+        />}
       </DashboardSection>
 
       <DashboardSection
@@ -1760,7 +1637,7 @@ function ExecutiveSummaryTab({
 
       <div className={`executive-evidence-grid${report.prioritizedFindings.length ? ' has-findings' : ''}`}>
         <div className="executive-evidence-notes">
-        {report.operationalSignals.length > 0 && (() => {
+        {hasLiveEvidence && report.operationalSignals.length > 0 && (() => {
           /* The badge counted checks run, not issues found, so three clean
              checks read as "3 signals". A value that parses to zero is a
              clean check; anything else (including a non-numeric value) is
@@ -1800,7 +1677,9 @@ function ExecutiveSummaryTab({
           aside={report.prioritizedFindings.length > 0 ? <span className="executive-section-count">{report.prioritizedFindings.length} {report.prioritizedFindings.length === 1 ? 'finding' : 'findings'}</span> : undefined}
         >
           {report.prioritizedFindings.length === 0 ? (
-            <p className="executive-signal-clear" role="status">No prioritised findings in this snapshot. Review coverage and domain evidence before concluding that no action is needed.</p>
+            <p className="executive-signal-clear" role="status">{hasLiveEvidence
+              ? 'No prioritised findings in this snapshot. Review coverage and domain evidence before concluding that no action is needed.'
+              : 'Azure findings were not collected. Configure an optional Reader service principal to enable resource evidence.'}</p>
           ) : (
           <div className="executive-table-scroll">
             <table className="report-table executive-findings-table">
@@ -4023,7 +3902,7 @@ function CostByTagsTab({
   return (
     <div className="panel">
       <h2 className="section-title">Cost by Tags/Application</h2>
-      <p className="section-subtitle">Pick a tag key, then a value, to see what that application costs, its daily spend and the budget that tracks it.</p>
+      <p className="section-subtitle">Pick a tag key, then a value, to see the uploaded daily costs for that application.</p>
       {!summary?.available || dimensions.length === 0 ? (
         <EvidenceState title="Tag evidence unavailable" detail={summary?.status ?? 'No resource or resource-group tags were present.'} />
       ) : (
@@ -4137,7 +4016,7 @@ function CostByTagsTab({
           appear only when their own filter names this key and value; none is
           listed otherwise, rather than offering wider budgets as a stand-in. */}
       {selectionMade ? (
-        <section className="tag-selection" aria-label={`Daily spend and budget for ${scopeLabel}`}>
+        <section className="tag-selection" aria-label={`Daily spend for ${scopeLabel}`}>
           <header className="cost-section-heading">
             <h3 className="section-title">{scopeLabel}</h3>
             <span className="tag-selection-total">{formatMoney(selectionTotal)} in the selected period</span>
@@ -4187,8 +4066,8 @@ function CostByTagsTab({
         </section>
       ) : dimensions.length > 0 && (
         <p className="tag-selection-hint">{dimension
-          ? <>Choose a value for <strong>{dimension.tagKey}</strong> above to see its daily spend and budget.</>
-          : 'Choose a tag key and value above to see an application’s daily spend and budget. The breakdown below currently includes all tag keys and values.'}</p>
+          ? <>Choose a value for <strong>{dimension.tagKey}</strong> above to see its daily spend.</>
+          : 'Choose a tag key and value above to see application daily spend. The breakdown below includes all tag keys and values.'}</p>
       )}
 
       {/* Where the tagged money actually went. Scoped by the tag selection
@@ -4221,377 +4100,7 @@ function CostByTagsTab({
   );
 }
 
-function BudgetsTab({ report, costWindow, formatMoney }: { report: FullReport; costWindow: CostWindow; formatMoney: MoneyFormatter }) {
-  function defaultStartDate(): string {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-  }
-  const emptyForm = (): BudgetWriteRequest => ({
-    subscriptionId: report.subscriptionBreakdown[0]?.subscriptionId ?? '',
-    name: '',
-    amount: 0,
-    timeGrain: 'Monthly',
-    startDate: defaultStartDate(),
-    endDate: null,
-    alertThresholdPercent: null,
-    alertEmail: '',
-  });
-  const [budgets, setBudgets] = useState<Budget[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [refreshVersion, setRefreshVersion] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const formRef = useRef<HTMLFormElement>(null);
-  const [form, setForm] = useState<BudgetWriteRequest>(emptyForm());
-  const [editing, setEditing] = useState<{ subscriptionId: string; name: string } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [openBudget, setOpenBudget] = useState<string | null>(null);
-  const [budgetQuery, setBudgetQuery] = useState('');
-  const [budgetFilter, setBudgetFilter] = useState<'all' | 'expiring' | 'expired' | 'forecast' | 'over' | 'open'>('all');
 
-  const subscriptionIds = report.subscriptionBreakdown.map((row) => row.subscriptionId);
-  const budgetScope = JSON.stringify(subscriptionIds.slice().sort());
-  const refreshBudgets = () => setRefreshVersion(value => value + 1);
-  const clearBudgetFilters = () => { setBudgetQuery(''); setBudgetFilter('all'); };
-  const subscriptionNames = new Map(report.subscriptionBreakdown.map((row) => [row.subscriptionId, row.subscriptionName]));
-  const expiring = (budget: Budget) => {
-    const days = budgetExpiryDays(budget.periodEnd);
-    return days !== null && days >= 0 && days <= 30;
-  };
-  const expired = (budget: Budget) => {
-    const days = budgetExpiryDays(budget.periodEnd);
-    return days !== null && days < 0;
-  };
-  const forecastOver = (budget: Budget) => budget.forecastSpend !== null && budget.forecastSpend > budget.amount;
-  const filterChoices = [
-    { value: 'all', label: 'All budgets', count: budgets.length },
-    { value: 'expiring', label: 'Expiring in 30 days', count: budgets.filter(expiring).length },
-    { value: 'expired', label: 'Expired', count: budgets.filter(expired).length },
-    { value: 'forecast', label: 'Forecast over budget', count: budgets.filter(forecastOver).length },
-    { value: 'over', label: 'Over budget now', count: budgets.filter((budget) => budget.currentSpend !== null && budget.currentSpend > budget.amount).length },
-    { value: 'open', label: 'Open-ended', count: budgets.filter((budget) => !budget.periodEnd).length },
-  ] as const;
-  const visibleBudgets = budgets.filter((budget) => {
-    const text = [budget.name, budget.subscriptionId, subscriptionNames.get(budget.subscriptionId), budget.currency, budget.periodEnd].filter(Boolean).join(' ').toLocaleLowerCase();
-    if (!text.includes(budgetQuery.trim().toLocaleLowerCase())) return false;
-    switch (budgetFilter) {
-      case 'expiring': return expiring(budget);
-      case 'expired': return expired(budget);
-      case 'forecast': return forecastOver(budget);
-      case 'over': return budget.currentSpend !== null && budget.currentSpend > budget.amount;
-      case 'open': return !budget.periodEnd;
-      default: return true;
-    }
-  });
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoadError(null);
-    setBudgets([]);
-    if (subscriptionIds.length === 0) {
-      setLoading(false);
-      return undefined;
-    }
-    setLoading(true);
-    const timer = window.setTimeout(() => {
-      controller.abort();
-      setLoading(false);
-      setLoadError('Azure budget lookup timed out. Retry the budget check.');
-    }, 15000);
-    listBudgets(subscriptionIds, controller.signal)
-      .then(result => { if (!controller.signal.aborted) setBudgets(result); })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        setLoadError(err instanceof Error ? err.message : 'Budgets are unavailable.');
-      })
-      .finally(() => { window.clearTimeout(timer); if (!controller.signal.aborted) setLoading(false); });
-    return () => { controller.abort(); window.clearTimeout(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [budgetScope, refreshVersion]);
-
-  function formatNative(amount: number | null, currency: string): string {
-    if (amount === null) return '—';
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency,
-      currencyDisplay: 'narrowSymbol',
-      maximumFractionDigits: 0,
-    }).format(amount);
-  }
-
-  function edit(budget: Budget) {
-    setEditing({ subscriptionId: budget.subscriptionId, name: budget.name });
-    setForm({
-      subscriptionId: budget.subscriptionId,
-      name: budget.name,
-      amount: budget.amount,
-      timeGrain: (budget.timeGrain as BudgetTimeGrain) || 'Monthly',
-      startDate: budget.periodStart ? budget.periodStart.slice(0, 10) : defaultStartDate(),
-      endDate: budget.periodEnd ? budget.periodEnd.slice(0, 10) : null,
-      alertThresholdPercent: null,
-      alertEmail: '',
-    });
-  }
-
-  function cancelEdit() {
-    setEditing(null);
-    setForm(emptyForm());
-  }
-
-  async function submit() {
-    if (form.endDate && form.endDate <= form.startDate) {
-      setError('Budget end date must be after the start date.');
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      let saved: Budget;
-      if (editing) {
-        const updated = await updateBudget(editing.subscriptionId, editing.name, form);
-        saved = updated;
-        setBudgets((current) => current.map((budget) => (
-          budget.subscriptionId === editing.subscriptionId && budget.name === editing.name ? updated : budget
-        )));
-      } else {
-        const created = await createBudget(form);
-        saved = created;
-        setBudgets((current) => [...current, created]);
-      }
-      if (form.endDate && saved.periodEnd.slice(0, 10) !== form.endDate) {
-        setEditing({ subscriptionId: saved.subscriptionId, name: saved.name });
-        setError(`Budget "${saved.name}" was saved, but the requested end date ${form.endDate} was not applied (Azure returned ${saved.periodEnd.slice(0, 10) || 'no end date'}). The deployed API may not support end dates yet. Do not create it again; update this budget after the API is upgraded.`);
-        return;
-      }
-      cancelEdit();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Budget save failed.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function remove(budget: Budget) {
-    setError(null);
-    try {
-      await deleteBudget(budget.subscriptionId, budget.name);
-      setBudgets((current) => current.filter((item) => (
-        !(item.subscriptionId === budget.subscriptionId && item.name === budget.name)
-      )));
-      if (editing?.subscriptionId === budget.subscriptionId && editing?.name === budget.name) cancelEdit();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Budget delete failed.');
-    }
-  }
-
-  return (
-    <div className="panel">
-      <div className="section-title-row">
-        <h2 className="section-title">Budgets</h2>
-        {/* live: fetched from Azure on every visit, unlike the rest of this report (snapshot-based) */}
-        <span className="live-badge" title="Fetched live from Azure, not from the report snapshot">Live</span>
-        <button type="button" className="outline-command" onClick={refreshBudgets} disabled={loading || saving}
-          aria-label="Refresh managed budgets"><RefreshCw size={15} aria-hidden="true" /> Refresh budgets</button>
-      </div>
-      <p className="section-subtitle">Create, edit, and delete Azure Cost Management budgets directly for the selected subscriptions.</p>
-      <p className="budget-period-help">Recurrence resets the spending cycle. End date controls when the budget expires; leaving it blank lets Azure choose its default.</p>
-      {error && <p className="workflow-error" role="alert">{error}</p>}
-      <form
-        ref={formRef}
-        className="budget-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <label><span>Subscription</span>
-        <select
-          aria-label="Budget subscription"
-          required
-          disabled={!!editing}
-          value={form.subscriptionId}
-          onChange={(event) => setForm((current) => ({ ...current, subscriptionId: event.target.value }))}
-        >
-          <option value="">Select subscription</option>
-          {report.subscriptionBreakdown.map((subscription) => (
-            <option value={subscription.subscriptionId} key={subscription.subscriptionId}>{subscription.subscriptionName}</option>
-          ))}
-        </select>
-        </label>
-        <label><span>Budget name</span>
-        <input
-          required
-          disabled={!!editing}
-          placeholder="Budget name"
-          aria-label="Budget name"
-          value={form.name}
-          onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-        />
-        </label>
-        <label><span>Amount</span>
-        <input
-          required
-          type="number"
-          min="0"
-          step="0.01"
-          placeholder="0.00"
-          aria-label="Budget amount"
-          value={form.amount || ''}
-          onChange={(event) => setForm((current) => ({ ...current, amount: Number(event.target.value) }))}
-        />
-        </label>
-        <label><span>Recurrence</span>
-        <select
-          aria-label="Budget recurrence"
-          value={form.timeGrain}
-          onChange={(event) => setForm((current) => ({ ...current, timeGrain: event.target.value as BudgetTimeGrain }))}
-        >
-          <option value="Monthly">Monthly</option>
-          <option value="Quarterly">Quarterly</option>
-          <option value="Annually">Annually</option>
-        </select>
-        </label>
-        <label><span>Start date</span>
-        <input
-          required
-          type="date"
-          aria-label="Budget start date"
-          value={form.startDate}
-          max={form.endDate ?? undefined}
-          onChange={(event) => setForm((current) => ({ ...current, startDate: event.target.value }))}
-        />
-        </label>
-        <label><span>End date</span>
-        <input
-          type="date"
-          aria-label="Budget end date"
-          min={form.startDate}
-          value={form.endDate ?? ''}
-          onChange={(event) => setForm((current) => ({ ...current, endDate: event.target.value || null }))}
-          title="Budget expiry date; leave blank to use Azure's default end date"
-        />
-        </label>
-        <label><span>Alert threshold (%)</span>
-        <input
-          type="number"
-          min="1"
-          max="1000"
-          placeholder="Optional"
-          aria-label="Budget alert threshold percentage"
-          value={form.alertThresholdPercent ?? ''}
-          onChange={(event) => setForm((current) => ({
-            ...current,
-            alertThresholdPercent: event.target.value === '' ? null : Number(event.target.value),
-          }))}
-        />
-        </label>
-        <label><span>Alert email</span>
-        <input
-          type="email"
-          placeholder="Optional"
-          aria-label="Budget alert email"
-          value={form.alertEmail ?? ''}
-          onChange={(event) => setForm((current) => ({ ...current, alertEmail: event.target.value }))}
-        />
-        </label>
-        <div className="budget-form-actions">
-          <button type="submit" disabled={saving}>{saving ? <RefreshCw className="spin" size={16} aria-hidden="true" /> : editing ? <Check size={16} aria-hidden="true" /> : <Plus size={16} aria-hidden="true" />}{saving ? 'Saving...' : editing ? 'Save changes' : 'Add budget'}</button>
-          {editing && <button type="button" onClick={cancelEdit}><X size={16} aria-hidden="true" />Cancel</button>}
-        </div>
-      </form>
-      {!loading && budgets.length > 0 && (
-        <div className="table-toolbar budget-management-toolbar" role="search" aria-label="Filter budget management">
-          <label className="table-search"><Search size={15} aria-hidden="true" /><input type="search" aria-label="Search managed budgets" placeholder="Search name or subscription" value={budgetQuery} onChange={(event) => setBudgetQuery(event.target.value)} /></label>
-          <label className="billing-filter"><span>Show</span><select aria-label="Budget attention filter" value={budgetFilter} onChange={(event) => {
-            const value = filterChoices.find((choice) => choice.value === event.target.value)?.value;
-            if (value) setBudgetFilter(value);
-          }}>{filterChoices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label} ({choice.count})</option>)}</select></label>
-          <span className="table-count" role="status">{visibleBudgets.length} of {budgets.length} budgets</span>
-          {(budgetQuery || budgetFilter !== 'all') && <button type="button" className="ghost-button" onClick={clearBudgetFilters}>Clear budget filters</button>}
-        </div>
-      )}
-      {loading ? (
-        <EvidenceState loading title="Checking budgets" detail="Reading Azure budget configuration, current-cycle spend and forecasts. Your form draft is preserved." />
-      ) : loadError ? (
-        <EvidenceState tone="error" title="Budget lookup unavailable" detail={loadError}
-          action={{ label: 'Retry budget lookup', onClick: refreshBudgets }} />
-      ) : budgets.length === 0 ? (
-        <EvidenceState title="No budgets in this scope" detail="No budgets defined yet for the selected subscriptions. Use the form above to define an amount, recurrence and expiry."
-          action={{ label: 'Start a budget', onClick: () => formRef.current?.querySelector<HTMLInputElement>('[aria-label="Budget name"]')?.focus() }} />
-      ) : visibleBudgets.length === 0 ? (
-        <EvidenceState title="No budgets match these filters" detail="Clear the search or choose All budgets to see the full list."
-          action={{ label: 'Show all budgets', onClick: clearBudgetFilters }} />
-      ) : (
-        <div className="billing-table-scroll budget-management-scroll mobile-card-scroll" tabIndex={0} role="region" aria-label="Managed budgets">
-        <table className="report-table budget-table mobile-card-table" role="table">
-          <thead role="rowgroup">
-            <tr role="row">
-              <th scope="col" role="columnheader">Name</th>
-              <th scope="col" role="columnheader">Subscription</th>
-              <th scope="col" role="columnheader" className="num">Amount</th>
-              <th scope="col" role="columnheader" className="num">Current spend</th>
-              <th scope="col" role="columnheader" className="num">Forecast spend</th>
-              <th scope="col" role="columnheader">Projected outcome</th>
-              <th scope="col" role="columnheader">Time grain</th>
-              <th scope="col" role="columnheader">End date</th>
-              <th scope="col" role="columnheader"><span className="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody role="rowgroup">
-            {visibleBudgets.map((budget) => {
-              const pctUsed = budget.amount && budget.currentSpend !== null ? budget.currentSpend / budget.amount : 0;
-              const status = pctUsed >= 1 ? 'over' : pctUsed >= 0.85 ? 'at_risk' : 'on_track';
-              const forecastDelta = budget.forecastSpend !== null ? budget.forecastSpend - budget.amount : null;
-              const key = `${budget.subscriptionId}-${budget.name}`;
-              const drillable = report.costDetails?.status === 'complete';
-              return (
-                <Fragment key={key}>
-                <tr role="row">
-                  <td role="cell" data-label="Name">{drillable
-                    ? <button type="button" className="finding-link" aria-expanded={openBudget === key} aria-label={`Daily spend for ${budget.name}`} onClick={() => setOpenBudget((value) => value === key ? null : key)}>{budget.name}</button>
-                    : budget.name}</td>
-                  <td role="cell" data-label="Subscription">{subscriptionNames.get(budget.subscriptionId) ?? budget.subscriptionId}</td>
-                  <td role="cell" data-label="Amount" className="num">{formatNative(budget.amount, budget.currency)}</td>
-                  <td role="cell" data-label="Current spend" className="num">
-                    {formatNative(budget.currentSpend, budget.currency)}
-                    {budget.currentSpend !== null && <span className="budget-progress-track" aria-hidden="true">
-                      <span className={`budget-progress-fill budget-progress-${status}`} style={{ width: `${Math.min(100, pctUsed * 100)}%` }} />
-                    </span>}
-                  </td>
-                  <td role="cell" data-label="Forecast spend" className="num">{formatNative(budget.forecastSpend, budget.currency)}</td>
-                  <td role="cell" data-label="Projected outcome">
-                    {forecastDelta === null ? (
-                      <span className="budget-outcome budget-outcome-unknown">Forecast unavailable</span>
-                    ) : forecastDelta > 0 ? (
-                      <span className="budget-outcome budget-outcome-overrun" title="Projected end-of-period spend exceeds the budget">
-                        <TrendingUp size={14} aria-hidden="true" /> Overrun {formatNative(forecastDelta, budget.currency)}
-                      </span>
-                    ) : (
-                      <span className="budget-outcome budget-outcome-surplus" title="Projected end-of-period spend stays under the budget">
-                        <TrendingDown size={14} aria-hidden="true" /> Surplus {formatNative(Math.abs(forecastDelta), budget.currency)}
-                      </span>
-                    )}
-                  </td>
-                  <td role="cell" data-label="Time grain">{budget.timeGrain}</td>
-                  <td role="cell" data-label="End date" className="budget-end-date"><BudgetExpiry periodEnd={budget.periodEnd} highlightNearExpiry /></td>
-                  <td role="cell" data-label="Actions" className="budget-actions">
-                    <button type="button" aria-label={`Edit budget ${budget.name}`} onClick={() => edit(budget)}>Edit</button>
-                    <button type="button" aria-label={`Delete budget ${budget.name}`} onClick={() => void remove(budget)}>Delete</button>
-                  </td>
-                </tr>
-                {drillable && openBudget === key && (
-                  <tr role="row" className="mobile-card-detail"><td role="cell" colSpan={9}><BudgetDailyChart budget={budget} details={report.costDetails} window={costWindow} formatMoney={formatMoney} /></td></tr>
-                )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-        </div>
-      )}
-    </div>
-  );
-}
 
 export function ActionPlanTab({
   report,

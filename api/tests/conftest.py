@@ -24,7 +24,8 @@ def _isolate_immutable_projection_cache():
 def _bind_test_identity(monkeypatch, request):
     tenant_id = "11111111-1111-1111-1111-111111111111"
     monkeypatch.setenv("AZURE_TENANT_ID", tenant_id)
-    if request.module.__name__.rsplit(".", 1)[-1] in {"test_auth", "test_entra_tokens"}:
+    if request.module.__name__.rsplit(".", 1)[-1] in {"test_auth", "test_entra_tokens"} \
+            or request.module.__name__.rsplit(".", 1)[-1].startswith("test_manual"):
         return
     from services import auth
     from services.entra_tokens import TokenIdentity
@@ -36,7 +37,9 @@ def _bind_test_identity(monkeypatch, request):
 
 
 @pytest.fixture(autouse=True)
-def _authorize_all_subscriptions_by_default(monkeypatch):
+def _authorize_all_subscriptions_by_default(monkeypatch, request):
+    if request.module.__name__.rsplit(".", 1)[-1].startswith("test_manual"):
+        return
     import main
 
     async def allow_all(principal_object_id, subscription_ids):

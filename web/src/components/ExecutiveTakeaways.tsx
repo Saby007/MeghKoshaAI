@@ -1,10 +1,9 @@
 import { ArrowRight } from 'lucide-react';
 import type { Budget, CostDetailRow, FullReport } from '../report/models';
 import { costMetrics, costWindowDates, type CostWindow } from '../report/costDetails';
-import { budgetThreshold } from './BudgetContext';
 
 export type TakeawayTone = 'neutral' | 'good' | 'warning' | 'risk';
-export type TakeawayTarget = 'History' | 'Stale Resources' | 'Cost by Tags/Application' | 'Budgets' | 'Cost Anomalies';
+export type TakeawayTarget = 'History' | 'Stale Resources' | 'Cost by Tags/Application' | 'Cost Anomalies';
 export type Takeaway = { key: string; tone: TakeawayTone; text: string; target?: TakeawayTarget };
 
 type Formatter = (value: number) => string;
@@ -29,7 +28,7 @@ export function untaggedShare(rows: CostDetailRow[], window: CostWindow): number
    emitted when it is true, so the strip cannot claim more than the report
    supports. Order is by what a reader should act on first: money already
    spent over plan, then things to review, then context. */
-export function buildTakeaways({ report, budgets, anomalySignals, window, formatMoney }: {
+export function buildTakeaways({ report, anomalySignals, window, formatMoney }: {
   report: FullReport;
   budgets: Budget[];
   anomalySignals: number | null;
@@ -38,19 +37,6 @@ export function buildTakeaways({ report, budgets, anomalySignals, window, format
 }): Takeaway[] {
   const s = report.executiveSummary;
   const items: Takeaway[] = [];
-
-  const over = budgets
-    .map((budget) => ({ budget, status: budgetThreshold(budget) }))
-    .filter(({ status }) => status.tone === 'over' || status.tone === 'warning');
-  if (over.length) {
-    const worst = over.slice().sort((a, b) => (b.budget.currentSpend ?? 0) / Math.max(b.budget.amount, 1) - (a.budget.currentSpend ?? 0) / Math.max(a.budget.amount, 1))[0];
-    items.push({
-      key: 'budgets',
-      tone: over.some(({ status }) => status.tone === 'over') ? 'risk' : 'warning',
-      text: `${over.length} of ${budgets.length} ${budgets.length === 1 ? 'budget is' : 'budgets are'} over this cycle - ${worst.budget.name} ${worst.status.label.toLowerCase()}`,
-      target: 'Budgets',
-    });
-  }
 
   if (s.potentialSavingsMonth > 0) {
     items.push({ key: 'savings', tone: 'good', text: `${formatMoney(s.potentialSavingsMonth)} a month in verified savings available`, target: 'Stale Resources' });

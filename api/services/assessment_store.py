@@ -10,6 +10,10 @@ import ssl
 from collections.abc import Iterator
 from datetime import date, datetime
 from uuid import UUID, uuid4
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from services.focus_history_reader import FocusHistoryData
 
 import asyncpg
 
@@ -74,9 +78,9 @@ async def pool(*, for_read: bool | None = None) -> asyncpg.Pool:
                 min_size=0,
                 max_size=capacity,
                 timeout=10,
-                command_timeout=15,
+                command_timeout=settings().db_command_seconds,
                 max_inactive_connection_lifetime=300,
-                server_settings={"statement_timeout": "15000", "lock_timeout": "3000",
+                server_settings={"statement_timeout": str(settings().db_command_seconds * 1000), "lock_timeout": "3000",
                                  "application_name": "meghkosha-assessments"},
             )
             if use_read:
@@ -115,7 +119,10 @@ def _job(row: asyncpg.Record) -> dict:
     }
 
 
-async def enqueue(tenant_id: str, actor: str, subscription_ids: list[str], stale_days: int) -> dict:
+async def enqueue(
+    tenant_id: str, actor: str, subscription_ids: list[str], stale_days: int, *,
+    task_payload: dict | None = None, replace_active: bool = False,
+) -> dict:
     ids = report_snapshots.normalize_subscription_ids(subscription_ids)
     if len(ids) > settings().max_subscriptions:
         raise AssessmentLimitError("Too many subscriptions for one assessment. Select a smaller scope.")
@@ -127,8 +134,14 @@ async def enqueue(tenant_id: str, actor: str, subscription_ids: list[str], stale
             "SELECT * FROM assessments.jobs WHERE tenant_id=$1 AND scope_hash=$2 "
             "AND status IN ('queued','running')", tenant_id, scope,
         )
-        if existing:
+        if existing and (not replace_active or json.loads(existing["task_payload"]) == (task_payload or {})):
             return _job(existing)
+        if replace_active:
+            await connection.execute(
+                "UPDATE assessments.jobs SET status='cancelled',phase='replaced',completed_at=now() "
+                "WHERE tenant_id=$1 AND task_kind='assessment' AND status IN ('queued','running')",
+                tenant_id,
+            )
         count = await connection.fetchval(
             "SELECT count(*) FROM assessments.jobs WHERE status IN ('queued','running')"
         )
@@ -136,10 +149,18 @@ async def enqueue(tenant_id: str, actor: str, subscription_ids: list[str], stale
             raise QueueFullError("Assessment queue is full. Existing reports remain available; retry later.")
         row = await connection.fetchrow(
             "INSERT INTO assessments.jobs "
-            "(job_id,tenant_id,requested_by,scope_hash,subscription_ids,stale_days,status) "
-            "VALUES ($1,$2,$3,$4,$5::jsonb,$6,'queued') RETURNING *",
-            uuid4(), tenant_id, actor, scope, _json(ids), stale_days,
+            "(job_id,tenant_id,requested_by,scope_hash,subscription_ids,stale_days,status,task_payload) "
+            "VALUES ($1,$2,$3,$4,$5::jsonb,$6,'queued',$7::jsonb) RETURNING *",
+            uuid4(), tenant_id, actor, scope, _json(ids), stale_days, _json(task_payload or {}),
         )
+        if task_payload and task_payload.get("datasetId"):
+            result = await connection.execute(
+                "UPDATE assessments.uploads SET job_id=$3,status='queued',error_message=NULL "
+                "WHERE dataset_id=$1 AND workspace_id=$2 AND status<>'uploading'",
+                UUID(task_payload["datasetId"]), UUID(tenant_id), row["job_id"],
+            )
+            if result != "UPDATE 1":
+                raise ValueError("The completed upload is unavailable in this report workspace.")
     return _job(row)
 
 
@@ -275,6 +296,12 @@ async def fail(job_id: UUID, token: UUID, message: str, *, retryable: bool, code
     )
     if result != "UPDATE 1":
         logger.info("Assessment %s no longer owns its job lease", job_id)
+    else:
+        await (await pool()).execute(
+            "UPDATE assessments.uploads u SET status='failed',error_message=j.error_message "
+            "FROM assessments.jobs j WHERE j.job_id=$1 AND j.status='failed' AND u.job_id=j.job_id",
+            job_id,
+        )
 
 
 def _resource_collection(path: str) -> bool:
@@ -375,7 +402,10 @@ def record_rows(tenant: str, snapshot_id: str, path: str, records: list) -> Iter
         yield tenant, snapshot_id, path, ordinal, subscription_id, resource_id, search, payload, size
 
 
-async def publish(snapshot: ReportSnapshot, job: asyncpg.Record, blob_name: str) -> None:
+async def publish(
+    snapshot: ReportSnapshot, job: asyncpg.Record, blob_name: str, *,
+    history: "FocusHistoryData | None" = None, coverage: dict | None = None,
+) -> None:
     if (snapshot.scope_hash != job["scope_hash"] or snapshot.stale_days != job["stale_days"]
             or snapshot.subscription_ids != json.loads(job["subscription_ids"])
             or snapshot.report.report_metadata.stale_days != snapshot.stale_days
@@ -406,7 +436,10 @@ async def publish(snapshot: ReportSnapshot, job: asyncpg.Record, blob_name: str)
             snapshot.report.report_metadata.period_start,
             chat, _json(contexts),
         )
-        await assessment_queries.persist_costs(connection, tenant, snapshot.snapshot_id, snapshot.report.cost_details)
+        if history is not None:
+            await assessment_queries.persist_history(connection, tenant, snapshot.snapshot_id, history)
+        else:
+            await assessment_queries.persist_costs(connection, tenant, snapshot.snapshot_id, snapshot.report.cost_details)
         if anomaly_content is not None:
             parts = (len(anomaly_content) + 1048575) // 1048576
             for ordinal in range(parts):
@@ -450,6 +483,20 @@ async def publish(snapshot: ReportSnapshot, job: asyncpg.Record, blob_name: str)
             "UPDATE assessments.snapshots SET published=true,serving_version=1 WHERE tenant_id=$1 AND snapshot_id=$2",
             tenant, snapshot.snapshot_id,
         )
+        payload = json.loads(job.get("task_payload", "{}"))
+        if payload.get("datasetId"):
+            result = await connection.execute(
+                "UPDATE assessments.workspaces SET active_dataset=$2 WHERE workspace_id=$1 "
+                "AND configuration_revision=$3 AND expires_at>now()",
+                UUID(tenant), UUID(payload["datasetId"]), payload["configurationRevision"],
+            )
+            if result != "UPDATE 1":
+                raise LeaseLostError("Workspace configuration changed before the replacement report was published.")
+            await connection.execute(
+                "UPDATE assessments.uploads SET status='ready',coverage=$3::jsonb,error_message=NULL "
+                "WHERE dataset_id=$1 AND workspace_id=$2",
+                UUID(payload["datasetId"]), UUID(tenant), _json(coverage or {}),
+            )
 
 
 async def snapshot_view(tenant: str, *, scope: str | None = None, snapshot_id: str | None = None,

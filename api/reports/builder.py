@@ -36,6 +36,7 @@ from .models import (
     ComplianceSummary,
     ComputeCoverageSplit,
     CostHierarchyItem,
+    CostDetailSummary,
     DataCompleteness,
     DomainAdvisorRecommendation,
     DomainSummary,
@@ -305,7 +306,7 @@ def _spend_history(
                 for subscription_id, category_values in monthly_subscription_categories.get(month, {}).items()
             },
         )
-        for month, values in sorted(monthly.items())[-12:]
+        for month, values in sorted(monthly.items())
     ]
     count = len(points)
     return SpendHistorySummary(
@@ -1550,6 +1551,8 @@ def build_full_report(
     include_all_resource_costs: bool = False,
     detail_max_rows: int = 20000,
     detail_max_points: int = 500000,
+    cost_details_override: CostDetailSummary | None = None,
+    defer_tag_history: bool = False,
 ) -> FullReport:
     total_monthly_spend = sum(per_sub_spend.values())
     base = build_report(
@@ -1580,7 +1583,12 @@ def build_full_report(
     savings_month = sum(c.monthly_total for c in categories if c.impact_type == "potential_savings")
     spend_history = _spend_history(focus_history, focus_cost_data)
     daily_cost_trend = _daily_cost_trend(focus_history)
-    tag_daily_cost_trend = _tag_daily_cost_trend(focus_history)
+    tag_daily_cost_trend = (
+        TagDailyCostTrendSummary(
+            status="complete", statusMessage="Daily tag evidence is served by bounded PostgreSQL projections.",
+            tagKey="", availableTagValues=[], series=[],
+        ) if defer_tag_history else _tag_daily_cost_trend(focus_history)
+    )
     previous_spend = spend_history.months[-2].total if len(spend_history.months) > 1 else None
     idle_resource_ids = {
         line.resource_id.lower()
@@ -1709,7 +1717,9 @@ def build_full_report(
         spend_history=spend_history,
         daily_cost_trend=daily_cost_trend,
         tag_daily_cost_trend=tag_daily_cost_trend,
-        cost_details=build_cost_details(focus_history, max_rows=detail_max_rows, max_points=detail_max_points),
+        cost_details=cost_details_override if cost_details_override is not None else build_cost_details(
+            focus_history, max_rows=detail_max_rows, max_points=detail_max_points,
+        ),
         cost_hierarchy=_cost_hierarchy(focus_cost_data, base.total_monthly_spend, include_all_resource_costs),
         region_spend=_region_spend(focus_cost_data, base.total_monthly_spend),
         advisor_score=_advisor_score(advisor_score_rows or []),

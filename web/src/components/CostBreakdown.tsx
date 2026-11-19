@@ -85,7 +85,7 @@ export function GroupedCostBreakdown({
       {!details || details.status !== 'complete' ? (
         <p role="status" className="empty-state">{details?.statusMessage ?? 'Resource cost evidence is unavailable in this snapshot.'}</p>
       ) : !dates.length ? (
-        <p role="status" className="empty-state">Select a valid date range of at most 366 days.</p>
+        <p role="status" className="empty-state">Select an ordered date range within the daily projection response budget.</p>
       ) : !groups.length ? (
         <p role="status" className="empty-state">No {noun} charges match the selected range and filters.</p>
       ) : (

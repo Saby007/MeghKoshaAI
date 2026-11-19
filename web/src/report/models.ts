@@ -271,6 +271,13 @@ export type ReportMetadata = {
   staleDays: number;
   protectedTagKeys: string[];
   excludedProtectedResources: number;
+  enrichmentStatus?: 'not_configured' | 'complete' | 'partial' | 'failed';
+  enrichmentMessage?: string;
+  uploadStart?: string;
+  uploadEnd?: string;
+  assessmentMonthPartial?: boolean;
+  billedResourceCount?: number;
+  datasetId?: string;
 };
 
 export type DataCompleteness = {

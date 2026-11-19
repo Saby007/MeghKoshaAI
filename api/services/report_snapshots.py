@@ -13,7 +13,7 @@ from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient, ContainerClient, ContentSettings
 
 from reports.models import FullReport, ReportSnapshot, ReportSnapshotSummary
-from services import runtime_identity
+from services import runtime_identity, workspace
 from services.assessment_settings import scalable_mode, settings
 from services.assessment_limits import AssessmentLimitError
 
@@ -38,6 +38,7 @@ def normalize_subscription_ids(subscription_ids: list[str]) -> list[str]:
 
 def scope_hash(subscription_ids: list[str], stale_days: int) -> str:
     scope = {
+        "workspaceId": workspace.current.get(),
         "reportSchemaVersion": REPORT_SCHEMA_VERSION,
         "staleDays": stale_days,
         "subscriptionIds": normalize_subscription_ids(subscription_ids),

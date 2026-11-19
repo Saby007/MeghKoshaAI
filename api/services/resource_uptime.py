@@ -12,7 +12,7 @@ from urllib.parse import quote, urlencode
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from services import arm_client
+from services import arm_client, target_connection
 
 _VM_ID = re.compile(r"^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/?#]+/providers/Microsoft.Compute/virtualMachines/[^/?#]+$", re.IGNORECASE)
 _limit = asyncio.Semaphore(4)
@@ -83,12 +83,18 @@ def parse_availability(resource_id: str, day: date, payload: dict) -> ResourceAv
 
 
 async def get_resource_availability(resource_id: str, day: date) -> ResourceAvailability:
+    configuration = await target_connection.load()
+    if configuration is None or not configuration.has_credentials:
+        return ResourceAvailability(
+            resourceId=resource_id, date=str(day), status="unavailable",
+            statusMessage="Configure an optional Reader service principal in Admin to collect Azure availability.",
+        )
     if not _VM_ID.fullmatch(resource_id):
         return ResourceAvailability(resourceId=resource_id, date=str(day), status="unsupported", statusMessage="A common uptime metric is not available for this resource type. No uptime is inferred from billing.")
     today = datetime.now(timezone.utc).date()
     if day >= today or day < today - timedelta(days=92):
         return ResourceAvailability(resourceId=resource_id, date=str(day), status="unavailable", statusMessage="Choose a complete UTC day inside the 93-day platform-metric retention window.")
-    key = (resource_id.lower(), str(day))
+    key = (target_connection.cache_key(resource_id.lower()), str(day))
     cached = _cache.get(key)
     if cached and time.monotonic() - cached[0] < 300:
         _cache.move_to_end(key)

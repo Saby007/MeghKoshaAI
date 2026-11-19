@@ -28,6 +28,7 @@ type AssessmentLimits = {
   azureGetRetries: int?
   detailRows: int?
   detailPoints: int?
+  dbCommandSeconds: int?
 }
 
 @minLength(1)
@@ -37,17 +38,25 @@ param location string = 'centralindia'
 param foundryLocation string = 'eastus2'
 @allowed(['core', 'data', 'ai'])
 param profile string = 'core'
-@description('New configurations use private PostgreSQL/background assessments. Select blob explicitly for compatibility/foundation-only deployments.')
-@allowed(['blob', 'postgres'])
+@description('Manual FOCUS workspaces require private PostgreSQL and background assessments.')
+@allowed(['postgres'])
 param assessmentMode string = 'postgres'
-param postgresSkuName string = 'Standard_D2ds_v5'
+param postgresSkuName string = 'Standard_D4ds_v5'
 @allowed(['GeneralPurpose', 'MemoryOptimized'])
 param postgresSkuTier string = 'GeneralPurpose'
 @allowed(['16', '17'])
 param postgresVersion string = '16'
 @minValue(32)
 @maxValue(16384)
-param postgresStorageGB int = 128
+param postgresStorageGB int = 256
+@allowed(['1.0', '2.0', '4.0'])
+param apiCpu string = '2.0'
+@minValue(1)
+@maxValue(90)
+param workspaceTtlDays int = 7
+@minValue(1)
+@maxValue(10000)
+param workspaceMaxActive int = 250
 @description('Worker CPU; memory is paired safely: 1 CPU/2 GiB, 2 CPU/4 GiB, 4 CPU/8 GiB.')
 @allowed(['1.0', '2.0', '4.0'])
 param assessmentWorkerCpu string = '4.0'
@@ -84,6 +93,7 @@ param minimumReplicas int = 1
 param logRetentionDays int = 30
 @allowed(['Standard_LRS', 'Standard_ZRS'])
 param storageSku string = 'Standard_LRS'
+@allowed([false])
 param allowNativeExportTrustedServices bool = false
 @description('Policy-restricted subscriptions: put the container registry behind a private endpoint and deny public network access. Requires the Premium registry tier and stops azd remote builds from reaching the registry.')
 param privateRegistry bool = false
@@ -112,7 +122,8 @@ param closedMonthRetentionDays int = 214
 @minValue(1)
 @maxValue(6)
 param exportParallelMonths int = 1
-@description('Keep false until the scheduled processor implementation is validated end to end.')
+@description('Retired: manual FOCUS mode never deploys the native export scheduler.')
+@allowed([false])
 param enableProcessor bool = false
 @description('Only set true when redeploying the same environment name after azd down without --purge left a soft-deleted AI Foundry account behind.')
 param restoreAiAccount bool = false
@@ -196,7 +207,6 @@ module data './modules/data.bicep' = if (dataEnabled) {
     privateEndpointSubnetId: core.outputs.privateEndpointSubnetId
     apiPrincipalId: core.outputs.apiIdentity.principalId
     storageSku: storageSku
-    allowNativeExportTrustedServices: allowNativeExportTrustedServices
     blobDataProtection: blobDataProtection
     blobRetentionDays: blobRetentionDays
     dailyExportRetentionDays: dailyExportRetentionDays
@@ -220,18 +230,38 @@ module postgres './modules/postgres.bicep' = if (scalableEnabled) {
   }
 }
 
+module workspaceVault './modules/workspace-vault.bicep' = if (scalableEnabled) {
+  name: 'app-workspace-vault'
+  scope: group
+  params: {
+    resourceToken: resourceToken
+    location: location
+    tags: tags
+    networkId: core.outputs.networkId
+    privateEndpointSubnetId: core.outputs.privateEndpointSubnetId
+    apiPrincipalId: core.outputs.apiIdentity.principalId
+    workerPrincipalId: data!.outputs.processorIdentity.principalId
+  }
+}
+
 var assessmentEnvironment = [
+  { name: 'WORKSPACE_VAULT_URL', value: scalableEnabled ? workspaceVault!.outputs.url : '' }
+  { name: 'WORKSPACE_TTL_DAYS', value: string(workspaceTtlDays) }
+  { name: 'WORKSPACE_MAX_ACTIVE', value: string(workspaceMaxActive) }
+  { name: 'WORKSPACE_COOKIE_SECURE', value: 'true' }
+  { name: 'FOCUS_UPLOAD_CONTAINER', value: 'focus-uploads' }
   { name: 'ASSESSMENT_MODE', value: assessmentMode }
   { name: 'ASSESSMENT_DB_HOST', value: scalableEnabled ? postgres!.outputs.host : '' }
   { name: 'ASSESSMENT_DB_NAME', value: scalableEnabled ? postgres!.outputs.databaseName : '' }
   { name: 'ASSESSMENT_DB_POOL_SIZE', value: string(assessmentPoolSize) }
+  { name: 'ASSESSMENT_DB_COMMAND_TIMEOUT_SECONDS', value: string(assessmentLimits.?dbCommandSeconds ?? 60) }
   { name: 'ASSESSMENT_QUEUE_CAPACITY', value: string(assessmentQueueCapacity) }
   { name: 'ASSESSMENT_INPUT_BYTES', value: string(assessmentLimits.?inputBytes ?? 4294967296) }
   { name: 'ASSESSMENT_SPOOL_BYTES', value: string(assessmentLimits.?spoolBytes ?? (assessmentWorkerCpu == '1.0' ? 2147483648 : assessmentWorkerCpu == '2.0' ? 4294967296 : 6442450944)) }
   { name: 'ASSESSMENT_EXPANDED_BYTES', value: string(assessmentLimits.?expandedBytes ?? 8589934592) }
   { name: 'ASSESSMENT_CSV_ROWS', value: string(assessmentLimits.?csvRows ?? 20000000) }
   { name: 'ASSESSMENT_INVENTORY_ROWS', value: string(assessmentLimits.?inventoryRows ?? 500000) }
-  { name: 'ASSESSMENT_HISTORY_ROWS', value: string(assessmentLimits.?historyRows ?? 2000000) }
+  { name: 'ASSESSMENT_HISTORY_ROWS', value: string(assessmentLimits.?historyRows ?? 20000000) }
   { name: 'ASSESSMENT_TIMEOUT_SECONDS', value: string(assessmentLimits.?timeoutSeconds ?? 3600) }
   { name: 'ASSESSMENT_LEASE_SECONDS', value: string(assessmentLimits.?leaseSeconds ?? 120) }
   { name: 'ASSESSMENT_MAX_ATTEMPTS', value: string(assessmentLimits.?maxAttempts ?? 3) }
@@ -248,7 +278,7 @@ var assessmentEnvironment = [
   { name: 'ASSESSMENT_METRICS_INTERVAL_MS', value: string(assessmentLimits.?metricsIntervalMs ?? 500) }
   { name: 'ASSESSMENT_COST_INTERVAL_MS', value: string(assessmentLimits.?costIntervalMs ?? 15000) }
   { name: 'ASSESSMENT_AZURE_GET_RETRIES', value: string(assessmentLimits.?azureGetRetries ?? 3) }
-  { name: 'ASSESSMENT_DETAIL_ROWS', value: string(assessmentLimits.?detailRows ?? 50000) }
+  { name: 'ASSESSMENT_DETAIL_ROWS', value: string(assessmentLimits.?detailRows ?? 250000) }
   { name: 'ASSESSMENT_DETAIL_POINTS', value: string(assessmentLimits.?detailPoints ?? 5000000) }
 ]
 
@@ -301,11 +331,9 @@ module apps './modules/apps.bicep' = if (deployApplications) {
     registryServer: core.outputs.registryServer
     apiIdentity: core.outputs.apiIdentity
     webIdentity: core.outputs.webIdentity
-    oboIdentity: core.outputs.oboIdentity
     apiImage: apiImage
     webImage: webImage
-    apiClientId: apiClientId
-    webClientId: webClientId
+    apiCpu: apiCpu
     minimumReplicas: minimumReplicas
     apiEnvironment: concat(assessmentEnvironment, [
       { name: 'ASSESSMENT_DB_USER', value: 'meghkosha_api' }
@@ -388,6 +416,8 @@ module assessmentWorker './modules/assessment-worker.bicep' = if (scalableEnable
 }
 
 output ASSESSMENT_MODE string = assessmentMode
+output WORKSPACE_VAULT_URL string = scalableEnabled ? workspaceVault!.outputs.url : ''
+output WORKSPACE_VAULT_NAME string = scalableEnabled ? workspaceVault!.outputs.name : ''
 output ASSESSMENT_DB_HOST string = scalableEnabled ? postgres!.outputs.host : ''
 output ASSESSMENT_BOOTSTRAP_JOB string = scalableEnabled && !empty(assessmentRuntimeImage) ? assessmentWorker!.outputs.bootstrapJobName : ''
 output SERVICE_ASSESSMENT_RESOURCE_NAME string = scalableEnabled && deployApplications ? assessmentWorker!.outputs.workerName : ''

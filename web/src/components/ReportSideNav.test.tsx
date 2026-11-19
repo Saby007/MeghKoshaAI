@@ -28,7 +28,7 @@ it('is a left navigation with every area open and the current page marked', asyn
   const toggles = [...container.querySelectorAll<HTMLButtonElement>('.report-sidenav-group-toggle')];
   expect(toggles.map((item) => item.textContent?.trim())).toEqual(['Dashboard', 'Cost Management', 'Resources', 'Analytics', 'Recommendations', 'Reports']);
   expect(toggles.every((item) => item.getAttribute('aria-expanded') === 'true')).toBe(true);
-  expect(container.querySelectorAll('.report-sidenav-pages button')).toHaveLength(19);
+  expect(container.querySelectorAll('.report-sidenav-pages button')).toHaveLength(18);
   expect(pageButton('History').getAttribute('aria-current')).toBe('page');
   const current = container.querySelectorAll('.report-sidenav-group[data-current="true"]');
   expect(current).toHaveLength(1);
@@ -94,8 +94,8 @@ it('becomes one mobile menu that closes after selection and on Escape', async ()
   expect(toggle.textContent).toContain('History');
   await act(async () => toggle.click());
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
-  await act(async () => pageButton('Budgets').click());
-  expect(onSelect).toHaveBeenCalledWith('Budgets');
+  await act(async () => pageButton('Cost Anomalies').click());
+  expect(onSelect).toHaveBeenCalledWith('Cost Anomalies');
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
   await act(async () => toggle.click());
   await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
@@ -127,7 +127,7 @@ it('keeps collapsed groups labelled and shows current-page context on keyboard f
   expect(button.getAttribute('aria-label')).toBe('Cost Management');
   await act(async () => button.focus());
   const tooltip = container.querySelector('[role="tooltip"]')!;
-  expect(tooltip.textContent).toContain('8 pages');
+  expect(tooltip.textContent).toContain('7 pages');
   expect(tooltip.textContent).toContain('Current: History');
   expect(button.getAttribute('aria-describedby')).toBe(tooltip.id);
   await act(async () => button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
@@ -151,7 +151,7 @@ it('opens mobile search with category context and uses Escape to clear then clos
   await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(search.value).toBe('');
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
-  expect(container.querySelector('#report-page-count')?.textContent).toBe('19 pages');
+  expect(container.querySelector('#report-page-count')?.textContent).toBe('18 pages');
   await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
   expect(document.activeElement).toBe(toggle);

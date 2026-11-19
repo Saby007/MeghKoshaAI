@@ -1,685 +1,191 @@
-import { Component, Suspense, lazy, useEffect, useRef, useState } from 'react';
-import type { ErrorInfo, ReactNode } from 'react';
-import { ArrowRight, BarChart3, CalendarClock, Check, LoaderCircle, Lock, Maximize2, MessageSquareText, Moon, RefreshCw, Rows3, Settings2, ShieldCheck, Sun } from 'lucide-react';
-import { SubscriptionPicker, type Subscription } from './components/SubscriptionPicker';
+import { Component, Suspense, lazy, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
+import { BarChart3, LoaderCircle, Maximize2, MessageSquareText, Moon, RefreshCw, Rows3, Settings2, Sun } from 'lucide-react';
 import { CostRangeControls } from './components/CostRangeControls';
-import { defaultCostWindow, monthCostWindow, monthToDateWindow, type CostWindow } from './report/costDetails';
-import { runCostAssessment, type StaleDays } from './collectors/costAssessment';
+import { monthCostWindow, type CostWindow } from './report/costDetails';
+import { runCostAssessment } from './collectors/costAssessment';
 import { getLatestReport, narrate, type CostAgentOutput } from './api';
-import { apiFetch, ApiIdentityRequiredError, initializeApiIdentity, redirectApiIdentity, signOutApiIdentity, IDENTITY_REQUIRED_EVENT, type VerifiedIdentity } from './apiIdentity';
-import type { FullReport, ReportSnapshot } from './report/models';
+import { apiFetch, initializeApiIdentity, IDENTITY_REQUIRED_EVENT, type VerifiedIdentity } from './apiIdentity';
+import type { ReportSnapshot } from './report/models';
 import { BRAND_NAME } from './brand';
+import './manual-workspace.css';
 
 const ReportView = lazy(() => import('./components/ReportView').then((module) => ({ default: module.ReportView })));
 const ChatWindow = lazy(() => import('./components/ChatWindow').then((module) => ({ default: module.ChatWindow })));
-const ScheduleManager = lazy(() => import('./components/ScheduleManager').then((module) => ({ default: module.ScheduleManager })));
+const ManualAdmin = lazy(() => import('./components/ManualAdmin'));
+type View = 'report' | 'chat' | 'admin';
+type Subscription = { subscriptionId: string; displayName: string };
 
-// Prevents a single bad field/render error anywhere in the (large) report tree from
-// unmounting the whole app to a blank screen - shows a reload prompt instead. This
-// covers cases like an open browser tab still running an older bundle against a
-// freshly-deployed backend that renamed/removed a field it expects.
 class ReportErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
-  constructor(props: { children: ReactNode }) {
-    super(props);
-    this.state = { error: null };
-  }
-
-  static getDerivedStateFromError(error: Error) {
-    return { error };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Report view crashed', error, info);
-  }
-
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: ErrorInfo) { console.error('Report view crashed', error, info); }
   render() {
-    if (this.state.error) {
-      return (
-        <div className="report-crash-banner" role="alert">
-          <strong>Something went wrong showing this report.</strong>
-          <p>This usually clears up with a reload - the app may have updated while this page was open.</p>
-          <button type="button" onClick={() => window.location.reload()}>Reload</button>
-        </div>
-      );
-    }
-    return this.props.children;
+    return this.state.error
+      ? <section role="alert">This report could not be displayed. <button type="button" onClick={() => window.location.reload()}>Reload</button></section>
+      : this.props.children;
   }
 }
 
-type ClientPrincipal = VerifiedIdentity | null;
-type AssessmentPhase = 'collecting' | 'narrating' | null;
-type WorkspaceView = 'report' | 'chat' | 'schedules';
-/* Resources are judged stale after 90 days. It is a fixed policy, not a per-report choice. */
-const STALE_DAYS: StaleDays = 90;
-const scopePreferenceKey = (identity: VerifiedIdentity) => `mkai-report-scope:${identity.tenantId}:${identity.userId}`;
-
-function rememberScope(identity: VerifiedIdentity, subscriptionIds: string[]) {
-  try {
-    window.localStorage.setItem(scopePreferenceKey(identity), JSON.stringify({ subscriptionIds }));
-  } catch {}
-}
-
-function WorkspaceLoading({ label }: { label: string }) {
-  return (
-    <section className="workspace-skeleton" role="status" aria-busy="true" aria-live="polite">
-      <span className="loading-state"><LoaderCircle className="spin" size={18} aria-hidden="true" /> Loading {label}...</span>
-      <div className="workspace-skeleton-grid" aria-hidden="true"><i /><i /><i /></div>
-    </section>
-  );
-}
-
-function AssessmentProgress({ phase, updating }: { phase: Exclude<AssessmentPhase, null>; updating: boolean }) {
-  const narrating = phase === 'narrating';
-  return (
-    <section className={`assessment-progress ${updating ? 'is-update' : ''}`} role="status" aria-live="polite">
-      <span className="assessment-progress-icon" aria-hidden="true"><LoaderCircle className="spin" size={22} /></span>
-      <span className="assessment-progress-copy">
-        <small>{updating ? 'Updating assessment' : 'Running assessment'}</small>
-        <strong>{narrating ? 'Generating report narrative' : 'Collecting Azure data'}</strong>
-        <span>
-          {narrating
-            ? 'The verified report is ready. Please wait while the narrative is prepared.'
-            : 'Please wait while cost, resource, Advisor, and governance evidence is reconciled.'}
-        </span>
-      </span>
-      <ol className="assessment-progress-steps" aria-label="Assessment progress">
-        <li className={narrating ? 'complete' : 'active'}><b>01</b> Collect</li>
-        <li className={narrating ? 'active' : ''}><b>02</b> Narrate</li>
-      </ol>
-    </section>
-  );
-}
-
-function BrandLockup({ onLight = false }: { onLight?: boolean }) {
-  return (
-    <span className={`brand-lockup ${onLight ? 'on-light' : ''}`} aria-label={BRAND_NAME}>
-      <img className="brand-mark" src={`${import.meta.env.BASE_URL}brand-mark.svg`} alt="" aria-hidden="true" width={28} height={28} />
-      <span className="brand-divider" aria-hidden="true" />
-      <span className="brand-product">{BRAND_NAME}</span>
-    </span>
-  );
-}
-
-type Theme = 'dark' | 'light';
-const THEME_STORAGE_KEY = 'mkai-theme';
-
-function useTheme(): [Theme, () => void] {
-  const [theme, setTheme] = useState<Theme>(() => {
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    return stored === 'light' ? 'light' : 'dark';
-  });
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#F3F6FA' : '#0F1214');
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme]);
-
-  return [theme, () => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))];
-}
-
-function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
-  const label = `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`;
-  return (
-    <button type="button" className="theme-toggle" onClick={onToggle} title={label} aria-label={label}>
-      {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-    </button>
-  );
-}
-
-type SignInStep = 'idle' | 'redirecting';
-
-/* The centre column of the sign-in design, supplied as finished artwork.
-
-   Rendered as a background-image on a div rather than an <img>: the art has a
-   separate light and dark version, and a CSS background swaps with the theme
-   attribute while fetching only the variant actually shown. Two <img> tags
-   toggled with CSS would pull both files down. The element is decorative and
-   aria-hidden, so it carries no semantic loss.
-
-   Each file is ~135KB as JPEG at 2x its layout width; the sources are opaque
-   photographic glass renders, where PNG cost 1.9MB for no visible gain. */
-function SignInStage() {
-  return (
-    <div className="signin-stage" aria-hidden="true">
-      <div className="signin-stage-art" />
-    </div>
-  );
-}
-
-function SignInScreen({ theme, onToggleTheme, notice }: { theme: Theme; onToggleTheme: () => void; notice?: string | null }) {
-  const [step, setStep] = useState<SignInStep>('idle');
-  const [error, setError] = useState<string | null>(null);
-
-  /* Entra is the only credential path. Passing an empty login hint is a
-     supported input - the client omits loginHint when it is blank and lets
-     Entra prompt for account selection - so nothing is lost by dropping the
-     email field: the user picks the same account one screen later, from the
-     account list they already trust, instead of typing it here first. */
-  async function handleMicrosoftSignIn() {
-    setError(null);
-    setStep('redirecting');
-    try {
-      await redirectApiIdentity('');
-    } catch (failure) {
-      setStep('idle');
-      setError(failure instanceof Error ? failure.message : 'Microsoft sign-in could not start. Retry the connection.');
-    }
-  }
-
-  return (
-    <main className="signin-screen signin-production" aria-labelledby="signin-heading">
-      <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-      <section className="signin-showcase">
-        <BrandLockup />
-        <p className="signin-tagline">See. Assess. Save.</p>
-        <p className="signin-headline">Total clarity for your <span>Azure spend.</span></p>
-        <p className="signin-subhead">Turn your cloud data into insights, savings and smarter decisions.</p>
-        <ul className="signin-feature-list">
-          <li><span className="signin-feature-icon"><BarChart3 size={18} aria-hidden="true" /></span><div><strong>Azure cost assessment</strong><small>Costs, anomalies, and evidence-backed opportunities.</small></div></li>
-          <li><span className="signin-feature-icon"><ShieldCheck size={18} aria-hidden="true" /></span><div><strong>Access scoped to you</strong><small>Secure, tenant-aware access via Microsoft Entra ID.</small></div></li>
-          <li><span className="signin-feature-icon"><Settings2 size={18} aria-hidden="true" /></span><div><strong>Explicit control changes</strong><small>Read-only assessment. Budget and export changes require authorized operators.</small></div></li>
-        </ul>
-        <p className="signin-trust">
-          Trusted by teams building a smarter cloud.
-          <span className="signin-trust-progress" aria-hidden="true">
-            <i className="signin-trust-bar" />
-            <i className="signin-trust-dot" />
-            <i className="signin-trust-dot" />
-            <i className="signin-trust-dot" />
-          </span>
-        </p>
-      </section>
-      <SignInStage />
-      <section className="signin-panel">
-        <div className="signin-card-v2">
-          <h1 id="signin-heading">Sign in to {BRAND_NAME}</h1>
-          <p className="signin-card-lede">Use your organization account to continue.</p>
-          {notice && <p role="alert" className="signin-error">{notice}</p>}
-          {error && <p id="signin-error" className="signin-error" role="alert">{error}</p>}
-          {step === 'idle' && (
-            <>
-              <button type="button" className="signin-microsoft" onClick={() => void handleMicrosoftSignIn()}>
-                <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false">
-                  <rect x="1" y="1" width="8" height="8" fill="#F25022" />
-                  <rect x="11" y="1" width="8" height="8" fill="#7FBA00" />
-                  <rect x="1" y="11" width="8" height="8" fill="#00A4EF" />
-                  <rect x="11" y="11" width="8" height="8" fill="#FFB900" />
-                </svg>
-                Sign in with Microsoft
-                <ArrowRight className="signin-microsoft-arrow" size={16} aria-hidden="true" />
-              </button>
-              <p className="signin-secure">
-                <Lock size={13} aria-hidden="true" />
-                Single sign-on · No password stored by {BRAND_NAME}
-              </p>
-            </>
-          )}
-          {step === 'redirecting' && (
-            <div className="signin-detecting" role="status" aria-live="polite">
-              <LoaderCircle className="spin" size={20} aria-hidden="true" />
-              <p>Redirecting to Microsoft Entra ID...</p>
-            </div>
-          )}
-          <p className="signin-card-footnote">Microsoft Entra ID · Your organization's access policy</p>
-        </div>
-        <p className="signin-strapline"><span>Insights today.</span><span>A smarter tomorrow.</span></p>
-      </section>
-    </main>
-  );
+function Loading({ label }: { label: string }) {
+  return <p className="loading-state" role="status"><LoaderCircle className="spin" size={18} aria-hidden="true" /> {label}</p>;
 }
 
 export default function App() {
-  const [theme, toggleTheme] = useTheme();
-  const [density, setDensity] = useState<'compact' | 'comfortable'>(() => {
-    try { return window.localStorage.getItem('mkai-density') === 'comfortable' ? 'comfortable' : 'compact'; } catch { return 'compact'; }
-  });
+  const [identity, setIdentity] = useState<VerifiedIdentity | null>(null);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [startup, setStartup] = useState(0);
+  const [version, setVersion] = useState(0);
+  const [view, setView] = useState<View>('report');
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [snapshot, setSnapshot] = useState<ReportSnapshot | null>(null);
+  const [narration, setNarration] = useState<CostAgentOutput>(null);
+  const [loading, setLoading] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [costWindow, setCostWindow] = useState<CostWindow>({ startDate: '', endDate: '' });
+  const [theme, setTheme] = useState(() => window.localStorage.getItem('mkai-theme') === 'light' ? 'light' : 'dark');
+  const [density, setDensity] = useState(() => window.localStorage.getItem('mkai-density') === 'comfortable' ? 'comfortable' : 'compact');
+  const generation = useRef(0);
+  const pendingReaderDisposal = useRef<{ reader: NonNullable<ReportSnapshot['report']['remote']>; timer: number } | null>(null);
+
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.density = density;
-    try { window.localStorage.setItem('mkai-density', density); } catch {}
-  }, [density]);
-  const [principal, setPrincipal] = useState<ClientPrincipal>(null);
-  const [checkingAuth, setCheckingAuth] = useState(true);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authVersion, setAuthVersion] = useState(0);
-  const [verifiedIdentity, setVerifiedIdentity] = useState<VerifiedIdentity | null>(null);
-  const [identityConnecting, setIdentityConnecting] = useState(false);
-  const [identityError, setIdentityError] = useState<string | null>(null);
-  const [report, setReport] = useState<FullReport | null>(null);
-  const pendingReaderDisposal = useRef<{ reader: NonNullable<FullReport['remote']>; timer: number } | null>(null);
+    window.localStorage.setItem('mkai-theme', theme);
+    window.localStorage.setItem('mkai-density', density);
+  }, [theme, density]);
+
   useEffect(() => {
-    const reader = report?.remote;
+    let active = true;
+    setStartupError(null);
+    initializeApiIdentity().then((session) => { if (active) setIdentity(session); })
+      .catch((failure: unknown) => { if (active) setStartupError(failure instanceof Error ? failure.message : 'Workspace initialization failed.'); });
+    return () => { active = false; };
+  }, [startup]);
+
+  useEffect(() => {
+    const expired = () => {
+      generation.current += 1;
+      setIdentity(null); setSnapshot(null); setSubscription(null);
+      setStartupError('This browser workspace expired. Reopen the workspace and upload your report again.');
+    };
+    globalThis.window.addEventListener(IDENTITY_REQUIRED_EVENT, expired);
+    return () => globalThis.window.removeEventListener(IDENTITY_REQUIRED_EVENT, expired);
+  }, []);
+
+  useEffect(() => {
+    const reader = snapshot?.report.remote;
     if (!reader) return;
     if (pendingReaderDisposal.current?.reader === reader) {
-      window.clearTimeout(pendingReaderDisposal.current.timer);
+      globalThis.window.clearTimeout(pendingReaderDisposal.current.timer);
       pendingReaderDisposal.current = null;
     }
     return () => {
-      const timer = window.setTimeout(() => reader.dispose(), 0);
+      const timer = globalThis.window.setTimeout(() => reader.dispose(), 0);
       pendingReaderDisposal.current = { reader, timer };
     };
-  }, [report?.remote]);
-  const [loadedSnapshot, setLoadedSnapshot] = useState<ReportSnapshot | null>(null);
-  const [narration, setNarration] = useState<CostAgentOutput>(null);
-  const [running, setRunning] = useState(false);
-  const [assessmentPhase, setAssessmentPhase] = useState<AssessmentPhase>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [loadingSubscriptions, setLoadingSubscriptions] = useState(false);
-  const [loadingSnapshot, setLoadingSnapshot] = useState(false);
-  const [snapshotError, setSnapshotError] = useState<string | null>(null);
-  const [snapshotMissing, setSnapshotMissing] = useState(false);
-  const [startupVersion, setStartupVersion] = useState(0);
-  const pendingStartup = useRef<AbortController | null>(null);
-  const workGeneration = useRef(0);
-  const [view, setView] = useState<WorkspaceView>('report');
-  const [visitedViews, setVisitedViews] = useState<Set<WorkspaceView>>(() => new Set(['report']));
-  /* The cost window is presented once, in the scope bar, and applies
-     to every tab that reads it, so it is owned here and handed to ReportView
-     rather than being re-declared inside each tab. */
-  const [costWindow, setCostWindow] = useState<CostWindow>({ startDate: '', endDate: '' });
-  const costWindowDatesAvailable = report ? report.costDetails?.dates ?? report.dailyCostTrend?.days?.map((day) => day.date) ?? [] : [];
-  useEffect(() => {
-    if (!report) return;
-    const dates = report.costDetails?.dates ?? report.dailyCostTrend?.days?.map((day) => day.date) ?? [];
-    setCostWindow(defaultCostWindow(report.costDetails, report.reportMetadata.periodStart, report.reportMetadata.periodEnd, dates));
-  }, [report]);
+  }, [snapshot?.report.remote]);
 
   useEffect(() => {
-    const currentAsset = Array.from(document.scripts)
-      .map((script) => script.src)
-      .find((source) => /\/assets\/index-[^/]+\.js$/.test(source));
-    if (!currentAsset) return;
-
-    async function reloadIfUpdated() {
-      try {
-        const response = await fetch(`/?asset-check=${Date.now()}`, { cache: 'no-store' });
-        const html = await response.text();
-        const nextAsset = html.match(/src="(\/assets\/index-[^"]+\.js)"/)?.[1];
-        if (nextAsset && new URL(nextAsset, window.location.origin).href !== currentAsset) {
-          window.location.reload();
-        }
-      } catch {
-        // A transient version check must not interrupt the current workspace.
-      }
-    }
-
-    function checkOnFocus() {
-      if (document.visibilityState === 'visible') void reloadIfUpdated();
-    }
-
-    document.addEventListener('visibilitychange', checkOnFocus);
-    const interval = window.setInterval(() => void reloadIfUpdated(), 5 * 60 * 1000);
-    return () => {
-      document.removeEventListener('visibilitychange', checkOnFocus);
-      window.clearInterval(interval);
-    };
-  }, []);
-
-  useEffect(() => {
+    if (!identity) return;
     const controller = new AbortController();
-    setCheckingAuth(true);
-    setAuthError(null);
-    const timer = window.setTimeout(() => {
-      controller.abort();
-      setAuthError('Sign-in status could not be loaded. Retry the connection.');
-      setCheckingAuth(false);
-    }, 15000);
-    initializeApiIdentity('')
-      .then((identity) => {
-        if (controller.signal.aborted) return;
-        setPrincipal(identity);
-        setVerifiedIdentity(identity);
-        setIdentityError(null);
-      })
-      .catch((failure) => {
-        if (controller.signal.aborted) return;
-        setPrincipal(null);
-        setVerifiedIdentity(null);
-        if (!(failure instanceof ApiIdentityRequiredError)) setAuthError(failure instanceof Error ? failure.message : 'Sign-in status is unavailable.');
-      })
-      .finally(() => { window.clearTimeout(timer); if (!controller.signal.aborted) setCheckingAuth(false); });
-    return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [authVersion]);
-
-  useEffect(() => {
-    const requireConnection = () => {
-      workGeneration.current += 1;
-      pendingStartup.current?.abort();
-      setPrincipal(null);
-      setVerifiedIdentity(null);
-      setSubscriptions([]);
-      setSelectedIds(new Set());
-      setVisitedViews(new Set(['report']));
-      setView('report');
-      setReport(null);
-      setLoadedSnapshot(null);
+    const current = ++generation.current;
+    setLoading(true); setError(null);
+    async function load() {
+      const response = await apiFetch('/api/subscriptions', { signal: controller.signal });
+      if (!response.ok) throw new Error('The configured subscription could not be loaded.');
+      const subscriptions: Subscription[] = await response.json();
+      if (subscriptions.length > 1) throw new Error('This workspace must contain only one target subscription.');
+      const selected = subscriptions[0] ?? null;
+      const saved = selected ? await getLatestReport(controller.signal, [selected.subscriptionId], 90) : null;
+      if (controller.signal.aborted || current !== generation.current) return;
+      setSubscription(selected); setSnapshot(saved);
       setNarration(null);
-      setAssessmentPhase(null);
-      setLoadingSnapshot(false);
-      setLoadingSubscriptions(false);
-      setRunning(false);
-      setIdentityError('Your API session needs verification. Reconnect your Microsoft account.');
-    };
-    window.addEventListener(IDENTITY_REQUIRED_EVENT, requireConnection);
-    return () => window.removeEventListener(IDENTITY_REQUIRED_EVENT, requireConnection);
-  }, []);
-
-  useEffect(() => {
-    if (!verifiedIdentity || identityError) return;
-    const controller = new AbortController();
-    pendingStartup.current = controller;
-    workGeneration.current += 1;
-    let stage: 'subscriptions' | 'snapshot' = 'subscriptions';
-    setLoadingSubscriptions(true);
-    setLoadingSnapshot(false);
-    setSnapshotError(null);
-    setSnapshotMissing(false);
-    const timer = window.setTimeout(() => {
-      if (controller.signal.aborted) return;
-      controller.abort();
-      setLoadingSubscriptions(false);
-      setLoadingSnapshot(false);
-      if (stage === 'subscriptions') setError('Subscription loading timed out. Retry the saved report lookup.');
-      else setSnapshotError('Saved report loading timed out. Retry or run a new report.');
-    }, 25000);
-    apiFetch('/api/subscriptions', { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error(`Subscription loading failed: ${res.status}`);
-        return res.json();
-      })
-      .then(async (items: Subscription[]) => {
-        if (controller.signal.aborted) return;
-        const availableIds = items.map((item) => item.subscriptionId.toLowerCase());
-        let subscriptionIds = availableIds;
-        try {
-          const preference = startupVersion > 0
-            ? { subscriptionIds: [...selectedIds] }
-            : JSON.parse(window.localStorage.getItem(scopePreferenceKey(verifiedIdentity)) ?? 'null');
-          if (preference && Array.isArray(preference.subscriptionIds)) {
-            const remembered = new Set(preference.subscriptionIds.filter((value: unknown) => typeof value === 'string').map((value: string) => value.toLowerCase()));
-            const allowed = availableIds.filter((value) => remembered.has(value));
-            if (allowed.length || startupVersion > 0) subscriptionIds = allowed;
+      if (saved) {
+        const dates = saved.report.costDetails?.dates ?? [];
+        setCostWindow({ startDate: dates[0] ?? saved.report.reportMetadata.periodStart,
+          endDate: dates.at(-1) ?? saved.report.reportMetadata.periodEnd });
+        if (identity?.features?.aiNarration) {
+          try {
+            const result = await narrate(saved.subscriptionIds, saved.report);
+            if (!controller.signal.aborted && current === generation.current) setNarration(result);
+          } catch (failure) {
+            if (!controller.signal.aborted && current === generation.current) {
+              setError(`Dashboard ready; optional narration failed: ${failure instanceof Error ? failure.message : 'Retry the report.'}`);
+            }
           }
-        } catch {}
-        setSubscriptions(items);
-        setSelectedIds(new Set(subscriptionIds));
-        setLoadingSubscriptions(false);
-        setError(null);
-        if (!subscriptionIds.length) { setSnapshotMissing(true); return; }
-        stage = 'snapshot';
-        setLoadingSnapshot(true);
-        const saved = await getLatestReport(controller.signal, subscriptionIds, STALE_DAYS);
-        if (controller.signal.aborted) return;
-        if (!saved) { setSnapshotMissing(true); return; }
-        const expected = new Set(subscriptionIds.map((value) => value.toLowerCase()));
-        if (saved.staleDays !== STALE_DAYS || saved.report.reportMetadata.staleDays !== STALE_DAYS
-          || new Set(saved.subscriptionIds.map((value) => value.toLowerCase())).size !== expected.size
-          || saved.subscriptionIds.length !== expected.size
-          || saved.subscriptionIds.some((value) => !expected.has(value.toLowerCase()))
-          || saved.report.subscriptionBreakdown.length !== expected.size
-          || saved.report.subscriptionBreakdown.some((item) => !expected.has(item.subscriptionId.toLowerCase()))) {
-          throw new Error('The saved report does not match the authorized scope. Run a new report.');
         }
-        setReport(saved.report);
-        setLoadedSnapshot(saved);
-        setNarration(null);
-        rememberScope(verifiedIdentity, subscriptionIds);
-      })
-      .catch((loadError) => {
-        if (controller.signal.aborted) return;
-        if (stage === 'subscriptions') setError(loadError instanceof Error ? loadError.message : 'Unable to load subscriptions.');
-        else setSnapshotError(loadError instanceof Error ? loadError.message : 'Saved report unavailable.');
-      })
-      .finally(() => {
-        window.clearTimeout(timer);
-        if (!controller.signal.aborted) { setLoadingSubscriptions(false); setLoadingSnapshot(false); }
-        if (pendingStartup.current === controller) pendingStartup.current = null;
-      });
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [verifiedIdentity?.userId, verifiedIdentity?.tenantId, identityError, startupVersion]);
-
-  if (checkingAuth) {
-    return (
-      <div className="center-screen">
-        <p className="loading-state">Loading...</p>
-      </div>
-    );
-  }
-
-  if (authError) {
-    return <main className="center-screen"><p role="alert">{authError}</p><button type="button" className="ghost-button" onClick={() => setAuthVersion((value) => value + 1)}><RefreshCw size={16} aria-hidden="true" /> Retry sign-in check</button></main>;
-  }
-
-  if (!principal) {
-    return <SignInScreen theme={theme} onToggleTheme={toggleTheme} notice={identityError} />;
-  }
-
-  async function handleConnect() {
-    if (identityConnecting || !principal) return;
-    setIdentityConnecting(true);
-    setIdentityError(null);
-    try {
-      let identity: VerifiedIdentity;
-      try {
-        identity = await initializeApiIdentity(principal.userDetails);
-      } catch (failure) {
-        if (!(failure instanceof ApiIdentityRequiredError)) throw failure;
-        await redirectApiIdentity(principal.userDetails);
-        return;
       }
-      if (verifiedIdentity && (identity.userId !== verifiedIdentity.userId || identity.tenantId !== verifiedIdentity.tenantId)) {
-        window.location.reload();
-        return;
-      }
-      setVerifiedIdentity(identity);
-    } catch (connectionError) {
-      setIdentityError(connectionError instanceof Error ? connectionError.message : 'Microsoft account connection failed.');
-    } finally {
-      setIdentityConnecting(false);
     }
-  }
+    load().catch((failure: unknown) => {
+      if (!controller.signal.aborted && current === generation.current) setError(failure instanceof Error ? failure.message : 'Report loading failed.');
+    }).finally(() => { if (!controller.signal.aborted && current === generation.current) setLoading(false); });
+    return () => controller.abort();
+  }, [identity, version]);
 
-  async function handleRun() {
-    if (running || loadingSubscriptions || selectedIds.size === 0 || !verifiedIdentity || identityError) return;
-    pendingStartup.current?.abort();
-    setLoadingSnapshot(false);
-    setSnapshotError(null);
-    setSnapshotMissing(false);
-    const generation = ++workGeneration.current;
-    setError(null);
-    setRunning(true);
-    setAssessmentPhase('collecting');
+  async function rebuild() {
+    if (!subscription || running) return;
+    const current = ++generation.current;
+    setRunning(true); setError(null);
     try {
-      const subscriptionIds = [...selectedIds];
-      const result = await runCostAssessment(subscriptionIds, STALE_DAYS);
-      if (generation !== workGeneration.current) return;
-      setReport(result);
-      setLoadedSnapshot(null);
-      rememberScope(verifiedIdentity, subscriptionIds.map((value) => value.toLowerCase()));
-      try {
-        const persisted = await getLatestReport(undefined, subscriptionIds, STALE_DAYS);
-        if (generation !== workGeneration.current) return;
-        if (
-          persisted
-          && persisted.subscriptionIds.length === subscriptionIds.length
-          && subscriptionIds.every((subscriptionId) => persisted.subscriptionIds.includes(subscriptionId.toLowerCase()))
-          && persisted.staleDays === STALE_DAYS
-        ) {
-          setLoadedSnapshot(persisted);
-          setReport(persisted.report);
-        } else {
-          setError('Report generated, but the saved copy could not be confirmed. Chat and reopening this report may be unavailable until you run it again.');
-        }
-      } catch (snapshotError) {
-        if (generation !== workGeneration.current) return;
-        setError(snapshotError instanceof Error
-          ? `Report generated, but persisted exports are unavailable: ${snapshotError.message}`
-          : 'Report generated, but persisted exports are unavailable.');
-      }
-      setNarration(null);
-      if (verifiedIdentity.features?.aiNarration !== true) return;
-      setAssessmentPhase('narrating');
-      try {
-        const narrative = await narrate(subscriptionIds, result);
-        if (generation !== workGeneration.current) return;
-        setNarration(narrative);
-      } catch (narrationError) {
-        if (generation !== workGeneration.current) return;
-        setError(narrationError instanceof Error
-          ? `Report generated, but narration failed: ${narrationError.message}`
-          : 'Report generated, but narration is unavailable.');
-      }
-    } catch (runError) {
-      if (generation !== workGeneration.current) return;
-      setError(runError instanceof Error ? runError.message : 'Assessment failed. Please retry.');
-    } finally {
-      if (generation === workGeneration.current) { setAssessmentPhase(null); setRunning(false); }
-    }
+      await runCostAssessment([subscription.subscriptionId], 90);
+      if (current === generation.current) setVersion((value) => value + 1);
+    } catch (failure) {
+      if (current === generation.current) setError(failure instanceof Error ? failure.message : 'Dashboard generation failed.');
+    } finally { if (current === generation.current) setRunning(false); }
   }
 
-  function toggleSubscription(subscriptionId: string) {
-    pendingStartup.current?.abort();
-    setLoadingSnapshot(false);
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(subscriptionId)) next.delete(subscriptionId);
-      else next.add(subscriptionId);
-      return next;
-    });
-  }
-
-  function changeView(nextView: WorkspaceView) {
-    setView(nextView);
-    setVisitedViews((current) => current.has(nextView) ? current : new Set([...current, nextView]));
-  }
-
-  const reportIds = new Set(report?.subscriptionBreakdown.map((row) => row.subscriptionId) ?? []);
-  const scopeChanged = report !== null && (
-    selectedIds.size !== reportIds.size
-    || [...selectedIds].some((id) => !reportIds.has(id))
-  );
-
-  return (
-    <div className="app-shell">
-      <a className="skip-link" href="#workspace-main">Skip to workspace</a>
-      <header className="app-header">
-        <BrandLockup />
-        <nav className="workspace-nav" aria-label="Workspace">
-          <button className={view === 'report' ? 'active' : ''} aria-current={view === 'report' ? 'page' : undefined} type="button" onClick={() => changeView('report')}>
-            <BarChart3 size={15} /> Report
-          </button>
-          <button className={view === 'chat' ? 'active' : ''} aria-current={view === 'chat' ? 'page' : undefined} type="button" onClick={() => changeView('chat')}>
-            <MessageSquareText size={15} /> Chat
-          </button>
-          <button className={view === 'schedules' ? 'active' : ''} aria-current={view === 'schedules' ? 'page' : undefined} type="button" onClick={() => changeView('schedules')}>
-            <CalendarClock size={15} /> Schedules
-          </button>
-        </nav>
-        <span className="account-chip">
-          <button type="button" className="theme-toggle" title={`Switch to ${density === 'compact' ? 'comfortable' : 'compact'} layout`} aria-label={`Switch to ${density === 'compact' ? 'comfortable' : 'compact'} layout`} onClick={() => setDensity((value) => value === 'compact' ? 'comfortable' : 'compact')}>
-            {density === 'compact' ? <Maximize2 size={15} aria-hidden="true" /> : <Rows3 size={15} aria-hidden="true" />}
-          </button>
-          <ThemeToggle theme={theme} onToggle={toggleTheme} />
-          <span className="account-name">{verifiedIdentity?.userDetails ?? principal.userDetails}</span>
-          <button type="button" className="ghost-button" onClick={() => {
-            window.dispatchEvent(new Event(IDENTITY_REQUIRED_EVENT));
-            void signOutApiIdentity().catch(() => setAuthError('Sign-out failed. Please retry the connection.'));
-          }}>
-            Sign out
-          </button>
-        </span>
-      </header>
-      {(!verifiedIdentity || identityError) && (
-        <section className="api-identity-status" aria-label="Microsoft API connection">
-          <ShieldCheck size={18} aria-hidden="true" />
-          <span role={identityError ? 'alert' : 'status'}>{identityConnecting ? 'Verifying Microsoft account' : identityError || 'Connect your Microsoft account to verify access.'}</span>
-          <button type="button" className="ghost-button" disabled={identityConnecting} onClick={() => void handleConnect()}>
-            {identityConnecting ? <LoaderCircle className="spin" size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}
-            Connect Microsoft account
-          </button>
+  if (startupError) return <main className="center-screen"><p role="alert">{startupError}</p>
+    <button type="button" onClick={() => setStartup((value) => value + 1)}>Reopen workspace</button></main>;
+  if (!identity) return <main className="center-screen"><Loading label="Opening your FOCUS workspace..." /></main>;
+  const report = snapshot?.report;
+  const dates = report?.costDetails?.dates ?? [];
+  return <div className="app-shell manual-workspace">
+    <a className="skip-link" href="#workspace-main">Skip to workspace</a>
+    <header className="app-header">
+      <span className="brand-lockup"><img className="brand-mark" src="/brand-mark.svg" alt="" width={28} height={28} /><span className="brand-product">{BRAND_NAME}</span></span>
+      <nav className="workspace-nav" aria-label="Workspace">
+        <button type="button" className={view === 'report' ? 'active' : ''} onClick={() => setView('report')}><BarChart3 size={15} /> Report</button>
+        <button type="button" className={view === 'chat' ? 'active' : ''} onClick={() => setView('chat')}><MessageSquareText size={15} /> Chat</button>
+        <button type="button" className={view === 'admin' ? 'active' : ''} onClick={() => setView('admin')}><Settings2 size={15} /> Admin</button>
+      </nav>
+      <span className="account-chip">
+        <button type="button" className="theme-toggle" aria-label="Toggle display density" onClick={() => setDensity((value) => value === 'compact' ? 'comfortable' : 'compact')}>{density === 'compact' ? <Maximize2 size={15} /> : <Rows3 size={15} />}</button>
+        <button type="button" className="theme-toggle" aria-label="Toggle light and dark theme" onClick={() => setTheme((value) => value === 'light' ? 'dark' : 'light')}>{theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}</button>
+        <span className="account-name">No-login FOCUS workspace</span>
+      </span>
+    </header>
+    <main id="workspace-main" tabIndex={-1}>
+      <div hidden={view !== 'report'}>
+        <section className="manual-scope">
+          <div><strong>{subscription?.displayName ?? 'No target subscription configured'}</strong><small>{subscription?.subscriptionId ?? 'Start in Admin: target subscription, FOCUS report, optional Reader credentials.'}</small></div>
+          <button type="button" className="ghost-button" disabled={!snapshot || running || loading} onClick={() => void rebuild()}><RefreshCw size={15} /> {running ? 'Processing...' : 'Rebuild from uploaded report'}</button>
+          <button type="button" className="dark-button" onClick={() => setView('admin')}>Upload / replace report</button>
+          {report && <CostRangeControls dates={dates} value={costWindow} onChange={setCostWindow}
+            month={monthCostWindow(report.reportMetadata.periodStart, report.reportMetadata.periodEnd)} />}
         </section>
-      )}
-      {verifiedIdentity && (
-      <main id="workspace-main" tabIndex={-1}>
-        <div className="view-panel" hidden={view !== 'report'}>
-          <SubscriptionPicker
-            subscriptions={subscriptions}
-            selectedIds={selectedIds}
-            loading={loadingSubscriptions}
-            running={running}
-            runningLabel={assessmentPhase === 'narrating' ? 'Generating narrative' : 'Collecting Azure data'}
-            hasReport={report !== null}
-            /* The assessed period is shown by the cost window's From/To just
-               below; repeating it in the ribbon put the same dates on screen
-               twice. */
-            periodLabel={null}
-            scopeChanged={scopeChanged}
-            error={error}
-            onToggle={toggleSubscription}
-            onSelectAll={() => { pendingStartup.current?.abort(); setLoadingSnapshot(false); setSelectedIds(new Set(subscriptions.map((item) => item.subscriptionId))); }}
-            onClearAll={() => { pendingStartup.current?.abort(); setLoadingSnapshot(false); setSelectedIds(new Set()); }}
-            onRun={handleRun}
-          >
-            {report && <CostRangeControls dates={costWindowDatesAvailable} value={costWindow} onChange={setCostWindow} month={monthCostWindow(report.reportMetadata.periodStart, report.reportMetadata.periodEnd)} monthToDate={monthToDateWindow(report.costDetails)} />}
-          </SubscriptionPicker>
-          {loadingSnapshot && <section className="saved-report-status"><span role="status"><LoaderCircle className="spin" size={18} aria-hidden="true" /> Opening saved report...</span><button type="button" className="ghost-button" onClick={() => { pendingStartup.current?.abort(); setLoadingSnapshot(false); }}>Skip saved report</button></section>}
-          {(snapshotError || (error && !report)) && <section className="saved-report-status">
-            {snapshotError && <p role="alert">{snapshotError}</p>}
-            <button type="button" className="ghost-button" onClick={() => setStartupVersion((value) => value + 1)} disabled={loadingSubscriptions || loadingSnapshot || running}><RefreshCw size={16} aria-hidden="true" /> Retry saved report</button>
-          </section>}
-          {running && assessmentPhase && <AssessmentProgress phase={assessmentPhase} updating={report !== null} />}
-          {!report && !running && !loadingSubscriptions && !loadingSnapshot && !error && !snapshotError && (
-            <section className="report-awaiting" aria-labelledby="report-ready-heading">
-              <BarChart3 size={28} aria-hidden="true" />
-              <h2 id="report-ready-heading">{selectedIds.size ? snapshotMissing ? 'No saved report for this scope' : 'Report workspace ready' : 'No subscriptions selected'}</h2>
-              <p>{selectedIds.size} subscription{selectedIds.size === 1 ? '' : 's'} selected</p>
-              <ol className="landing-steps" aria-label="Getting started">
-                <li className={selectedIds.size > 0 ? 'is-done' : 'is-current'}>
-                  <span className="landing-step-index">{selectedIds.size > 0 ? <Check size={14} aria-hidden="true" /> : '1'}</span>
-                  <span className="landing-step-copy"><strong>Select subscriptions</strong><small>Choose which Azure subscriptions to include, above.</small></span>
-                </li>
-                <li className={selectedIds.size > 0 ? 'is-current' : 'is-pending'}>
-                  <span className="landing-step-index">2</span>
-                  <span className="landing-step-copy"><strong>Run your report</strong><small>Collects cost, savings and compliance findings for the selected scope.</small></span>
-                </li>
-                <li className="is-pending">
-                  <span className="landing-step-index">3</span>
-                  <span className="landing-step-copy"><strong>Explore Chat and Schedules</strong><small>Ask questions about the report or set up automatic FOCUS exports of up to six months.</small></span>
-                </li>
-              </ol>
-              {selectedIds.size > 0 && <button type="button" className="dark-button" disabled={!!identityError} onClick={() => void handleRun()}><BarChart3 size={16} aria-hidden="true" /> Run first report</button>}
-            </section>
-          )}
-          {report && (
-            <ReportErrorBoundary>
-              <Suspense fallback={<WorkspaceLoading label="report" />}>
-                <ReportView report={report} narration={narration} snapshotId={loadedSnapshot?.snapshotId ?? null} snapshotCreatedAt={loadedSnapshot?.createdAt} costWindow={costWindow} onCostWindowChange={setCostWindow} />
-              </Suspense>
-            </ReportErrorBoundary>
-          )}
-        </div>
-        {visitedViews.has('chat') && (
-          <div className="view-panel" hidden={view !== 'chat'}>
-            <Suspense fallback={<WorkspaceLoading label="chat" />}>
-              <ChatWindow
-                snapshotId={loadedSnapshot?.snapshotId ?? null}
-                period={report?.reportMetadata.period ?? null}
-                currency={report?.reportMetadata.currency ?? null}
-                subscriptionCount={loadedSnapshot?.subscriptionIds.length ?? 0}
-                onOpenReport={() => changeView('report')}
-              />
-            </Suspense>
-          </div>
-        )}
-        {visitedViews.has('schedules') && (
-          <div className="view-panel" hidden={view !== 'schedules'}>
-            <Suspense fallback={<WorkspaceLoading label="schedules" />}><ScheduleManager /></Suspense>
-          </div>
-        )}
-      </main>
-      )}
-    </div>
-  );
+        {loading && <Loading label="Opening saved dashboard..." />}
+        {running && <Loading label="Processing the uploaded report. The previous complete dashboard stays available." />}
+        {error && <section role="alert">{error} <button type="button" onClick={() => setVersion((value) => value + 1)}>Retry</button></section>}
+        {!report && !loading && <section className="report-awaiting">
+          <h1>Build a dashboard from your FOCUS report</h1>
+          <p>Set one target subscription in Admin, then upload a FOCUS CSV or gzip report for any duration. A replacement report overrides the previous active report.</p>
+          <p>Service-principal credentials are optional. Without them, financial views work and live Azure inventory, Advisor and metric sections stay unavailable.</p>
+          <button type="button" className="dark-button" onClick={() => setView('admin')}>Open Admin and upload</button>
+        </section>}
+        {report && <ReportErrorBoundary><Suspense fallback={<Loading label="Loading report views..." />}>
+          <ReportView key={snapshot.snapshotId} report={report} narration={narration} snapshotId={snapshot.snapshotId}
+            snapshotCreatedAt={snapshot.createdAt} costWindow={costWindow} onCostWindowChange={setCostWindow} />
+        </Suspense></ReportErrorBoundary>}
+      </div>
+      <div hidden={view !== 'admin'}><Suspense fallback={<Loading label="Loading Admin..." />}>
+        <ManualAdmin onConfigurationChanged={() => { setSnapshot(null); setVersion((value) => value + 1); }}
+          onReady={() => { setVersion((value) => value + 1); setView('report'); }} />
+      </Suspense></div>
+      {view === 'chat' && <Suspense fallback={<Loading label="Loading Chat..." />}>
+        <ChatWindow snapshotId={snapshot?.snapshotId ?? null} period={report?.reportMetadata.period ?? null}
+          currency={report?.reportMetadata.currency ?? null} subscriptionCount={snapshot ? 1 : 0} onOpenReport={() => setView('report')} />
+      </Suspense>}
+    </main>
+  </div>;
 }

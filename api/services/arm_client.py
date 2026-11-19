@@ -1,4 +1,4 @@
-"""ARM, Cost Management and Resource Graph calls under the runtime managed identity."""
+"""Read-only target Azure calls using the active workspace's service principal."""
 
 import asyncio
 import logging
@@ -11,7 +11,7 @@ from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
-from services import runtime_identity
+from services import target_connection
 from services import azure_request_pacing
 from services.assessment_settings import settings as assessment_settings
 
@@ -96,14 +96,17 @@ def _cost_retry_delay(error: httpx.HTTPStatusError, attempt: int) -> float:
 
 
 async def _token() -> str:
-    global _credential
-    if _credential is None:
-        _credential = runtime_identity.async_credential()
-    result = await _credential.get_token(f"{ARM_BASE}/.default")
-    return result.token
+    return await target_connection.access_token()
 
 
 async def _arm_request(method: str, path: str, json: dict | None = None, timeout: float = 30.0) -> dict:
+    normalized = path.casefold()
+    if method not in {"GET", "POST"} or any(value in normalized for value in (
+        "/microsoft.costmanagement/exports", "/microsoft.consumption/budgets", "/microsoft.costmanagement/query",
+    )):
+        raise ValueError("Manual FOCUS mode never changes target resources or fetches historical cost data.")
+    if method == "POST" and "/microsoft.resourcegraph/resources" not in normalized and "/metrics" not in normalized:
+        raise ValueError("Only read-only Resource Graph and metric query POSTs are supported.")
     paced = azure_request_pacing.enabled()
     retries = assessment_settings().azure_get_retries if paced and method == "GET" else 0
     for attempt in range(retries + 1):
@@ -154,16 +157,9 @@ async def _list_arm_collection(path: str, timeout: float = 30.0) -> list[dict]:
 
 
 async def list_subscriptions() -> list[dict]:
-    rows = await _list_arm_collection("/subscriptions?api-version=2022-12-01")
-    subscriptions: dict[str, dict] = {}
-    for row in rows:
-        if row.get("state") != "Enabled":
-            continue
-        subscription_id = row.get("subscriptionId")
-        if not isinstance(subscription_id, str) or not subscription_id.strip():
-            raise ValueError("Subscription response is missing an ID")
-        subscriptions[subscription_id.casefold()] = row
-    return list(subscriptions.values())
+    configuration = await target_connection.load(required=False)
+    return [{"subscriptionId": configuration.subscription_id,
+             "displayName": configuration.subscription_name, "state": "Configured"}] if configuration else []
 
 
 async def get_subscription(subscription_id: str) -> dict:
@@ -351,7 +347,7 @@ async def assess_storage_account(
     period_start: str,
     period_end: str,
 ) -> dict:
-    cache_key = (resource_id.lower(), "storage_tiers", period_start, period_end)
+    cache_key = (target_connection.cache_key(resource_id.lower()), "storage_tiers", period_start, period_end)
     now = time.monotonic()
     cached = _metric_cache.get(cache_key)
     if cached and now - cached[0] < _METRIC_CACHE_TTL_SECONDS:
@@ -680,7 +676,7 @@ async def collect_ai_deployment_usage(
     deployments: list[tuple[dict, dict]] = []
     for account in eligible:
         account_id = str(account.get("id") or "")
-        cache_key = (account_id.lower(), str(period_start), str(period_end))
+        cache_key = (target_connection.cache_key(account_id.lower()), str(period_start), str(period_end))
         now = time.monotonic()
         cached = _ai_usage_cache.get(cache_key)
         try:
@@ -722,7 +718,7 @@ async def assess_zero_traffic(
     if metric_names is None:
         raise ValueError(f"No traffic metric profile for {category}")
 
-    cache_key = (resource_id.lower(), category, period_start, period_end)
+    cache_key = (target_connection.cache_key(resource_id.lower()), category, period_start, period_end)
     now = time.monotonic()
     cached = _metric_cache.get(cache_key)
     if cached and now - cached[0] < _METRIC_CACHE_TTL_SECONDS:
@@ -849,7 +845,7 @@ async def _cost_management_query(subscription_id: str, groupings: list[str]) -> 
     429s) and noticeably slower than plain ARM/Resource Graph calls, unlike the rest
     of this module.
     """
-    cache_key = f"{subscription_id}:{','.join(groupings)}"
+    cache_key = target_connection.cache_key(f"{subscription_id}:{','.join(groupings)}")
     now = time.monotonic()
     cached = _cost_cache.get(cache_key)
     if cached and now - cached[0] < _COST_CACHE_TTL_SECONDS:
@@ -977,6 +973,7 @@ def _validate_recommendation_scenario(
 
 
 async def _list_recommendation_pages(cache_key: tuple[str, ...], path: str) -> list[dict]:
+    cache_key = (target_connection.cache_key("recommendations"), *cache_key)
     now = time.monotonic()
     cached = _recommendation_cache.get(cache_key)
     if cached and now - cached[0] < _RECOMMENDATION_CACHE_TTL_SECONDS:

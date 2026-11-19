@@ -32,7 +32,7 @@ export function shiftCostDate(value: string, days: number): string {
 export function costWindowDates(window: CostWindow): string[] {
   if (!validCostDate(window.startDate) || !validCostDate(window.endDate)) return [];
   const count = (Date.parse(window.endDate) - Date.parse(window.startDate)) / DAY_MS + 1;
-  if (count < 1 || count > 366) return [];
+  if (count < 1 || count * 16 > 1048576) return [];
   return Array.from({ length: count }, (_, index) => shiftCostDate(window.startDate, index));
 }
 

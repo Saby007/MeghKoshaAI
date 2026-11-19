@@ -1,10 +1,10 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('All', 'Initialize', 'Foundation', 'Build', 'Bootstrap', 'Identity', 'Permissions', 'Release', 'Verify', 'StopBuilder')]
+    [ValidateSet('All', 'Initialize', 'Foundation', 'Build', 'Bootstrap', 'Release', 'Verify', 'StopBuilder')]
     [string] $Stage,
     [ValidatePattern('^[a-z0-9][a-z0-9-]{0,63}$')]
-    [string] $EnvironmentName = 'meghkoshaai-scalable-dev',
+    [string] $EnvironmentName = 'meghkoshaai-manual-focus',
     [string] $SubscriptionId = '',
     [string] $Location = 'centralindia',
     [string] $FoundryLocation = 'eastus2',
@@ -44,6 +44,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion -lt [version]'7.4') { throw 'PowerShell 7.4 or later is required.' }
+if ($TargetSubscriptionId.Count -or $AllowNativeExportTrustedServices -or $ApproveOwnedRegistrationMigration -or
+    $IncludeLocalhostRedirects -or $ServiceManagementReference) {
+    throw 'Manual FOCUS mode has no sign-in registrations, native exports or target IAM grants. Enter the target and optional Reader service principal in Admin after deployment.'
+}
 if ($EnvironmentName -eq 'meghkoshaai-dev') { throw 'The existing Dev environment is under a layout hold. Use a reviewed parallel environment.' }
 if ($ApproveOwnedRegistrationMigration) {
     if (-not $PreviousWebOrigin -or -not $PreviousWebOrigin.IsAbsoluteUri -or $PreviousWebOrigin.Scheme -ne 'https' -or
@@ -65,8 +69,12 @@ if (-not $Apply -or $WhatIfPreference) {
         privateBuilder = @{ vmSize = $BuilderVmSize; publicVmIp = $false; inboundAccess = $false; outboundNat = $true }
         provisionRetry = @{ maxAttempts = $MaxAttempts; settleSeconds = $SettleSeconds; settlementTimeoutSeconds = 600 }
         source = @{ repository = $Repository; commit = $SourceCommit }
-        stages = $(if ($Stage -eq 'All') { @('Initialize', 'Foundation', 'Build', 'Bootstrap', 'Identity', 'Permissions', 'Release', 'Verify', 'StopBuilder') } else { @($Stage) })
-        targets = $TargetSubscriptionId
+        stages = $(if ($Stage -eq 'All') { @('Initialize', 'Foundation', 'Build', 'Bootstrap', 'Release', 'Verify', 'StopBuilder') } else { @($Stage) })
+        targetConfiguredInAdmin = $true
+        applicationLogin = $false
+        optionalReaderServicePrincipal = $true
+        manualFocusUploads = $true
+        privateWorkspaceVault = $true
         appliesChanges = $false
         nativeExportTrustedServicesException = [bool]$AllowNativeExportTrustedServices
         ownedRegistrationMigrationApproved = [bool]$ApproveOwnedRegistrationMigration
@@ -310,6 +318,11 @@ function Check-Private {
         $database.authConfig.passwordAuth -ne 'Disabled' -or $database.authConfig.activeDirectoryAuth -ne 'Enabled') {
         throw 'PostgreSQL must remain private and Entra-only.'
     }
+    $vault = Azure @('keyvault', 'show', '--name', (Value 'WORKSPACE_VAULT_NAME' -Required))
+    if ($vault.properties.publicNetworkAccess -ne 'Disabled' -or
+        -not $vault.properties.enableRbacAuthorization -or -not $vault.properties.enablePurgeProtection) {
+        throw 'Workspace Key Vault must remain private, RBAC-enabled and purge-protected.'
+    }
     if ((Value 'APP_ENABLE_CHAT_RUNTIME') -eq 'true') {
         $ai = Azure @('cognitiveservices', 'account', 'show', '--resource-group', (Value 'AZURE_RESOURCE_GROUP' -Required),
                      '--name', (Value 'APP_FOUNDRY_ACCOUNT_NAME' -Required))
@@ -414,13 +427,6 @@ function Invoke-AllStages {
     }
     $account = Azure @('account', 'show')
     if ($account.state -ne 'Enabled') { throw 'The selected subscription is not enabled.' }
-    $targets = $TargetSubscriptionId
-    if (-not $targets.Count -and (Value 'APP_STAGED_TARGET_SUBSCRIPTIONS')) {
-        $targets = [guid[]]@((Value 'APP_STAGED_TARGET_SUBSCRIPTIONS') | ConvertFrom-Json)
-    }
-    if (-not $targets.Count) { $targets = [guid[]]@($script:subscription) }
-    $targets = [guid[]]@($targets | Select-Object -Unique)
-    if ($targets -contains [guid]::Empty) { throw 'Target subscription IDs must be nonzero.' }
     $deployed = (Value 'APP_APPLICATIONS_DEPLOYED') -eq 'true'
     if ($deployed -and (Value 'APP_STAGED_BUILD_COMMIT') -ne $commit) {
         throw 'This environment already runs a different source commit. Review its image/schema update before using the individual stages; no automatic migration was started.'
@@ -428,14 +434,14 @@ function Invoke-AllStages {
     Write-Host "`nEnd-to-end private deployment: $EnvironmentName"
     Write-Host "Hosting subscription: $script:subscription; tenant: $($account.tenantId); region: $Location"
     Write-Host "Private Foundry/Model Router region: $FoundryLocation. Chat is included; the hosted-agent narrator remains separate and opt-in."
-    Write-Host "Assessed subscriptions: $($targets -join ', ')"
+    Write-Host 'The target subscription and optional Reader service-principal credentials are configured in the no-login Admin workspace after deployment.'
     Write-Host "Source commit: $commit"
     if ($ApproveOwnedRegistrationMigration) {
         Write-Host "Guarded owned sign-in migration: API $ExpectedApiClientId; web $ExpectedWebClientId."
         Write-Host "Only previous callback origin $PreviousWebOrigin and OBO principal $PreviousOboPrincipalId may be replaced."
     }
-    Write-Host 'Includes private ACR Premium, PostgreSQL, private Foundry/model usage, VM/disk/NAT costs, image publication, sign-in registration, and Reader/Cost Management Contributor grants.'
-    Write-Host "Blob trusted-service export exception: $($AllowNativeExportTrustedServices.IsPresent). No public ACR/PostgreSQL access or inbound VM access."
+    Write-Host 'Includes private ACR Premium, PostgreSQL, private Key Vault, private Foundry/model usage, VM/disk/NAT costs and image publication. No user sign-in registrations, target IAM grants, budgets or native exports.'
+    Write-Host 'ACR, PostgreSQL, Blob and Key Vault stay private. The no-login HTTPS app uses isolated browser workspaces.'
     Write-Host 'The builder is deallocated on completion/failure; disk, NAT, registry and database charges remain.'
     if (-not $ApproveAll -and (Read-Host 'Approve this complete rollout? Type YES').Trim() -cne 'YES') {
         throw 'End-to-end rollout was not approved. No resource changes were started.'
@@ -501,26 +507,11 @@ function Invoke-AllStages {
         } else {
             Run-Stage 'Bootstrap' @{ ApproveDatabaseBootstrap = $true }
         }
-        $treeId = $ServiceManagementReference
-        if (-not $treeId) { $treeId = Value 'APP_SERVICE_MANAGEMENT_REFERENCE' }
-        try {
-            Run-Stage 'Identity' @{ ApproveIdentityChanges = $true; ServiceManagementReference = $treeId }
-        } catch {
-            if ($treeId -or $_.Exception.Message -notmatch 'serviceManagementReference') { throw }
-            $treeId = (Read-Host 'This tenant requires a Service Tree UUID').Trim()
-            $treeGuid = [guid]::Empty
-            if (-not [guid]::TryParse($treeId, [ref]$treeGuid) -or $treeGuid -eq [guid]::Empty) { throw 'A valid Service Tree UUID is required.' }
-            Run-Stage 'Identity' @{ ApproveIdentityChanges = $true; ServiceManagementReference = $treeGuid.ToString() }
-        }
-        if ($treeId) { Save 'APP_SERVICE_MANAGEMENT_REFERENCE' $treeId }
-        Run-Stage 'Permissions' @{ ApproveRoleAssignments = $true; TargetSubscriptionId = $targets }
         if ((Value 'APP_APPLICATIONS_DEPLOYED') -eq 'true' -and
             (Value 'APP_STAGED_RELEASE_COMMIT') -eq $commit -and
             (Value 'SERVICE_API_IMAGE_NAME') -eq (Value 'APP_STAGED_API_IMAGE') -and
-            (Value 'SERVICE_WEB_IMAGE_NAME') -eq (Value 'APP_STAGED_WEB_IMAGE') -and
-            (Value 'APP_STAGED_RELEASE_API_CLIENT_ID') -eq (Value 'MEGHKOSHA_API_CLIENT_ID') -and
-            (Value 'APP_STAGED_RELEASE_WEB_CLIENT_ID') -eq (Value 'MEGHKOSHA_WEB_CLIENT_ID')) {
-            Write-Host 'The same images and sign-in configuration are already released; verifying them.'
+            (Value 'SERVICE_WEB_IMAGE_NAME') -eq (Value 'APP_STAGED_WEB_IMAGE')) {
+            Write-Host 'The same reviewed manual-FOCUS images are already released; verifying them.'
         } else {
             Run-Stage 'Release' @{ ApproveRelease = $true }
         }
@@ -544,8 +535,8 @@ function Invoke-AllStages {
     return [ordered]@{
         stage = 'All'; environment = $EnvironmentName; status = 'deployment_completed'
         sourceCommit = $commit; webOrigin = (Value 'APP_WEB_ORIGIN' -Required)
-        builderDeallocated = $true; assessedSubscriptions = $targets
-        note = 'Sign in, complete native FOCUS exports, and validate a representative assessment. Live workload acceptance is not implied by readiness.'
+        builderDeallocated = $true; targetConfiguredInAdmin = $true; applicationLogin = $false
+        note = 'Open Admin, select the target and upload FOCUS. Optional Reader SP credentials enable Azure enrichment. Readiness is not a customer-load certification.'
     }
 }
 
@@ -576,7 +567,9 @@ try {
             APP_PRIVATE_REGISTRY = 'true'; APP_REGISTRY_BUILD_MODE = 'private-runner'
             APP_ENABLE_PRIVATE_BUILDER = 'true'; APP_PRIVATE_BUILDER_VM_SIZE = $BuilderVmSize
             APP_ASSESSMENT_FOUNDATION_ONLY = 'true'; APP_ASSESSMENT_DB_BOOTSTRAPPED = 'false'
-            APP_ENABLE_PROCESSOR = 'false'; APP_MIN_REPLICAS = '2'
+            APP_ENABLE_PROCESSOR = 'false'; APP_EXPORT_TRUSTED_SERVICES = 'false'; APP_MIN_REPLICAS = '1'
+            APP_API_CPU = '2.0'; APP_POSTGRES_SKU = 'Standard_D4ds_v5'; APP_POSTGRES_STORAGE_GB = '256'
+            APP_WORKSPACE_TTL_DAYS = '7'; APP_WORKSPACE_MAX_ACTIVE = '250'
         }
         foreach ($entry in $defaults.GetEnumerator()) {
             if (-not (Value $entry.Key)) { Save $entry.Key ([string]$entry.Value) }
@@ -595,7 +588,6 @@ try {
         }
         Check-Compute
         Check-Foundry
-        if ($AllowNativeExportTrustedServices) { Save 'APP_EXPORT_TRUSTED_SERVICES' 'true' }
         if ($BlobDataProtection) { Save 'APP_BLOB_DATA_PROTECTION' 'true' }
     } else {
         Reload
@@ -696,65 +688,21 @@ try {
                 Save 'APP_STAGED_BOOTSTRAP_IMAGE' (Value 'APP_STAGED_API_IMAGE')
                 Save 'APP_ASSESSMENT_DB_BOOTSTRAPPED' 'true'
             }
-            'Identity' {
-                $env:APP_ALLOW_AZURE_CHANGES = 'true'
-                $arguments = @{
-                    TenantId = (Value 'AZURE_TENANT_ID' -Required); SubscriptionId = $script:subscription
-                    EnvironmentName = $EnvironmentName; WebOrigin = (Value 'APP_WEB_ORIGIN' -Required)
-                    OboManagedIdentityResourceId = (Value 'MEGHKOSHA_OBO_MANAGED_IDENTITY_RESOURCE_ID' -Required)
-                    Apply = $true
-                }
-                if ($ServiceManagementReference) { $arguments.ServiceManagementReference = $ServiceManagementReference }
-                $arguments.Confirm = $false
-                if ($IncludeLocalhostRedirects) { $arguments.IncludeLocalhostRedirects = $true }
-                if ($ApproveOwnedRegistrationMigration) {
-                    $arguments.ApproveOwnedRegistrationMigration = $true
-                    $arguments.PreviousWebOrigin = $PreviousWebOrigin
-                    $arguments.PreviousOboPrincipalId = $PreviousOboPrincipalId
-                    $arguments.ExpectedApiClientId = $ExpectedApiClientId
-                    $arguments.ExpectedWebClientId = $ExpectedWebClientId
-                }
-                $identity = & (Join-Path $PSScriptRoot 'bootstrap-identity.ps1') @arguments | ConvertFrom-Json -AsHashtable
-                Save 'MEGHKOSHA_API_CLIENT_ID' $identity.MEGHKOSHA_API_CLIENT_ID
-                Save 'MEGHKOSHA_WEB_CLIENT_ID' $identity.MEGHKOSHA_WEB_CLIENT_ID
-            }
-            'Permissions' {
-                if (-not $TargetSubscriptionId.Count -or $TargetSubscriptionId -contains [guid]::Empty) { throw 'Select explicit nonzero target subscription IDs.' }
-                $token = (Value 'SERVICE_API_RESOURCE_NAME' -Required) -replace '^ca-api-', ''
-                foreach ($purpose in @('api', 'processor')) {
-                    $identity = Azure @('identity', 'show', '--resource-group', $group, '--name', "id-$purpose-$token")
-                    foreach ($target in $TargetSubscriptionId) {
-                        $existing = @(Azure @('role', 'assignment', 'list', '--scope', "/subscriptions/$target",
-                            '--query', "[?principalId=='$($identity.principalId)']"))
-                        $roles = @{ Reader = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'; 'Cost Management Contributor' = '434105ed-43f6-45c7-a02f-909b2ba83430' }
-                        foreach ($role in $roles.Keys) {
-                            if (@($existing | Where-Object { $_.roleDefinitionId -like "*/$($roles[$role])" -and $_.scope -eq "/subscriptions/$target" }).Count) { continue }
-                            $null = Azure @('role', 'assignment', 'create', '--assignee-object-id', $identity.principalId,
-                                '--assignee-principal-type', 'ServicePrincipal', '--role', $role, '--scope', "/subscriptions/$target")
-                        }
-                    }
-                }
-                Save 'APP_STAGED_TARGET_SUBSCRIPTIONS' (($TargetSubscriptionId | ForEach-Object { $_.ToString() }) | ConvertTo-Json -Compress -AsArray)
-            }
             'Release' {
                 Check-Private
                 Check-Build
                 if ((Value 'APP_ASSESSMENT_DB_BOOTSTRAPPED') -ne 'true' -or
                     (Value 'APP_STAGED_BOOTSTRAP_IMAGE') -ne (Value 'APP_STAGED_API_IMAGE')) { throw 'Bootstrap must verify the exact reviewed API image before release.' }
-                $null = Value 'APP_STAGED_TARGET_SUBSCRIPTIONS' -Required
-                $null = Value 'MEGHKOSHA_API_CLIENT_ID' -Required
-                $null = Value 'MEGHKOSHA_WEB_CLIENT_ID' -Required
                 Save 'SERVICE_API_IMAGE_NAME' (Value 'APP_STAGED_API_IMAGE')
                 Save 'SERVICE_WEB_IMAGE_NAME' (Value 'APP_STAGED_WEB_IMAGE')
-                Save 'SERVICE_PROCESSOR_IMAGE_NAME' (Value 'APP_STAGED_API_IMAGE')
+                Save 'SERVICE_PROCESSOR_IMAGE_NAME' ''
                 Save 'SERVICE_ASSESSMENT_IMAGE_NAME' (Value 'APP_STAGED_API_IMAGE')
-                Save 'APP_ENABLE_PROCESSOR' 'true'
+                Save 'APP_ENABLE_PROCESSOR' 'false'
+                Save 'APP_EXPORT_TRUSTED_SERVICES' 'false'
                 Save 'APP_ASSESSMENT_FOUNDATION_ONLY' 'false'
                 Provision
                 if (-not $PreviewOnly) {
                     Save 'APP_STAGED_RELEASE_COMMIT' (Value 'APP_STAGED_BUILD_COMMIT')
-                    Save 'APP_STAGED_RELEASE_API_CLIENT_ID' (Value 'MEGHKOSHA_API_CLIENT_ID')
-                    Save 'APP_STAGED_RELEASE_WEB_CLIENT_ID' (Value 'MEGHKOSHA_WEB_CLIENT_ID')
                 }
             }
             'Verify' {
@@ -784,7 +732,7 @@ try {
     if ($Stage -ne 'All') { [ordered]@{
         stage = $Stage; environment = $EnvironmentName; status = $(if ($PreviewOnly) { 'preview_completed' } else { 'stage_completed' })
         webOrigin = (Value 'APP_WEB_ORIGIN')
-        note = 'Only this stage ran. Sign-in, native exports and realistic private-network load/restart acceptance remain separate checks.'
+        note = 'Only this stage ran. Configure the target and upload FOCUS in Admin. SP enrichment is optional; customer-load and private-network acceptance remain deployment checks.'
     } | ConvertTo-Json -Depth 4 }
 } finally {
     Pop-Location

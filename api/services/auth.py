@@ -1,4 +1,8 @@
-"""Principals derived exclusively from validated delegated API bearer tokens."""
+"""Principal contract shared with legacy helpers.
+
+The manual application creates workspace-scoped principals, not Entra users.
+The delegated resolver below is retained for legacy library compatibility only.
+"""
 
 from __future__ import annotations
 

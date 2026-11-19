@@ -60,7 +60,7 @@ class AssessmentHTTPBudget:
                 if not any(key.lower() == b"cache-control" for key, _ in headers):
                     headers.append((b"cache-control", b"private, no-store"))
                 if not any(key.lower() == b"vary" for key, _ in headers):
-                    headers.append((b"vary", b"Authorization"))
+                    headers.append((b"vary", b"Cookie"))
                 message["headers"] = headers
             await send(message)
 
@@ -74,7 +74,9 @@ class AssessmentHTTPBudget:
                     await JSONResponse({"detail": "Report export/chat capacity is busy. Retry shortly."},
                                        status_code=429, headers={"Retry-After": "2"})(scope, receive, send)
                     return
-            if scope["method"] in {"POST", "PUT", "PATCH"}:
+            upload_chunk = scope["method"] == "PUT" and scope["path"].startswith("/api/admin/uploads/") \
+                and "/files/" in scope["path"]
+            if scope["method"] in {"POST", "PUT", "PATCH"} and not upload_chunk:
                 body = bytearray()
                 while True:
                     message = await receive()

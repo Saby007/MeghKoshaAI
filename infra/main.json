@@ -6,10 +6,116 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "6485073714621672345"
+      "templateHash": "18380716921726057143"
     }
   },
   "definitions": {
+    "AssessmentLimits": {
+      "type": "object",
+      "properties": {
+        "inputBytes": {
+          "type": "int",
+          "nullable": true
+        },
+        "spoolBytes": {
+          "type": "int",
+          "nullable": true
+        },
+        "expandedBytes": {
+          "type": "int",
+          "nullable": true
+        },
+        "csvRows": {
+          "type": "int",
+          "nullable": true
+        },
+        "inventoryRows": {
+          "type": "int",
+          "nullable": true
+        },
+        "historyRows": {
+          "type": "int",
+          "nullable": true
+        },
+        "timeoutSeconds": {
+          "type": "int",
+          "nullable": true
+        },
+        "leaseSeconds": {
+          "type": "int",
+          "nullable": true
+        },
+        "maxAttempts": {
+          "type": "int",
+          "nullable": true
+        },
+        "pageSize": {
+          "type": "int",
+          "nullable": true
+        },
+        "responseBytes": {
+          "type": "int",
+          "nullable": true
+        },
+        "recordBytes": {
+          "type": "int",
+          "nullable": true
+        },
+        "inlineRows": {
+          "type": "int",
+          "nullable": true
+        },
+        "apiConcurrency": {
+          "type": "int",
+          "nullable": true
+        },
+        "interactiveRows": {
+          "type": "int",
+          "nullable": true
+        },
+        "workConcurrency": {
+          "type": "int",
+          "nullable": true
+        },
+        "readPoolSize": {
+          "type": "int",
+          "nullable": true
+        },
+        "armIntervalMs": {
+          "type": "int",
+          "nullable": true
+        },
+        "graphIntervalMs": {
+          "type": "int",
+          "nullable": true
+        },
+        "metricsIntervalMs": {
+          "type": "int",
+          "nullable": true
+        },
+        "costIntervalMs": {
+          "type": "int",
+          "nullable": true
+        },
+        "azureGetRetries": {
+          "type": "int",
+          "nullable": true
+        },
+        "detailRows": {
+          "type": "int",
+          "nullable": true
+        },
+        "detailPoints": {
+          "type": "int",
+          "nullable": true
+        },
+        "dbCommandSeconds": {
+          "type": "int",
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
     "ModelDeployment": {
       "type": "object",
       "properties": {
@@ -66,6 +172,114 @@
         "data",
         "ai"
       ]
+    },
+    "assessmentMode": {
+      "type": "string",
+      "defaultValue": "postgres",
+      "allowedValues": [
+        "postgres"
+      ],
+      "metadata": {
+        "description": "Manual FOCUS workspaces require private PostgreSQL and background assessments."
+      }
+    },
+    "postgresSkuName": {
+      "type": "string",
+      "defaultValue": "Standard_D4ds_v5"
+    },
+    "postgresSkuTier": {
+      "type": "string",
+      "defaultValue": "GeneralPurpose",
+      "allowedValues": [
+        "GeneralPurpose",
+        "MemoryOptimized"
+      ]
+    },
+    "postgresVersion": {
+      "type": "string",
+      "defaultValue": "16",
+      "allowedValues": [
+        "16",
+        "17"
+      ]
+    },
+    "postgresStorageGB": {
+      "type": "int",
+      "defaultValue": 256,
+      "minValue": 32,
+      "maxValue": 16384
+    },
+    "apiCpu": {
+      "type": "string",
+      "defaultValue": "2.0",
+      "allowedValues": [
+        "1.0",
+        "2.0",
+        "4.0"
+      ]
+    },
+    "workspaceTtlDays": {
+      "type": "int",
+      "defaultValue": 7,
+      "minValue": 1,
+      "maxValue": 90
+    },
+    "workspaceMaxActive": {
+      "type": "int",
+      "defaultValue": 250,
+      "minValue": 1,
+      "maxValue": 10000
+    },
+    "assessmentWorkerCpu": {
+      "type": "string",
+      "defaultValue": "4.0",
+      "allowedValues": [
+        "1.0",
+        "2.0",
+        "4.0"
+      ],
+      "metadata": {
+        "description": "Worker CPU; memory is paired safely: 1 CPU/2 GiB, 2 CPU/4 GiB, 4 CPU/8 GiB."
+      }
+    },
+    "assessmentWorkerReplicas": {
+      "type": "int",
+      "defaultValue": 1,
+      "minValue": 1,
+      "maxValue": 4
+    },
+    "assessmentQueueCapacity": {
+      "type": "int",
+      "defaultValue": 50,
+      "minValue": 1,
+      "maxValue": 1000
+    },
+    "assessmentPoolSize": {
+      "type": "int",
+      "defaultValue": 5,
+      "minValue": 2,
+      "maxValue": 50
+    },
+    "assessmentImage": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional image for database bootstrap before application release; otherwise reuse the API image."
+      }
+    },
+    "assessmentFoundationOnly": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Stage only the private database and manual bootstrap job; preserve existing application resources until bootstrap is verified."
+      }
+    },
+    "assessmentLimits": {
+      "$ref": "#/definitions/AssessmentLimits",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Optional numeric worker/API safety budgets. Defaults are validated again by the runtime."
+      }
     },
     "resourceGroupName": {
       "type": "string",
@@ -127,7 +341,10 @@
     },
     "allowNativeExportTrustedServices": {
       "type": "bool",
-      "defaultValue": false
+      "defaultValue": false,
+      "allowedValues": [
+        false
+      ]
     },
     "privateRegistry": {
       "type": "bool",
@@ -135,6 +352,36 @@
       "metadata": {
         "description": "Policy-restricted subscriptions: put the container registry behind a private endpoint and deny public network access. Requires the Premium registry tier and stops azd remote builds from reaching the registry."
       }
+    },
+    "registryBuildMode": {
+      "type": "string",
+      "defaultValue": "[if(equals(parameters('assessmentMode'), 'postgres'), 'private-runner', 'managed-pool')]",
+      "allowedValues": [
+        "private-runner",
+        "managed-pool"
+      ],
+      "metadata": {
+        "description": "PostgreSQL deployments always require private ACR. Use a private Docker build host, or opt into a managed pool only in a supported region."
+      }
+    },
+    "enablePrivateBuilder": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Optional operator-controlled private Docker VM with NAT egress. Adds VM/disk/NAT cost; no public VM IP or inbound access."
+      }
+    },
+    "privateBuilderVmSize": {
+      "type": "string",
+      "defaultValue": "Standard_D2s_v5"
+    },
+    "privateBuilderSshPublicKey": {
+      "type": "string",
+      "defaultValue": ""
+    },
+    "privateBuilderImageVersion": {
+      "type": "string",
+      "defaultValue": ""
     },
     "blobDataProtection": {
       "type": "bool",
@@ -179,8 +426,11 @@
     "enableProcessor": {
       "type": "bool",
       "defaultValue": false,
+      "allowedValues": [
+        false
+      ],
       "metadata": {
-        "description": "Keep false until the scheduled processor implementation is validated end to end."
+        "description": "Retired: manual FOCUS mode never deploys the native export scheduler."
       }
     },
     "restoreAiAccount": {
@@ -249,13 +499,16 @@
       "azd-env-name": "[parameters('environmentName')]",
       "app-name": "cost-assessment"
     },
-    "dataEnabled": "[contains(createArray('data', 'ai'), parameters('profile'))]",
+    "dataEnabled": "[or(contains(createArray('data', 'ai'), parameters('profile')), equals(parameters('assessmentMode'), 'postgres'))]",
+    "scalableEnabled": "[equals(parameters('assessmentMode'), 'postgres')]",
+    "privateRegistryEnabled": "[or(parameters('privateRegistry'), variables('scalableEnabled'))]",
     "aiEnabled": "[equals(parameters('profile'), 'ai')]",
-    "deployApplications": "[and(not(empty(parameters('apiImage'))), not(empty(parameters('webImage'))))]",
+    "deployApplications": "[and(and(not(empty(parameters('apiImage'))), not(empty(parameters('webImage')))), not(and(variables('scalableEnabled'), parameters('assessmentFoundationOnly'))))]",
     "deployProcessor": "[and(and(variables('dataEnabled'), parameters('enableProcessor')), not(empty(parameters('processorImage'))))]",
     "resourceToken": "[toLower(uniqueString(subscription().id, parameters('environmentName'), if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))))]",
     "exportName": "[format('focus-closed-month-{0}', variables('resourceToken'))]",
-    "dailyExportName": "[format('focus-daily-{0}', variables('resourceToken'))]"
+    "dailyExportName": "[format('focus-daily-{0}', variables('resourceToken'))]",
+    "assessmentRuntimeImage": "[if(empty(parameters('assessmentImage')), parameters('apiImage'), parameters('assessmentImage'))]"
   },
   "resources": {
     "group": {
@@ -298,7 +551,13 @@
             "value": "[parameters('logRetentionDays')]"
           },
           "privateRegistry": {
-            "value": "[parameters('privateRegistry')]"
+            "value": "[variables('privateRegistryEnabled')]"
+          },
+          "registryBuildMode": {
+            "value": "[parameters('registryBuildMode')]"
+          },
+          "enablePrivateBuilder": {
+            "value": "[parameters('enablePrivateBuilder')]"
           }
         },
         "template": {
@@ -308,7 +567,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "8950450812570016853"
+              "templateHash": "2330479570728219266"
             }
           },
           "parameters": {
@@ -351,6 +610,18 @@
               "metadata": {
                 "description": "Put the registry behind a private endpoint and deny public network access. Requires the Premium tier, and azd remote builds can no longer reach the registry."
               }
+            },
+            "registryBuildMode": {
+              "type": "string",
+              "defaultValue": "managed-pool",
+              "allowedValues": [
+                "private-runner",
+                "managed-pool"
+              ]
+            },
+            "enablePrivateBuilder": {
+              "type": "bool",
+              "defaultValue": false
             },
             "buildAgentTier": {
               "type": "string",
@@ -398,13 +669,72 @@
             "buildAgentSubnets": [
               {
                 "name": "build-agents",
-                "properties": {
-                  "addressPrefix": "[parameters('buildAgentSubnetPrefix')]"
-                }
+                "properties": "[shallowMerge(createArray(createObject('addressPrefix', parameters('buildAgentSubnetPrefix')), if(parameters('enablePrivateBuilder'), createObject('defaultOutboundAccess', false(), 'natGateway', createObject('id', resourceId('Microsoft.Network/natGateways', format('nat-builder-{0}', parameters('resourceToken')))), 'networkSecurityGroup', createObject('id', resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-builder-{0}', parameters('resourceToken'))))), createObject())))]"
               }
             ]
           },
           "resources": [
+            {
+              "condition": "[parameters('enablePrivateBuilder')]",
+              "type": "Microsoft.Network/publicIPAddresses",
+              "apiVersion": "2024-05-01",
+              "name": "[format('pip-builder-egress-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard"
+              },
+              "properties": {
+                "publicIPAllocationMethod": "Static"
+              }
+            },
+            {
+              "condition": "[parameters('enablePrivateBuilder')]",
+              "type": "Microsoft.Network/natGateways",
+              "apiVersion": "2024-05-01",
+              "name": "[format('nat-builder-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "Standard"
+              },
+              "properties": {
+                "idleTimeoutInMinutes": 10,
+                "publicIpAddresses": [
+                  {
+                    "id": "[resourceId('Microsoft.Network/publicIPAddresses', format('pip-builder-egress-{0}', parameters('resourceToken')))]"
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', format('pip-builder-egress-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "condition": "[parameters('enablePrivateBuilder')]",
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2024-05-01",
+              "name": "[format('nsg-builder-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "deny-inbound",
+                    "properties": {
+                      "priority": 100,
+                      "direction": "Inbound",
+                      "access": "Deny",
+                      "protocol": "*",
+                      "sourcePortRange": "*",
+                      "destinationPortRange": "*",
+                      "sourceAddressPrefix": "*",
+                      "destinationAddressPrefix": "*"
+                    }
+                  }
+                ]
+              }
+            },
             {
               "type": "Microsoft.Network/virtualNetworks",
               "apiVersion": "2024-05-01",
@@ -418,7 +748,11 @@
                   ]
                 },
                 "subnets": "[if(parameters('privateRegistry'), concat(variables('baseSubnets'), variables('buildAgentSubnets')), variables('baseSubnets'))]"
-              }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/natGateways', format('nat-builder-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-builder-{0}', parameters('resourceToken')))]"
+              ]
             },
             {
               "type": "Microsoft.OperationalInsights/workspaces",
@@ -525,7 +859,7 @@
               ]
             },
             {
-              "condition": "[parameters('privateRegistry')]",
+              "condition": "[and(parameters('privateRegistry'), equals(parameters('registryBuildMode'), 'managed-pool'))]",
               "type": "Microsoft.ContainerRegistry/registries/agentPools",
               "apiVersion": "2019-06-01-preview",
               "name": "[format('{0}/{1}', format('acr{0}', parameters('resourceToken')), 'build-agents')]",
@@ -657,7 +991,11 @@
             },
             "buildAgentPoolName": {
               "type": "string",
-              "value": "[if(parameters('privateRegistry'), 'build-agents', '')]"
+              "value": "[if(and(parameters('privateRegistry'), equals(parameters('registryBuildMode'), 'managed-pool')), 'build-agents', '')]"
+            },
+            "buildAgentSubnetId": {
+              "type": "string",
+              "value": "[if(parameters('privateRegistry'), resourceId('Microsoft.Network/virtualNetworks/subnets', format('vnet-{0}', parameters('resourceToken')), 'build-agents'), '')]"
             },
             "networkId": {
               "type": "string",
@@ -702,6 +1040,225 @@
         "group"
       ]
     },
+    "privateBuilder": {
+      "condition": "[and(and(parameters('enablePrivateBuilder'), variables('privateRegistryEnabled')), equals(parameters('registryBuildMode'), 'private-runner'))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "app-private-builder",
+      "resourceGroup": "[if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "resourceToken": {
+            "value": "[variables('resourceToken')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "subnetId": {
+            "value": "[reference('core').outputs.buildAgentSubnetId.value]"
+          },
+          "registryName": {
+            "value": "[reference('core').outputs.registryName.value]"
+          },
+          "vmSize": {
+            "value": "[parameters('privateBuilderVmSize')]"
+          },
+          "sshPublicKey": {
+            "value": "[parameters('privateBuilderSshPublicKey')]"
+          },
+          "imageVersion": {
+            "value": "[parameters('privateBuilderImageVersion')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "1649479333863749515"
+            }
+          },
+          "parameters": {
+            "resourceToken": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            },
+            "subnetId": {
+              "type": "string"
+            },
+            "registryName": {
+              "type": "string"
+            },
+            "vmSize": {
+              "type": "string",
+              "defaultValue": "Standard_D2s_v5"
+            },
+            "adminUsername": {
+              "type": "string",
+              "defaultValue": "buildoperator"
+            },
+            "sshPublicKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "imageVersion": {
+              "type": "string",
+              "metadata": {
+                "description": "Resolve a specific Ubuntu 24.04 image version in the selected region before provisioning."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[format('id-builder-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-builder-{0}', parameters('resourceToken'))), 'acrpush')]",
+              "properties": {
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-builder-{0}', parameters('resourceToken'))), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8311e382-0749-4cb8-b61a-304f252e45ec')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-builder-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/networkInterfaces",
+              "apiVersion": "2024-05-01",
+              "name": "[format('nic-builder-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "ipConfigurations": [
+                  {
+                    "name": "private",
+                    "properties": {
+                      "privateIPAllocationMethod": "Dynamic",
+                      "subnet": {
+                        "id": "[parameters('subnetId')]"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Compute/virtualMachines",
+              "apiVersion": "2024-07-01",
+              "name": "[format('vm-builder-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-builder-{0}', parameters('resourceToken'))))]": {}
+                }
+              },
+              "properties": {
+                "hardwareProfile": {
+                  "vmSize": "[parameters('vmSize')]"
+                },
+                "securityProfile": {
+                  "securityType": "TrustedLaunch",
+                  "uefiSettings": {
+                    "secureBootEnabled": true,
+                    "vTpmEnabled": true
+                  }
+                },
+                "osProfile": {
+                  "computerName": "meghkosha-build",
+                  "adminUsername": "[parameters('adminUsername')]",
+                  "linuxConfiguration": {
+                    "disablePasswordAuthentication": true,
+                    "provisionVMAgent": true,
+                    "ssh": {
+                      "publicKeys": [
+                        {
+                          "path": "[format('/home/{0}/.ssh/authorized_keys', parameters('adminUsername'))]",
+                          "keyData": "[parameters('sshPublicKey')]"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "storageProfile": {
+                  "imageReference": {
+                    "publisher": "Canonical",
+                    "offer": "ubuntu-24_04-lts",
+                    "sku": "server",
+                    "version": "[parameters('imageVersion')]"
+                  },
+                  "osDisk": {
+                    "createOption": "FromImage",
+                    "diskSizeGB": 128,
+                    "managedDisk": {
+                      "storageAccountType": "StandardSSD_LRS"
+                    },
+                    "deleteOption": "Delete"
+                  }
+                },
+                "networkProfile": {
+                  "networkInterfaces": [
+                    {
+                      "id": "[resourceId('Microsoft.Network/networkInterfaces', format('nic-builder-{0}', parameters('resourceToken')))]",
+                      "properties": {
+                        "primary": true,
+                        "deleteOption": "Delete"
+                      }
+                    }
+                  ]
+                },
+                "diagnosticsProfile": {
+                  "bootDiagnostics": {
+                    "enabled": true
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-builder-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.Network/networkInterfaces', format('nic-builder-{0}', parameters('resourceToken')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "vmName": {
+              "type": "string",
+              "value": "[format('vm-builder-{0}', parameters('resourceToken'))]"
+            },
+            "identityClientId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-builder-{0}', parameters('resourceToken'))), '2023-01-31').clientId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "core",
+        "group"
+      ]
+    },
     "data": {
       "condition": "[variables('dataEnabled')]",
       "type": "Microsoft.Resources/deployments",
@@ -735,9 +1292,6 @@
           "storageSku": {
             "value": "[parameters('storageSku')]"
           },
-          "allowNativeExportTrustedServices": {
-            "value": "[parameters('allowNativeExportTrustedServices')]"
-          },
           "blobDataProtection": {
             "value": "[parameters('blobDataProtection')]"
           },
@@ -758,7 +1312,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "9212119494432200011"
+              "templateHash": "4070222227633056057"
             }
           },
           "parameters": {
@@ -789,13 +1343,6 @@
                 "Standard_LRS",
                 "Standard_ZRS"
               ]
-            },
-            "allowNativeExportTrustedServices": {
-              "type": "bool",
-              "defaultValue": false,
-              "metadata": {
-                "description": "Explicitly approved native-export ingress exception; never bypass an Azure Policy denial."
-              }
             },
             "blobDataProtection": {
               "type": "bool",
@@ -854,10 +1401,10 @@
                 "allowSharedKeyAccess": false,
                 "allowCrossTenantReplication": false,
                 "defaultToOAuthAuthentication": true,
-                "publicNetworkAccess": "[if(parameters('allowNativeExportTrustedServices'), 'Enabled', 'Disabled')]",
+                "publicNetworkAccess": "Disabled",
                 "networkAcls": {
                   "defaultAction": "Deny",
-                  "bypass": "[if(parameters('allowNativeExportTrustedServices'), 'AzureServices', 'None')]",
+                  "bypass": "None",
                   "ipRules": [],
                   "virtualNetworkRules": []
                 },
@@ -892,11 +1439,11 @@
             {
               "copy": {
                 "name": "containers",
-                "count": "[length(createArray('cost-exports', 'report-snapshots', 'control-state'))]"
+                "count": "[length(createArray('focus-uploads', 'report-snapshots', 'control-state'))]"
               },
               "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
               "apiVersion": "2023-05-01",
-              "name": "[format('{0}/{1}/{2}', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[copyIndex()])]",
+              "name": "[format('{0}/{1}/{2}', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[copyIndex()])]",
               "properties": {
                 "publicAccess": "None"
               },
@@ -961,129 +1508,85 @@
             {
               "copy": {
                 "name": "apiReaders",
-                "count": "[length(range(0, 2))]"
+                "count": "[length(range(1, 1))]"
               },
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[range(0, 2)[copyIndex()]])]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[range(0, 2)[copyIndex()]]), parameters('apiPrincipalId'), 'blob-reader')]",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[range(1, 1)[copyIndex()]])]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[range(1, 1)[copyIndex()]]), parameters('apiPrincipalId'), 'blob-reader')]",
               "properties": {
                 "principalId": "[parameters('apiPrincipalId')]",
                 "principalType": "ServicePrincipal",
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')]"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[range(0, 2)[copyIndex()]])]",
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[range(0, 2)[copyIndex()]])]"
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[range(1, 1)[copyIndex()]])]",
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[range(1, 1)[copyIndex()]])]"
               ]
             },
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[2])]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[2]), parameters('apiPrincipalId'), 'metadata-writer')]",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[2])]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[2]), parameters('apiPrincipalId'), 'metadata-writer')]",
               "properties": {
                 "principalId": "[parameters('apiPrincipalId')]",
                 "principalType": "ServicePrincipal",
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[2])]",
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[2])]"
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[2])]",
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[2])]"
               ]
             },
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[1])]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[1]), parameters('apiPrincipalId'), 'report-writer')]",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[0])]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[0]), parameters('apiPrincipalId'), 'focus-upload-writer')]",
               "properties": {
                 "principalId": "[parameters('apiPrincipalId')]",
                 "principalType": "ServicePrincipal",
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[1])]",
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[1])]"
-              ]
-            },
-            {
-              "type": "Microsoft.Authorization/roleDefinitions",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), 'export-storage-setup')]",
-              "properties": {
-                "roleName": "[format('Cost Assessment Export Storage Setup {0}', parameters('resourceToken'))]",
-                "description": "Lets the API identity complete the native FOCUS export destination role assignment on this account only. No keys, deletion or data actions.",
-                "type": "CustomRole",
-                "assignableScopes": [
-                  "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]"
-                ],
-                "permissions": [
-                  {
-                    "actions": [
-                      "Microsoft.Storage/storageAccounts/read",
-                      "Microsoft.Storage/storageAccounts/write",
-                      "Microsoft.Storage/storageAccounts/blobServices/containers/read",
-                      "Microsoft.Authorization/permissions/read",
-                      "Microsoft.Authorization/roleAssignments/read",
-                      "Microsoft.Authorization/roleAssignments/write"
-                    ],
-                    "notActions": [],
-                    "dataActions": [],
-                    "notDataActions": []
-                  }
-                ]
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]"
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[0])]",
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[0])]"
               ]
             },
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), parameters('apiPrincipalId'), resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), 'export-storage-setup')))]",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[0])]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[0]), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-processor-{0}', parameters('resourceToken'))), 'focus-upload-reader')]",
               "properties": {
-                "principalId": "[parameters('apiPrincipalId')]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-processor-{0}', parameters('resourceToken'))), '2023-01-31').principalId]",
                 "principalType": "ServicePrincipal",
-                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), 'export-storage-setup'))]"
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')]"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]",
-                "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), 'export-storage-setup'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken'))), parameters('apiPrincipalId'), 'storage-account-contributor')]",
-              "properties": {
-                "principalId": "[parameters('apiPrincipalId')]",
-                "principalType": "ServicePrincipal",
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '17d1049b-9a84-46fb-8f53-869881c3d3ab')]"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', format('st{0}', parameters('resourceToken')))]"
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[0])]",
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[0])]",
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-processor-{0}', parameters('resourceToken')))]"
               ]
             },
             {
               "copy": {
                 "name": "processorWriters",
-                "count": "[length(range(0, 3))]"
+                "count": "[length(range(1, 2))]"
               },
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[range(0, 3)[copyIndex()]])]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[range(0, 3)[copyIndex()]]), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-processor-{0}', parameters('resourceToken'))), 'processor-writer')]",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[range(1, 2)[copyIndex()]])]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[range(1, 2)[copyIndex()]]), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-processor-{0}', parameters('resourceToken'))), 'processor-writer')]",
               "properties": {
                 "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-processor-{0}', parameters('resourceToken'))), '2023-01-31').principalId]",
                 "principalType": "ServicePrincipal",
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[range(0, 3)[copyIndex()]])]",
-                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('cost-exports', 'report-snapshots', 'control-state')[range(0, 3)[copyIndex()]])]",
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[range(1, 2)[copyIndex()]])]",
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', format('st{0}', parameters('resourceToken')), 'default', createArray('focus-uploads', 'report-snapshots', 'control-state')[range(1, 2)[copyIndex()]])]",
                 "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-processor-{0}', parameters('resourceToken')))]"
               ]
             },
@@ -1209,6 +1712,526 @@
       },
       "dependsOn": [
         "core",
+        "group"
+      ]
+    },
+    "postgres": {
+      "condition": "[variables('scalableEnabled')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "app-postgres",
+      "resourceGroup": "[if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "resourceToken": {
+            "value": "[variables('resourceToken')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "networkId": {
+            "value": "[reference('core').outputs.networkId.value]"
+          },
+          "privateEndpointSubnetId": {
+            "value": "[reference('core').outputs.privateEndpointSubnetId.value]"
+          },
+          "skuName": {
+            "value": "[parameters('postgresSkuName')]"
+          },
+          "skuTier": {
+            "value": "[parameters('postgresSkuTier')]"
+          },
+          "version": {
+            "value": "[parameters('postgresVersion')]"
+          },
+          "storageSizeGB": {
+            "value": "[parameters('postgresStorageGB')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "6752570733051354859"
+            }
+          },
+          "parameters": {
+            "resourceToken": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            },
+            "networkId": {
+              "type": "string"
+            },
+            "privateEndpointSubnetId": {
+              "type": "string"
+            },
+            "skuName": {
+              "type": "string",
+              "defaultValue": "Standard_D4ds_v5"
+            },
+            "skuTier": {
+              "type": "string",
+              "defaultValue": "GeneralPurpose",
+              "allowedValues": [
+                "GeneralPurpose",
+                "MemoryOptimized"
+              ]
+            },
+            "version": {
+              "type": "string",
+              "defaultValue": "16",
+              "allowedValues": [
+                "16",
+                "17"
+              ]
+            },
+            "storageSizeGB": {
+              "type": "int",
+              "defaultValue": 256,
+              "minValue": 32,
+              "maxValue": 16384
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[format('id-db-bootstrap-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.DBforPostgreSQL/flexibleServers",
+              "apiVersion": "2024-08-01",
+              "name": "[format('pg-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "[parameters('skuName')]",
+                "tier": "[parameters('skuTier')]"
+              },
+              "properties": {
+                "version": "[parameters('version')]",
+                "createMode": "Default",
+                "authConfig": {
+                  "activeDirectoryAuth": "Enabled",
+                  "passwordAuth": "Disabled",
+                  "tenantId": "[tenant().tenantId]"
+                },
+                "network": {
+                  "publicNetworkAccess": "Disabled"
+                },
+                "storage": {
+                  "storageSizeGB": "[parameters('storageSizeGB')]",
+                  "autoGrow": "Enabled"
+                },
+                "backup": {
+                  "backupRetentionDays": 7,
+                  "geoRedundantBackup": "Disabled"
+                },
+                "highAvailability": {
+                  "mode": "Disabled"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.DBforPostgreSQL/flexibleServers/databases",
+              "apiVersion": "2024-08-01",
+              "name": "[format('{0}/{1}', format('pg-{0}', parameters('resourceToken')), 'meghkosha')]",
+              "properties": {
+                "charset": "UTF8",
+                "collation": "en_US.utf8"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', format('pg-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DBforPostgreSQL/flexibleServers/configurations",
+              "apiVersion": "2024-08-01",
+              "name": "[format('{0}/{1}', format('pg-{0}', parameters('resourceToken')), 'azure.extensions')]",
+              "properties": {
+                "source": "user-override",
+                "value": "pg_trgm"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', format('pg-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "privatelink.postgres.database.azure.com",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.postgres.database.azure.com', format('link-{0}', parameters('resourceToken')))]",
+              "location": "global",
+              "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                  "id": "[parameters('networkId')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.postgres.database.azure.com')]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2024-05-01",
+              "name": "[format('pe-postgres-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('privateEndpointSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "postgres",
+                    "properties": {
+                      "privateLinkServiceId": "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', format('pg-{0}', parameters('resourceToken')))]",
+                      "groupIds": [
+                        "postgresqlServer"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', format('pg-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2024-05-01",
+              "name": "[format('{0}/{1}', format('pe-postgres-{0}', parameters('resourceToken')), 'default')]",
+              "properties": {
+                "privateDnsZoneConfigs": [
+                  {
+                    "name": "postgres",
+                    "properties": {
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.postgres.database.azure.com')]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints', format('pe-postgres-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.postgres.database.azure.com')]"
+              ]
+            },
+            {
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "postgres-administrator",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "serverName": {
+                    "value": "[format('pg-{0}', parameters('resourceToken'))]"
+                  },
+                  "principalId": {
+                    "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-db-bootstrap-{0}', parameters('resourceToken'))), '2023-01-31').principalId]"
+                  },
+                  "principalName": {
+                    "value": "[format('id-db-bootstrap-{0}', parameters('resourceToken'))]"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.43.8.12551",
+                      "templateHash": "1472546146506440812"
+                    }
+                  },
+                  "parameters": {
+                    "serverName": {
+                      "type": "string"
+                    },
+                    "principalId": {
+                      "type": "string"
+                    },
+                    "principalName": {
+                      "type": "string"
+                    }
+                  },
+                  "resources": [
+                    {
+                      "type": "Microsoft.DBforPostgreSQL/flexibleServers/administrators",
+                      "apiVersion": "2024-08-01",
+                      "name": "[format('{0}/{1}', parameters('serverName'), parameters('principalId'))]",
+                      "properties": {
+                        "principalName": "[parameters('principalName')]",
+                        "principalType": "ServicePrincipal",
+                        "tenantId": "[tenant().tenantId]"
+                      }
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-db-bootstrap-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers', format('pg-{0}', parameters('resourceToken')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "host": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.DBforPostgreSQL/flexibleServers', format('pg-{0}', parameters('resourceToken'))), '2024-08-01').fullyQualifiedDomainName]"
+            },
+            "databaseName": {
+              "type": "string",
+              "value": "meghkosha"
+            },
+            "bootstrapIdentity": {
+              "type": "object",
+              "value": {
+                "resourceId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-db-bootstrap-{0}', parameters('resourceToken')))]",
+                "clientId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-db-bootstrap-{0}', parameters('resourceToken'))), '2023-01-31').clientId]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-db-bootstrap-{0}', parameters('resourceToken'))), '2023-01-31').principalId]",
+                "name": "[format('id-db-bootstrap-{0}', parameters('resourceToken'))]"
+              }
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "core",
+        "group"
+      ]
+    },
+    "workspaceVault": {
+      "condition": "[variables('scalableEnabled')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "app-workspace-vault",
+      "resourceGroup": "[if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "resourceToken": {
+            "value": "[variables('resourceToken')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "networkId": {
+            "value": "[reference('core').outputs.networkId.value]"
+          },
+          "privateEndpointSubnetId": {
+            "value": "[reference('core').outputs.privateEndpointSubnetId.value]"
+          },
+          "apiPrincipalId": {
+            "value": "[reference('core').outputs.apiIdentity.value.principalId]"
+          },
+          "workerPrincipalId": {
+            "value": "[reference('data').outputs.processorIdentity.value.principalId]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "9781168938736864771"
+            }
+          },
+          "parameters": {
+            "resourceToken": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            },
+            "networkId": {
+              "type": "string"
+            },
+            "privateEndpointSubnetId": {
+              "type": "string"
+            },
+            "apiPrincipalId": {
+              "type": "string"
+            },
+            "workerPrincipalId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.KeyVault/vaults",
+              "apiVersion": "2023-07-01",
+              "name": "[format('kv-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "tenantId": "[tenant().tenantId]",
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                },
+                "enableRbacAuthorization": true,
+                "enableSoftDelete": true,
+                "enablePurgeProtection": true,
+                "softDeleteRetentionInDays": 90,
+                "publicNetworkAccess": "Disabled",
+                "networkAcls": {
+                  "defaultAction": "Deny",
+                  "bypass": "None",
+                  "ipRules": [],
+                  "virtualNetworkRules": []
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', format('kv-{0}', parameters('resourceToken')))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', format('kv-{0}', parameters('resourceToken'))), parameters('apiPrincipalId'), 'workspace-secret-officer')]",
+              "properties": {
+                "principalId": "[parameters('apiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', format('kv-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', format('kv-{0}', parameters('resourceToken')))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', format('kv-{0}', parameters('resourceToken'))), parameters('workerPrincipalId'), 'workspace-secret-reader')]",
+              "properties": {
+                "principalId": "[parameters('workerPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', format('kv-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "privatelink.vaultcore.azure.net",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', 'privatelink.vaultcore.azure.net', format('link-{0}', parameters('resourceToken')))]",
+              "location": "global",
+              "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                  "id": "[parameters('networkId')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints",
+              "apiVersion": "2023-11-01",
+              "name": "[format('pe-workspace-vault-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "subnet": {
+                  "id": "[parameters('privateEndpointSubnetId')]"
+                },
+                "privateLinkServiceConnections": [
+                  {
+                    "name": "vault",
+                    "properties": {
+                      "privateLinkServiceId": "[resourceId('Microsoft.KeyVault/vaults', format('kv-{0}', parameters('resourceToken')))]",
+                      "groupIds": [
+                        "vault"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', format('kv-{0}', parameters('resourceToken')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
+              "apiVersion": "2023-11-01",
+              "name": "[format('{0}/{1}', format('pe-workspace-vault-{0}', parameters('resourceToken')), 'default')]",
+              "properties": {
+                "privateDnsZoneConfigs": [
+                  {
+                    "name": "vault",
+                    "properties": {
+                      "privateDnsZoneId": "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateEndpoints', format('pe-workspace-vault-{0}', parameters('resourceToken')))]",
+                "[resourceId('Microsoft.Network/privateDnsZones', 'privatelink.vaultcore.azure.net')]"
+              ]
+            }
+          ],
+          "outputs": {
+            "url": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults', format('kv-{0}', parameters('resourceToken'))), '2023-07-01').vaultUri]"
+            },
+            "name": {
+              "type": "string",
+              "value": "[format('kv-{0}', parameters('resourceToken'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "core",
+        "data",
         "group"
       ]
     },
@@ -1895,99 +2918,20 @@
           "webIdentity": {
             "value": "[reference('core').outputs.webIdentity.value]"
           },
-          "oboIdentity": {
-            "value": "[reference('core').outputs.oboIdentity.value]"
-          },
           "apiImage": {
             "value": "[parameters('apiImage')]"
           },
           "webImage": {
             "value": "[parameters('webImage')]"
           },
-          "apiClientId": {
-            "value": "[parameters('apiClientId')]"
-          },
-          "webClientId": {
-            "value": "[parameters('webClientId')]"
+          "apiCpu": {
+            "value": "[parameters('apiCpu')]"
           },
           "minimumReplicas": {
             "value": "[parameters('minimumReplicas')]"
           },
           "apiEnvironment": {
-            "value": [
-              {
-                "name": "APP_PROFILE",
-                "value": "[parameters('profile')]"
-              },
-              {
-                "name": "APP_SCHEDULER_ENABLED",
-                "value": "[string(variables('deployProcessor'))]"
-              },
-              {
-                "name": "MEGHKOSHA_AI_ENABLED",
-                "value": "[string(and(variables('aiEnabled'), parameters('enableAiRuntime')))]"
-              },
-              {
-                "name": "FOUNDRY_CHAT_ENABLED",
-                "value": "[string(and(and(variables('aiEnabled'), parameters('enableChatRuntime')), not(empty(parameters('modelRouterDeploymentName')))))]"
-              },
-              {
-                "name": "AI_PROJECT_ENDPOINT",
-                "value": "[if(not(variables('aiEnabled')), '', if(parameters('reuseAiAccount'), reference('existingAi').outputs.projectEndpoint.value, reference('ai').outputs.projectEndpoint.value))]"
-              },
-              {
-                "name": "AI_SERVICES_ENDPOINT",
-                "value": "[if(not(variables('aiEnabled')), '', if(parameters('reuseAiAccount'), reference('existingAi').outputs.endpoint.value, reference('ai').outputs.endpoint.value))]"
-              },
-              {
-                "name": "AGENT_NAME",
-                "value": "[parameters('agentName')]"
-              },
-              {
-                "name": "MODEL_ROUTER_DEPLOYMENT_NAME",
-                "value": "[parameters('modelRouterDeploymentName')]"
-              },
-              {
-                "name": "COST_EXPORT_STORAGE_URL",
-                "value": "[if(variables('dataEnabled'), reference('data').outputs.storageUrl.value, '')]"
-              },
-              {
-                "name": "COST_EXPORT_STORAGE_RESOURCE_ID",
-                "value": "[if(variables('dataEnabled'), reference('data').outputs.storageResourceId.value, '')]"
-              },
-              {
-                "name": "COST_EXPORT_CONTAINER",
-                "value": "cost-exports"
-              },
-              {
-                "name": "REPORT_SNAPSHOT_CONTAINER",
-                "value": "report-snapshots"
-              },
-              {
-                "name": "CONTROL_STATE_CONTAINER",
-                "value": "control-state"
-              },
-              {
-                "name": "COST_EXPORT_NAME",
-                "value": "[variables('exportName')]"
-              },
-              {
-                "name": "COST_EXPORT_DAILY_NAME",
-                "value": "[variables('dailyExportName')]"
-              },
-              {
-                "name": "FOCUS_EXPORT_PARALLEL_MONTHS",
-                "value": "[string(parameters('exportParallelMonths'))]"
-              },
-              {
-                "name": "COST_EXPORT_LOCATION",
-                "value": "[parameters('location')]"
-              },
-              {
-                "name": "REPORT_PUBLIC_APP_URL",
-                "value": "[format('https://ca-web-{0}.{1}', variables('resourceToken'), reference('core').outputs.environmentDomain.value)]"
-              }
-            ]
+            "value": "[concat(createArray(createObject('name', 'WORKSPACE_VAULT_URL', 'value', if(variables('scalableEnabled'), reference('workspaceVault').outputs.url.value, '')), createObject('name', 'WORKSPACE_TTL_DAYS', 'value', string(parameters('workspaceTtlDays'))), createObject('name', 'WORKSPACE_MAX_ACTIVE', 'value', string(parameters('workspaceMaxActive'))), createObject('name', 'WORKSPACE_COOKIE_SECURE', 'value', 'true'), createObject('name', 'FOCUS_UPLOAD_CONTAINER', 'value', 'focus-uploads'), createObject('name', 'ASSESSMENT_MODE', 'value', parameters('assessmentMode')), createObject('name', 'ASSESSMENT_DB_HOST', 'value', if(variables('scalableEnabled'), reference('postgres').outputs.host.value, '')), createObject('name', 'ASSESSMENT_DB_NAME', 'value', if(variables('scalableEnabled'), reference('postgres').outputs.databaseName.value, '')), createObject('name', 'ASSESSMENT_DB_POOL_SIZE', 'value', string(parameters('assessmentPoolSize'))), createObject('name', 'ASSESSMENT_DB_COMMAND_TIMEOUT_SECONDS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'dbCommandSeconds'), 60))), createObject('name', 'ASSESSMENT_QUEUE_CAPACITY', 'value', string(parameters('assessmentQueueCapacity'))), createObject('name', 'ASSESSMENT_INPUT_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'inputBytes'), json('4294967296')))), createObject('name', 'ASSESSMENT_SPOOL_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'spoolBytes'), if(equals(parameters('assessmentWorkerCpu'), '1.0'), json('2147483648'), if(equals(parameters('assessmentWorkerCpu'), '2.0'), json('4294967296'), json('6442450944')))))), createObject('name', 'ASSESSMENT_EXPANDED_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'expandedBytes'), json('8589934592')))), createObject('name', 'ASSESSMENT_CSV_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'csvRows'), 20000000))), createObject('name', 'ASSESSMENT_INVENTORY_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'inventoryRows'), 500000))), createObject('name', 'ASSESSMENT_HISTORY_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'historyRows'), 20000000))), createObject('name', 'ASSESSMENT_TIMEOUT_SECONDS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'timeoutSeconds'), 3600))), createObject('name', 'ASSESSMENT_LEASE_SECONDS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'leaseSeconds'), 120))), createObject('name', 'ASSESSMENT_MAX_ATTEMPTS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'maxAttempts'), 3))), createObject('name', 'ASSESSMENT_PAGE_SIZE', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'pageSize'), 100))), createObject('name', 'ASSESSMENT_RESPONSE_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'responseBytes'), 1048576))), createObject('name', 'ASSESSMENT_RECORD_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'recordBytes'), 262144))), createObject('name', 'ASSESSMENT_INLINE_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'inlineRows'), 20))), createObject('name', 'ASSESSMENT_API_CONCURRENCY', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'apiConcurrency'), 20))), createObject('name', 'ASSESSMENT_INTERACTIVE_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'interactiveRows'), 1000))), createObject('name', 'ASSESSMENT_WORK_CONCURRENCY', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'workConcurrency'), 4))), createObject('name', 'ASSESSMENT_READ_POOL_SIZE', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'readPoolSize'), if(greater(parameters('assessmentPoolSize'), 3), 3, sub(parameters('assessmentPoolSize'), 1))))), createObject('name', 'ASSESSMENT_ARM_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'armIntervalMs'), 200))), createObject('name', 'ASSESSMENT_GRAPH_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'graphIntervalMs'), 400))), createObject('name', 'ASSESSMENT_METRICS_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'metricsIntervalMs'), 500))), createObject('name', 'ASSESSMENT_COST_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'costIntervalMs'), 15000))), createObject('name', 'ASSESSMENT_AZURE_GET_RETRIES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'azureGetRetries'), 3))), createObject('name', 'ASSESSMENT_DETAIL_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'detailRows'), 250000))), createObject('name', 'ASSESSMENT_DETAIL_POINTS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'detailPoints'), 5000000)))), createArray(createObject('name', 'ASSESSMENT_DB_USER', 'value', 'meghkosha_api'), createObject('name', 'APP_PROFILE', 'value', parameters('profile')), createObject('name', 'APP_SCHEDULER_ENABLED', 'value', string(variables('deployProcessor'))), createObject('name', 'MEGHKOSHA_AI_ENABLED', 'value', string(and(variables('aiEnabled'), parameters('enableAiRuntime')))), createObject('name', 'FOUNDRY_CHAT_ENABLED', 'value', string(and(and(variables('aiEnabled'), parameters('enableChatRuntime')), not(empty(parameters('modelRouterDeploymentName')))))), createObject('name', 'AI_PROJECT_ENDPOINT', 'value', if(not(variables('aiEnabled')), '', if(parameters('reuseAiAccount'), reference('existingAi').outputs.projectEndpoint.value, reference('ai').outputs.projectEndpoint.value))), createObject('name', 'AI_SERVICES_ENDPOINT', 'value', if(not(variables('aiEnabled')), '', if(parameters('reuseAiAccount'), reference('existingAi').outputs.endpoint.value, reference('ai').outputs.endpoint.value))), createObject('name', 'AGENT_NAME', 'value', parameters('agentName')), createObject('name', 'MODEL_ROUTER_DEPLOYMENT_NAME', 'value', parameters('modelRouterDeploymentName')), createObject('name', 'COST_EXPORT_STORAGE_URL', 'value', if(variables('dataEnabled'), reference('data').outputs.storageUrl.value, '')), createObject('name', 'COST_EXPORT_STORAGE_RESOURCE_ID', 'value', if(variables('dataEnabled'), reference('data').outputs.storageResourceId.value, '')), createObject('name', 'COST_EXPORT_CONTAINER', 'value', 'cost-exports'), createObject('name', 'REPORT_SNAPSHOT_CONTAINER', 'value', 'report-snapshots'), createObject('name', 'CONTROL_STATE_CONTAINER', 'value', 'control-state'), createObject('name', 'COST_EXPORT_NAME', 'value', variables('exportName')), createObject('name', 'COST_EXPORT_DAILY_NAME', 'value', variables('dailyExportName')), createObject('name', 'FOCUS_EXPORT_PARALLEL_MONTHS', 'value', string(parameters('exportParallelMonths'))), createObject('name', 'COST_EXPORT_LOCATION', 'value', parameters('location')), createObject('name', 'REPORT_PUBLIC_APP_URL', 'value', format('https://ca-web-{0}.{1}', variables('resourceToken'), reference('core').outputs.environmentDomain.value))))]"
           }
         },
         "template": {
@@ -1997,7 +2941,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "10403295295197169524"
+              "templateHash": "14496443532730728456"
             }
           },
           "parameters": {
@@ -2024,9 +2968,6 @@
             "webIdentity": {
               "type": "object"
             },
-            "oboIdentity": {
-              "type": "object"
-            },
             "apiImage": {
               "type": "string",
               "minLength": 1
@@ -2035,11 +2976,14 @@
               "type": "string",
               "minLength": 1
             },
-            "apiClientId": {
-              "type": "string"
-            },
-            "webClientId": {
-              "type": "string"
+            "apiCpu": {
+              "type": "string",
+              "defaultValue": "2.0",
+              "allowedValues": [
+                "1.0",
+                "2.0",
+                "4.0"
+              ]
             },
             "apiEnvironment": {
               "type": "array",
@@ -2062,8 +3006,7 @@
               "identity": {
                 "type": "UserAssigned",
                 "userAssignedIdentities": {
-                  "[format('{0}', parameters('apiIdentity').resourceId)]": {},
-                  "[format('{0}', parameters('oboIdentity').resourceId)]": {}
+                  "[format('{0}', parameters('apiIdentity').resourceId)]": {}
                 }
               },
               "properties": {
@@ -2090,10 +3033,10 @@
                       "name": "api",
                       "image": "[parameters('apiImage')]",
                       "resources": {
-                        "cpu": "[json('0.5')]",
-                        "memory": "1Gi"
+                        "cpu": "[json(parameters('apiCpu'))]",
+                        "memory": "[if(equals(parameters('apiCpu'), '1.0'), '2Gi', if(equals(parameters('apiCpu'), '2.0'), '4Gi', '8Gi'))]"
                       },
-                      "env": "[concat(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('apiIdentity').clientId), createObject('name', 'AZURE_TENANT_ID', 'value', tenant().tenantId), createObject('name', 'MEGHKOSHA_API_CLIENT_ID', 'value', parameters('apiClientId')), createObject('name', 'MEGHKOSHA_WEB_CLIENT_ID', 'value', parameters('webClientId')), createObject('name', 'MEGHKOSHA_OBO_MANAGED_IDENTITY_CLIENT_ID', 'value', parameters('oboIdentity').clientId), createObject('name', 'MEGHKOSHA_ACTION_WRITES_PAUSED', 'value', 'true')), parameters('apiEnvironment'))]",
+                      "env": "[concat(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('apiIdentity').clientId), createObject('name', 'AZURE_TENANT_ID', 'value', tenant().tenantId), createObject('name', 'MEGHKOSHA_ACTION_WRITES_PAUSED', 'value', 'true')), parameters('apiEnvironment'))]",
                       "probes": [
                         {
                           "type": "Startup",
@@ -2120,7 +3063,7 @@
                         {
                           "type": "Readiness",
                           "httpGet": {
-                            "path": "/api/health",
+                            "path": "/api/ready",
                             "port": 8000,
                             "scheme": "HTTP"
                           },
@@ -2256,7 +3199,9 @@
         "core",
         "data",
         "existingAi",
-        "group"
+        "group",
+        "postgres",
+        "workspaceVault"
       ]
     },
     "processor": {
@@ -2309,6 +3254,9 @@
           },
           "schedule": {
             "value": "[parameters('processorSchedule')]"
+          },
+          "assessmentEnvironment": {
+            "value": "[concat(createArray(createObject('name', 'WORKSPACE_VAULT_URL', 'value', if(variables('scalableEnabled'), reference('workspaceVault').outputs.url.value, '')), createObject('name', 'WORKSPACE_TTL_DAYS', 'value', string(parameters('workspaceTtlDays'))), createObject('name', 'WORKSPACE_MAX_ACTIVE', 'value', string(parameters('workspaceMaxActive'))), createObject('name', 'WORKSPACE_COOKIE_SECURE', 'value', 'true'), createObject('name', 'FOCUS_UPLOAD_CONTAINER', 'value', 'focus-uploads'), createObject('name', 'ASSESSMENT_MODE', 'value', parameters('assessmentMode')), createObject('name', 'ASSESSMENT_DB_HOST', 'value', if(variables('scalableEnabled'), reference('postgres').outputs.host.value, '')), createObject('name', 'ASSESSMENT_DB_NAME', 'value', if(variables('scalableEnabled'), reference('postgres').outputs.databaseName.value, '')), createObject('name', 'ASSESSMENT_DB_POOL_SIZE', 'value', string(parameters('assessmentPoolSize'))), createObject('name', 'ASSESSMENT_DB_COMMAND_TIMEOUT_SECONDS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'dbCommandSeconds'), 60))), createObject('name', 'ASSESSMENT_QUEUE_CAPACITY', 'value', string(parameters('assessmentQueueCapacity'))), createObject('name', 'ASSESSMENT_INPUT_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'inputBytes'), json('4294967296')))), createObject('name', 'ASSESSMENT_SPOOL_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'spoolBytes'), if(equals(parameters('assessmentWorkerCpu'), '1.0'), json('2147483648'), if(equals(parameters('assessmentWorkerCpu'), '2.0'), json('4294967296'), json('6442450944')))))), createObject('name', 'ASSESSMENT_EXPANDED_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'expandedBytes'), json('8589934592')))), createObject('name', 'ASSESSMENT_CSV_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'csvRows'), 20000000))), createObject('name', 'ASSESSMENT_INVENTORY_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'inventoryRows'), 500000))), createObject('name', 'ASSESSMENT_HISTORY_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'historyRows'), 20000000))), createObject('name', 'ASSESSMENT_TIMEOUT_SECONDS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'timeoutSeconds'), 3600))), createObject('name', 'ASSESSMENT_LEASE_SECONDS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'leaseSeconds'), 120))), createObject('name', 'ASSESSMENT_MAX_ATTEMPTS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'maxAttempts'), 3))), createObject('name', 'ASSESSMENT_PAGE_SIZE', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'pageSize'), 100))), createObject('name', 'ASSESSMENT_RESPONSE_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'responseBytes'), 1048576))), createObject('name', 'ASSESSMENT_RECORD_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'recordBytes'), 262144))), createObject('name', 'ASSESSMENT_INLINE_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'inlineRows'), 20))), createObject('name', 'ASSESSMENT_API_CONCURRENCY', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'apiConcurrency'), 20))), createObject('name', 'ASSESSMENT_INTERACTIVE_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'interactiveRows'), 1000))), createObject('name', 'ASSESSMENT_WORK_CONCURRENCY', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'workConcurrency'), 4))), createObject('name', 'ASSESSMENT_READ_POOL_SIZE', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'readPoolSize'), if(greater(parameters('assessmentPoolSize'), 3), 3, sub(parameters('assessmentPoolSize'), 1))))), createObject('name', 'ASSESSMENT_ARM_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'armIntervalMs'), 200))), createObject('name', 'ASSESSMENT_GRAPH_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'graphIntervalMs'), 400))), createObject('name', 'ASSESSMENT_METRICS_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'metricsIntervalMs'), 500))), createObject('name', 'ASSESSMENT_COST_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'costIntervalMs'), 15000))), createObject('name', 'ASSESSMENT_AZURE_GET_RETRIES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'azureGetRetries'), 3))), createObject('name', 'ASSESSMENT_DETAIL_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'detailRows'), 250000))), createObject('name', 'ASSESSMENT_DETAIL_POINTS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'detailPoints'), 5000000)))), createArray(createObject('name', 'ASSESSMENT_DB_USER', 'value', 'meghkosha_worker')))]"
           }
         },
         "template": {
@@ -2318,7 +3266,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "2356258718951169693"
+              "templateHash": "13927100358655493452"
             }
           },
           "parameters": {
@@ -2366,6 +3314,10 @@
             "schedule": {
               "type": "string",
               "defaultValue": "*/5 * * * *"
+            },
+            "assessmentEnvironment": {
+              "type": "array",
+              "defaultValue": []
             }
           },
           "resources": [
@@ -2425,52 +3377,7 @@
                         "cpu": "[json('1.0')]",
                         "memory": "2Gi"
                       },
-                      "env": [
-                        {
-                          "name": "AZURE_CLIENT_ID",
-                          "value": "[parameters('processorIdentity').clientId]"
-                        },
-                        {
-                          "name": "AZURE_TENANT_ID",
-                          "value": "[tenant().tenantId]"
-                        },
-                        {
-                          "name": "APP_SCHEDULER_ENABLED",
-                          "value": "true"
-                        },
-                        {
-                          "name": "COST_EXPORT_STORAGE_URL",
-                          "value": "[parameters('storageUrl')]"
-                        },
-                        {
-                          "name": "COST_EXPORT_STORAGE_RESOURCE_ID",
-                          "value": "[parameters('storageResourceId')]"
-                        },
-                        {
-                          "name": "COST_EXPORT_NAME",
-                          "value": "[parameters('exportName')]"
-                        },
-                        {
-                          "name": "COST_EXPORT_DAILY_NAME",
-                          "value": "[parameters('dailyExportName')]"
-                        },
-                        {
-                          "name": "FOCUS_EXPORT_PARALLEL_MONTHS",
-                          "value": "[string(parameters('exportParallelMonths'))]"
-                        },
-                        {
-                          "name": "COST_EXPORT_CONTAINER",
-                          "value": "cost-exports"
-                        },
-                        {
-                          "name": "CONTROL_STATE_CONTAINER",
-                          "value": "control-state"
-                        },
-                        {
-                          "name": "MEGHKOSHA_AI_ENABLED",
-                          "value": "false"
-                        }
-                      ]
+                      "env": "[concat(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('processorIdentity').clientId), createObject('name', 'AZURE_TENANT_ID', 'value', tenant().tenantId), createObject('name', 'APP_SCHEDULER_ENABLED', 'value', 'true'), createObject('name', 'COST_EXPORT_STORAGE_URL', 'value', parameters('storageUrl')), createObject('name', 'COST_EXPORT_STORAGE_RESOURCE_ID', 'value', parameters('storageResourceId')), createObject('name', 'COST_EXPORT_NAME', 'value', parameters('exportName')), createObject('name', 'COST_EXPORT_DAILY_NAME', 'value', parameters('dailyExportName')), createObject('name', 'FOCUS_EXPORT_PARALLEL_MONTHS', 'value', string(parameters('exportParallelMonths'))), createObject('name', 'COST_EXPORT_CONTAINER', 'value', 'cost-exports'), createObject('name', 'CONTROL_STATE_CONTAINER', 'value', 'control-state'), createObject('name', 'MEGHKOSHA_AI_ENABLED', 'value', 'false')), parameters('assessmentEnvironment'))]"
                     }
                   ]
                 }
@@ -2491,11 +3398,347 @@
       "dependsOn": [
         "core",
         "data",
-        "group"
+        "group",
+        "postgres",
+        "workspaceVault"
+      ]
+    },
+    "assessmentWorker": {
+      "condition": "[and(variables('scalableEnabled'), not(empty(variables('assessmentRuntimeImage'))))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "app-assessment-worker",
+      "resourceGroup": "[if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "resourceToken": {
+            "value": "[variables('resourceToken')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          },
+          "environmentId": {
+            "value": "[reference('core').outputs.environmentId.value]"
+          },
+          "registryName": {
+            "value": "[reference('core').outputs.registryName.value]"
+          },
+          "image": {
+            "value": "[variables('assessmentRuntimeImage')]"
+          },
+          "workerIdentity": {
+            "value": "[reference('data').outputs.processorIdentity.value]"
+          },
+          "bootstrapIdentity": {
+            "value": "[reference('postgres').outputs.bootstrapIdentity.value]"
+          },
+          "apiPrincipalId": {
+            "value": "[reference('core').outputs.apiIdentity.value.principalId]"
+          },
+          "databaseHost": {
+            "value": "[reference('postgres').outputs.host.value]"
+          },
+          "databaseName": {
+            "value": "[reference('postgres').outputs.databaseName.value]"
+          },
+          "enableWorker": {
+            "value": "[variables('deployApplications')]"
+          },
+          "grantWorkerRegistryPull": {
+            "value": "[not(variables('deployProcessor'))]"
+          },
+          "workerCpu": {
+            "value": "[parameters('assessmentWorkerCpu')]"
+          },
+          "workerReplicas": {
+            "value": "[parameters('assessmentWorkerReplicas')]"
+          },
+          "workerEnvironment": {
+            "value": "[concat(createArray(createObject('name', 'WORKSPACE_VAULT_URL', 'value', if(variables('scalableEnabled'), reference('workspaceVault').outputs.url.value, '')), createObject('name', 'WORKSPACE_TTL_DAYS', 'value', string(parameters('workspaceTtlDays'))), createObject('name', 'WORKSPACE_MAX_ACTIVE', 'value', string(parameters('workspaceMaxActive'))), createObject('name', 'WORKSPACE_COOKIE_SECURE', 'value', 'true'), createObject('name', 'FOCUS_UPLOAD_CONTAINER', 'value', 'focus-uploads'), createObject('name', 'ASSESSMENT_MODE', 'value', parameters('assessmentMode')), createObject('name', 'ASSESSMENT_DB_HOST', 'value', if(variables('scalableEnabled'), reference('postgres').outputs.host.value, '')), createObject('name', 'ASSESSMENT_DB_NAME', 'value', if(variables('scalableEnabled'), reference('postgres').outputs.databaseName.value, '')), createObject('name', 'ASSESSMENT_DB_POOL_SIZE', 'value', string(parameters('assessmentPoolSize'))), createObject('name', 'ASSESSMENT_DB_COMMAND_TIMEOUT_SECONDS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'dbCommandSeconds'), 60))), createObject('name', 'ASSESSMENT_QUEUE_CAPACITY', 'value', string(parameters('assessmentQueueCapacity'))), createObject('name', 'ASSESSMENT_INPUT_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'inputBytes'), json('4294967296')))), createObject('name', 'ASSESSMENT_SPOOL_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'spoolBytes'), if(equals(parameters('assessmentWorkerCpu'), '1.0'), json('2147483648'), if(equals(parameters('assessmentWorkerCpu'), '2.0'), json('4294967296'), json('6442450944')))))), createObject('name', 'ASSESSMENT_EXPANDED_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'expandedBytes'), json('8589934592')))), createObject('name', 'ASSESSMENT_CSV_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'csvRows'), 20000000))), createObject('name', 'ASSESSMENT_INVENTORY_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'inventoryRows'), 500000))), createObject('name', 'ASSESSMENT_HISTORY_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'historyRows'), 20000000))), createObject('name', 'ASSESSMENT_TIMEOUT_SECONDS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'timeoutSeconds'), 3600))), createObject('name', 'ASSESSMENT_LEASE_SECONDS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'leaseSeconds'), 120))), createObject('name', 'ASSESSMENT_MAX_ATTEMPTS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'maxAttempts'), 3))), createObject('name', 'ASSESSMENT_PAGE_SIZE', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'pageSize'), 100))), createObject('name', 'ASSESSMENT_RESPONSE_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'responseBytes'), 1048576))), createObject('name', 'ASSESSMENT_RECORD_BYTES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'recordBytes'), 262144))), createObject('name', 'ASSESSMENT_INLINE_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'inlineRows'), 20))), createObject('name', 'ASSESSMENT_API_CONCURRENCY', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'apiConcurrency'), 20))), createObject('name', 'ASSESSMENT_INTERACTIVE_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'interactiveRows'), 1000))), createObject('name', 'ASSESSMENT_WORK_CONCURRENCY', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'workConcurrency'), 4))), createObject('name', 'ASSESSMENT_READ_POOL_SIZE', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'readPoolSize'), if(greater(parameters('assessmentPoolSize'), 3), 3, sub(parameters('assessmentPoolSize'), 1))))), createObject('name', 'ASSESSMENT_ARM_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'armIntervalMs'), 200))), createObject('name', 'ASSESSMENT_GRAPH_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'graphIntervalMs'), 400))), createObject('name', 'ASSESSMENT_METRICS_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'metricsIntervalMs'), 500))), createObject('name', 'ASSESSMENT_COST_INTERVAL_MS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'costIntervalMs'), 15000))), createObject('name', 'ASSESSMENT_AZURE_GET_RETRIES', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'azureGetRetries'), 3))), createObject('name', 'ASSESSMENT_DETAIL_ROWS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'detailRows'), 250000))), createObject('name', 'ASSESSMENT_DETAIL_POINTS', 'value', string(coalesce(tryGet(parameters('assessmentLimits'), 'detailPoints'), 5000000)))), createArray(createObject('name', 'COST_EXPORT_STORAGE_URL', 'value', reference('data').outputs.storageUrl.value), createObject('name', 'COST_EXPORT_STORAGE_RESOURCE_ID', 'value', reference('data').outputs.storageResourceId.value), createObject('name', 'COST_EXPORT_CONTAINER', 'value', 'cost-exports'), createObject('name', 'REPORT_SNAPSHOT_CONTAINER', 'value', 'report-snapshots'), createObject('name', 'CONTROL_STATE_CONTAINER', 'value', 'control-state'), createObject('name', 'COST_EXPORT_NAME', 'value', variables('exportName')), createObject('name', 'COST_EXPORT_DAILY_NAME', 'value', variables('dailyExportName'))))]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "8257846250551419741"
+            }
+          },
+          "parameters": {
+            "resourceToken": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            },
+            "environmentId": {
+              "type": "string"
+            },
+            "registryName": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "workerIdentity": {
+              "type": "object"
+            },
+            "bootstrapIdentity": {
+              "type": "object"
+            },
+            "apiPrincipalId": {
+              "type": "string"
+            },
+            "databaseHost": {
+              "type": "string"
+            },
+            "databaseName": {
+              "type": "string"
+            },
+            "workerEnvironment": {
+              "type": "array"
+            },
+            "enableWorker": {
+              "type": "bool"
+            },
+            "grantWorkerRegistryPull": {
+              "type": "bool",
+              "defaultValue": true
+            },
+            "workerCpu": {
+              "type": "string",
+              "defaultValue": "4.0",
+              "allowedValues": [
+                "1.0",
+                "2.0",
+                "4.0"
+              ]
+            },
+            "workerReplicas": {
+              "type": "int",
+              "defaultValue": 1,
+              "minValue": 1,
+              "maxValue": 4
+            }
+          },
+          "resources": [
+            {
+              "condition": "[parameters('grantWorkerRegistryPull')]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('workerIdentity').resourceId, 'acrpull')]",
+              "properties": {
+                "principalId": "[parameters('workerIdentity').principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('bootstrapIdentity').resourceId, 'acrpull')]",
+              "properties": {
+                "principalId": "[parameters('bootstrapIdentity').principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
+              }
+            },
+            {
+              "condition": "[parameters('enableWorker')]",
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2024-03-01",
+              "name": "[format('ca-assessment-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', parameters('workerIdentity').resourceId)]": {}
+                }
+              },
+              "properties": {
+                "environmentId": "[parameters('environmentId')]",
+                "workloadProfileName": "Consumption",
+                "configuration": {
+                  "activeRevisionsMode": "Single",
+                  "registries": [
+                    {
+                      "server": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), '2023-07-01').loginServer]",
+                      "identity": "[parameters('workerIdentity').resourceId]"
+                    }
+                  ]
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "assessment",
+                      "image": "[parameters('image')]",
+                      "command": [
+                        "/usr/bin/python",
+                        "-m",
+                        "jobs.assessments"
+                      ],
+                      "resources": {
+                        "cpu": "[json(parameters('workerCpu'))]",
+                        "memory": "[if(equals(parameters('workerCpu'), '1.0'), '2Gi', if(equals(parameters('workerCpu'), '2.0'), '4Gi', '8Gi'))]"
+                      },
+                      "env": "[concat(createArray(createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('workerIdentity').clientId), createObject('name', 'AZURE_TENANT_ID', 'value', tenant().tenantId), createObject('name', 'ASSESSMENT_DB_USER', 'value', 'meghkosha_worker'), createObject('name', 'ASSESSMENT_WORKER_PROCESS', 'value', 'true'), createObject('name', 'MEGHKOSHA_AI_ENABLED', 'value', 'false')), parameters('workerEnvironment'))]"
+                    }
+                  ],
+                  "scale": {
+                    "minReplicas": "[parameters('workerReplicas')]",
+                    "maxReplicas": "[parameters('workerReplicas')]"
+                  }
+                }
+              },
+              "dependsOn": [
+                "[extensionResourceId(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('workerIdentity').resourceId, 'acrpull'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.App/jobs",
+              "apiVersion": "2024-03-01",
+              "name": "[format('job-db-bootstrap-{0}', parameters('resourceToken'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', parameters('bootstrapIdentity').resourceId)]": {}
+                }
+              },
+              "properties": {
+                "environmentId": "[parameters('environmentId')]",
+                "workloadProfileName": "Consumption",
+                "configuration": {
+                  "triggerType": "Manual",
+                  "replicaTimeout": 300,
+                  "replicaRetryLimit": 0,
+                  "manualTriggerConfig": {
+                    "parallelism": 1,
+                    "replicaCompletionCount": 1
+                  },
+                  "registries": [
+                    {
+                      "server": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), '2023-07-01').loginServer]",
+                      "identity": "[parameters('bootstrapIdentity').resourceId]"
+                    }
+                  ]
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "bootstrap",
+                      "image": "[parameters('image')]",
+                      "command": [
+                        "/usr/bin/python",
+                        "-m",
+                        "jobs.assessment_bootstrap"
+                      ],
+                      "resources": {
+                        "cpu": "[json('0.5')]",
+                        "memory": "1Gi"
+                      },
+                      "env": [
+                        {
+                          "name": "AZURE_CLIENT_ID",
+                          "value": "[parameters('bootstrapIdentity').clientId]"
+                        },
+                        {
+                          "name": "ASSESSMENT_DB_HOST",
+                          "value": "[parameters('databaseHost')]"
+                        },
+                        {
+                          "name": "ASSESSMENT_DB_NAME",
+                          "value": "postgres"
+                        },
+                        {
+                          "name": "ASSESSMENT_TARGET_DB_NAME",
+                          "value": "[parameters('databaseName')]"
+                        },
+                        {
+                          "name": "ASSESSMENT_DB_USER",
+                          "value": "[parameters('bootstrapIdentity').name]"
+                        },
+                        {
+                          "name": "ASSESSMENT_API_PRINCIPAL_ID",
+                          "value": "[parameters('apiPrincipalId')]"
+                        },
+                        {
+                          "name": "ASSESSMENT_WORKER_PRINCIPAL_ID",
+                          "value": "[parameters('workerIdentity').principalId]"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              "dependsOn": [
+                "[extensionResourceId(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('bootstrapIdentity').resourceId, 'acrpull'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "workerName": {
+              "type": "string",
+              "value": "[if(parameters('enableWorker'), format('ca-assessment-{0}', parameters('resourceToken')), '')]"
+            },
+            "bootstrapJobName": {
+              "type": "string",
+              "value": "[format('job-db-bootstrap-{0}', parameters('resourceToken'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "core",
+        "data",
+        "group",
+        "postgres",
+        "workspaceVault"
       ]
     }
   },
   "outputs": {
+    "ASSESSMENT_MODE": {
+      "type": "string",
+      "value": "[parameters('assessmentMode')]"
+    },
+    "WORKSPACE_VAULT_URL": {
+      "type": "string",
+      "value": "[if(variables('scalableEnabled'), reference('workspaceVault').outputs.url.value, '')]"
+    },
+    "WORKSPACE_VAULT_NAME": {
+      "type": "string",
+      "value": "[if(variables('scalableEnabled'), reference('workspaceVault').outputs.name.value, '')]"
+    },
+    "ASSESSMENT_DB_HOST": {
+      "type": "string",
+      "value": "[if(variables('scalableEnabled'), reference('postgres').outputs.host.value, '')]"
+    },
+    "ASSESSMENT_BOOTSTRAP_JOB": {
+      "type": "string",
+      "value": "[if(and(variables('scalableEnabled'), not(empty(variables('assessmentRuntimeImage')))), reference('assessmentWorker').outputs.bootstrapJobName.value, '')]"
+    },
+    "SERVICE_ASSESSMENT_RESOURCE_NAME": {
+      "type": "string",
+      "value": "[if(and(variables('scalableEnabled'), variables('deployApplications')), reference('assessmentWorker').outputs.workerName.value, '')]"
+    },
     "AZURE_RESOURCE_GROUP": {
       "type": "string",
       "value": "[if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))]"
@@ -2538,7 +3781,23 @@
     },
     "APP_PRIVATE_REGISTRY": {
       "type": "bool",
-      "value": "[parameters('privateRegistry')]"
+      "value": "[variables('privateRegistryEnabled')]"
+    },
+    "APP_REGISTRY_BUILD_MODE": {
+      "type": "string",
+      "value": "[parameters('registryBuildMode')]"
+    },
+    "APP_PRIVATE_BUILDER_VM_NAME": {
+      "type": "string",
+      "value": "[if(and(and(parameters('enablePrivateBuilder'), variables('privateRegistryEnabled')), equals(parameters('registryBuildMode'), 'private-runner')), reference('privateBuilder').outputs.vmName.value, '')]"
+    },
+    "APP_PRIVATE_BUILDER_CLIENT_ID": {
+      "type": "string",
+      "value": "[if(and(and(parameters('enablePrivateBuilder'), variables('privateRegistryEnabled')), equals(parameters('registryBuildMode'), 'private-runner')), reference('privateBuilder').outputs.identityClientId.value, '')]"
+    },
+    "APP_BUILD_AGENT_SUBNET_ID": {
+      "type": "string",
+      "value": "[reference('core').outputs.buildAgentSubnetId.value]"
     },
     "APP_BUILD_AGENT_POOL": {
       "type": "string",
@@ -2591,6 +3850,14 @@
     "AI_PROJECT_ENDPOINT": {
       "type": "string",
       "value": "[if(not(variables('aiEnabled')), '', if(parameters('reuseAiAccount'), reference('existingAi').outputs.projectEndpoint.value, reference('ai').outputs.projectEndpoint.value))]"
+    },
+    "AI_SERVICES_ENDPOINT": {
+      "type": "string",
+      "value": "[if(not(variables('aiEnabled')), '', if(parameters('reuseAiAccount'), reference('existingAi').outputs.endpoint.value, reference('ai').outputs.endpoint.value))]"
+    },
+    "APP_FOUNDRY_ACCOUNT_NAME": {
+      "type": "string",
+      "value": "[if(variables('aiEnabled'), format('ai-{0}', variables('resourceToken')), '')]"
     },
     "APP_DEPLOYMENT_STATE": {
       "type": "object",

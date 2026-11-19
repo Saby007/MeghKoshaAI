@@ -150,6 +150,7 @@ export class ApiRequestError extends Error {
 }
 
 export type BackgroundAssessmentJob = {
+  phase?: string;
   jobId: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   snapshotId: string | null; error: string | null;
 };

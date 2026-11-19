@@ -3,14 +3,14 @@ param location string
 param tags object
 param networkId string
 param privateEndpointSubnetId string
-param skuName string = 'Standard_D2ds_v5'
+param skuName string = 'Standard_D4ds_v5'
 @allowed(['GeneralPurpose', 'MemoryOptimized'])
 param skuTier string = 'GeneralPurpose'
 @allowed(['16', '17'])
 param version string = '16'
 @minValue(32)
 @maxValue(16384)
-param storageSizeGB int = 128
+param storageSizeGB int = 256
 
 resource bootstrapIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: 'id-db-bootstrap-${resourceToken}'

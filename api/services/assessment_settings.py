@@ -6,7 +6,7 @@ from functools import lru_cache
 
 
 def scalable_mode() -> bool:
-    mode = os.environ.get("ASSESSMENT_MODE", "blob")
+    mode = os.environ.get("ASSESSMENT_MODE", "postgres")
     if mode not in {"blob", "postgres"}:
         raise ValueError("ASSESSMENT_MODE must be blob or postgres")
     return mode == "postgres"
@@ -50,6 +50,7 @@ class AssessmentSettings:
     azure_get_retries: int
     detail_rows: int
     detail_points: int
+    db_command_seconds: int = 60
 
 
 @lru_cache(maxsize=1)
@@ -73,7 +74,7 @@ def settings() -> AssessmentSettings:
         expanded_bytes=_integer("ASSESSMENT_EXPANDED_BYTES", 8 * 1024**3, 1024**2, 128 * 1024**3),
         csv_rows=_integer("ASSESSMENT_CSV_ROWS", 20_000_000, 1, 100_000_000),
         inventory_rows=_integer("ASSESSMENT_INVENTORY_ROWS", 500_000, 1, 5_000_000),
-        history_rows=_integer("ASSESSMENT_HISTORY_ROWS", 2_000_000, 1, 10_000_000),
+        history_rows=_integer("ASSESSMENT_HISTORY_ROWS", 20_000_000, 1, 100_000_000),
         snapshot_read_bytes=_integer("ASSESSMENT_SNAPSHOT_READ_BYTES", 4 * 1024**2, 1024, 16 * 1024**2),
         interactive_rows=_integer("ASSESSMENT_INTERACTIVE_ROWS", 1000, 1, 5000),
         work_concurrency=_integer("ASSESSMENT_WORK_CONCURRENCY", 4, 1, 20),
@@ -83,8 +84,9 @@ def settings() -> AssessmentSettings:
         azure_metrics_interval_ms=_integer("ASSESSMENT_METRICS_INTERVAL_MS", 500, 10, 60000),
         azure_cost_interval_ms=_integer("ASSESSMENT_COST_INTERVAL_MS", 15000, 10, 60000),
         azure_get_retries=_integer("ASSESSMENT_AZURE_GET_RETRIES", 3, 0, 5),
-        detail_rows=_integer("ASSESSMENT_DETAIL_ROWS", 50000, 1, 250000),
+        detail_rows=_integer("ASSESSMENT_DETAIL_ROWS", 250000, 1, 1000000),
         detail_points=_integer("ASSESSMENT_DETAIL_POINTS", 5000000, 1, 20000000),
+        db_command_seconds=_integer("ASSESSMENT_DB_COMMAND_TIMEOUT_SECONDS", 60, 5, 300),
     )
     if configured.record_bytes + 4096 > configured.response_bytes:
         raise ValueError("ASSESSMENT_RECORD_BYTES must leave at least 4096 bytes within ASSESSMENT_RESPONSE_BYTES.")

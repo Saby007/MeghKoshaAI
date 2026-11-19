@@ -72,7 +72,7 @@ $webImage = Get-Setting 'SERVICE_WEB_IMAGE_NAME'
 if ([string]::IsNullOrEmpty($apiImage) -xor [string]::IsNullOrEmpty($webImage)) { throw 'Provide both application images, or leave both empty for the foundation stage.' }
 $applications = -not [string]::IsNullOrEmpty($apiImage)
 $assessmentMode = Get-Setting 'APP_ASSESSMENT_MODE' 'postgres'
-if ($assessmentMode -cnotin @('blob', 'postgres')) { throw 'APP_ASSESSMENT_MODE must be blob or postgres.' }
+if ($assessmentMode -cne 'postgres') { throw 'Manual FOCUS workspaces require APP_ASSESSMENT_MODE=postgres.' }
 $privateRegistry = Get-BooleanSetting 'APP_PRIVATE_REGISTRY' ($assessmentMode -eq 'postgres')
 if ($assessmentMode -eq 'postgres' -and -not $privateRegistry) {
     throw 'PostgreSQL/scalable deployments require private ACR. Public registry access must not be enabled.'
@@ -112,13 +112,14 @@ $assessmentLimits = ConvertFrom-Json -InputObject (Get-Setting 'APP_ASSESSMENT_L
 if ($assessmentLimits -isnot [System.Collections.IDictionary]) { throw 'APP_ASSESSMENT_LIMITS must be a JSON object.' }
 $allowedAssessmentLimits = @{
     inputBytes = @(1048576L, 68719476736L); spoolBytes = @(1048576L, 68719476736L); expandedBytes = @(1048576L, 137438953472L)
-    csvRows = @(1L, 100000000L); inventoryRows = @(1L, 5000000L); historyRows = @(1L, 10000000L)
+    csvRows = @(1L, 100000000L); inventoryRows = @(1L, 5000000L); historyRows = @(1L, 100000000L)
     timeoutSeconds = @(60L, 86400L); leaseSeconds = @(30L, 600L); maxAttempts = @(1L, 5L)
     pageSize = @(1L, 200L); responseBytes = @(65536L, 2097152L); recordBytes = @(1024L, 524288L)
     inlineRows = @(1L, 100L); apiConcurrency = @(1L, 50L); interactiveRows = @(1L, 5000L)
     workConcurrency = @(1L, 20L); readPoolSize = @(1L, 49L)
     armIntervalMs = @(10L, 60000L); graphIntervalMs = @(10L, 60000L); metricsIntervalMs = @(10L, 60000L); costIntervalMs = @(10L, 60000L)
-    azureGetRetries = @(0L, 5L); detailRows = @(1L, 250000L); detailPoints = @(1L, 20000000L)
+    azureGetRetries = @(0L, 5L); detailRows = @(1L, 1000000L); detailPoints = @(1L, 20000000L)
+    dbCommandSeconds = @(5L, 300L)
 }
 foreach ($key in $assessmentLimits.Keys) {
     $value = $assessmentLimits[$key]
@@ -140,8 +141,7 @@ if ($Operation -ne 'Down' -and (Get-BooleanSetting 'APP_APPLICATIONS_DEPLOYED') 
     throw 'Do not clear deployed application image settings; incremental provisioning would leave the existing apps running.'
 }
 if ($applications) {
-    foreach ($name in @('AZURE_TENANT_ID', 'MEGHKOSHA_API_CLIENT_ID', 'MEGHKOSHA_WEB_CLIENT_ID')) { Assert-Identifier $name }
-    if ((Get-Setting 'MEGHKOSHA_API_CLIENT_ID') -eq (Get-Setting 'MEGHKOSHA_WEB_CLIENT_ID')) { throw 'API and SPA must use separate registrations.' }
+    Assert-Identifier 'AZURE_TENANT_ID'
 }
 if ($Operation -eq 'Publish' -and (Get-Setting 'AZURE_CONTAINER_REGISTRY_ENDPOINT') -cnotmatch '^[a-z0-9]+\.azurecr\.io$') {
     throw 'Publish requires the provisioned environment registry; no image digest is required before its first publication.'
@@ -157,6 +157,7 @@ if ($applications) {
 }
 
 $processor = Get-BooleanSetting 'APP_ENABLE_PROCESSOR'
+if ($processor) { throw 'Native export automation is removed. APP_ENABLE_PROCESSOR must remain false.' }
 if ($Operation -ne 'Down' -and (Get-BooleanSetting 'APP_PROCESSOR_DEPLOYED') -and -not $processor) {
     throw 'Disabling this module does not stop an existing scheduled job. Use the separately approved processor lifecycle operation.'
 }
@@ -173,6 +174,7 @@ if ($processor) {
     }
 }
 $trustedExports = Get-BooleanSetting 'APP_EXPORT_TRUSTED_SERVICES'
+if ($trustedExports) { throw 'Manual FOCUS uploads require private Blob access; native-export ingress exceptions are not used.' }
 if ($profile -eq 'core' -and $trustedExports) { throw 'Native export storage settings are not part of the core stage.' }
 
 $models = ConvertFrom-Json -InputObject (Get-Setting 'APP_MODEL_DEPLOYMENTS' '[]') -AsHashtable -NoEnumerate

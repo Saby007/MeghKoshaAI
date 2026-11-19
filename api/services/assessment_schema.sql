@@ -181,4 +181,60 @@ CREATE TABLE IF NOT EXISTS assessments.azure_request_budgets (
     next_at timestamptz NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS assessments.workspaces (
+    workspace_id uuid PRIMARY KEY,
+    capability_hash text NOT NULL,
+    configuration_revision integer NOT NULL DEFAULT 0,
+    active_dataset uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS workspaces_expiry ON assessments.workspaces(expires_at);
+
+CREATE TABLE IF NOT EXISTS assessments.workspace_connections (
+    workspace_id uuid NOT NULL REFERENCES assessments.workspaces ON DELETE CASCADE,
+    revision integer NOT NULL,
+    subscription_id text NOT NULL,
+    subscription_name text NOT NULL,
+    target_tenant_id text,
+    client_id text,
+    secret_version text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (workspace_id, revision),
+    CHECK ((target_tenant_id IS NULL AND client_id IS NULL AND secret_version IS NULL)
+        OR (target_tenant_id IS NOT NULL AND client_id IS NOT NULL AND secret_version IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS assessments.uploads (
+    dataset_id uuid PRIMARY KEY,
+    workspace_id uuid NOT NULL REFERENCES assessments.workspaces ON DELETE CASCADE,
+    subscription_id text NOT NULL,
+    status text NOT NULL DEFAULT 'uploading'
+        CHECK (status IN ('uploading','queued','processing','ready','failed')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    job_id uuid REFERENCES assessments.jobs,
+    coverage jsonb,
+    error_message text
+);
+CREATE INDEX IF NOT EXISTS uploads_workspace
+    ON assessments.uploads(workspace_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS assessments.upload_files (
+    file_id uuid PRIMARY KEY,
+    dataset_id uuid NOT NULL REFERENCES assessments.uploads ON DELETE CASCADE,
+    ordinal integer NOT NULL,
+    name text NOT NULL,
+    total_bytes bigint NOT NULL CHECK (total_bytes > 0),
+    received_bytes bigint NOT NULL DEFAULT 0,
+    sha256 text,
+    UNIQUE (dataset_id, ordinal),
+    CHECK (received_bytes >= 0 AND received_bytes <= total_bytes)
+);
+CREATE TABLE IF NOT EXISTS assessments.upload_chunks (
+    file_id uuid NOT NULL REFERENCES assessments.upload_files ON DELETE CASCADE,
+    byte_offset bigint NOT NULL CHECK (byte_offset >= 0),
+    byte_length integer NOT NULL CHECK (byte_length > 0),
+    sha256 text NOT NULL,
+    PRIMARY KEY (file_id, byte_offset)
+);
+
 REVOKE ALL ON ALL TABLES IN SCHEMA assessments FROM PUBLIC;

@@ -9,7 +9,8 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from services import assessment_store, report_snapshots
+from services import assessment_store, report_snapshots, target_connection
+from services.focus_cost_reader import FocusCostDataError
 from services.assessment_limits import AssessmentBudget, AssessmentLimitError, active_budget
 from services.assessment_settings import settings
 
@@ -25,32 +26,40 @@ async def run(job_id: UUID, token: UUID) -> None:
         )
         if not job:
             raise assessment_store.LeaseLostError("Assessment lease is no longer active.")
-        if job["tenant_id"] != os.environ["AZURE_TENANT_ID"].lower():
-            raise ValueError("Assessment job tenant does not match the worker tenant.")
-        from main import _build_and_publish_report
         import json
+        workspace_id = UUID(job["tenant_id"])
+        if not await (await assessment_store.pool()).fetchval(
+            "SELECT 1 FROM assessments.workspaces WHERE workspace_id=$1 AND expires_at>now()", workspace_id,
+        ):
+            raise ValueError("The uploaded-report workspace expired or is unavailable.")
 
         directory = Path(os.environ["ASSESSMENT_WORKSPACE"])
         if not directory.is_dir():
             raise RuntimeError("The supervisor-owned assessment workspace is unavailable.")
         budget_token = active_budget.set(AssessmentBudget(settings(), directory))
         try:
-            if job.get("task_kind", "assessment") == "artifact":
-                from jobs.report_artifact import run as build_artifact
-                try:
+            payload = json.loads(job["task_payload"])
+            async with target_connection.context(str(workspace_id), payload.get("configurationRevision")):
+                if job.get("task_kind", "assessment") == "artifact":
+                    from jobs.report_artifact import run as build_artifact
                     await build_artifact(job)
-                except ValueError as error:
-                    logger.exception("Report artifact %s has invalid input", job_id)
-                    await assessment_store.fail(job_id, token, str(error), retryable=False, code="invalid_report_request")
-                return
-            report = await _build_and_publish_report(
-                json.loads(job["subscription_ids"]), job["stale_days"], publish=False,
-            )
-            snapshot = report_snapshots.build_snapshot(
-                report, json.loads(job["subscription_ids"]), job["stale_days"],
-            )
-            await report_snapshots.publish_snapshot(snapshot, update_pointers=False)
-            await assessment_store.publish(snapshot, job, report_snapshots.snapshot_blob_name(snapshot))
+                    return
+                from services.manual_assessment import build
+                await (await assessment_store.pool()).execute(
+                    "UPDATE assessments.uploads SET status='processing' WHERE dataset_id=$1 AND job_id=$2",
+                    UUID(payload["datasetId"]), job_id,
+                )
+                report, evidence = await build(
+                    UUID(payload["datasetId"]), json.loads(job["subscription_ids"]), job["stale_days"],
+                )
+                snapshot = report_snapshots.build_snapshot(
+                    report, json.loads(job["subscription_ids"]), job["stale_days"],
+                )
+                await report_snapshots.publish_snapshot(snapshot, update_pointers=False)
+                await assessment_store.publish(
+                    snapshot, job, report_snapshots.snapshot_blob_name(snapshot),
+                    history=evidence.history, coverage=evidence.coverage,
+                )
         finally:
             active_budget.reset(budget_token)
     except AssessmentLimitError as error:
@@ -62,6 +71,9 @@ async def run(job_id: UUID, token: UUID) -> None:
         await assessment_store.fail(
             job_id, token, detail, retryable=error.status_code >= 500, code="collection_failed",
         )
+    except (FocusCostDataError, ValueError, KeyError) as error:
+        logger.warning("Assessment %s rejected uploaded evidence: %s", job_id, error)
+        await assessment_store.fail(job_id, token, str(error), retryable=False, code="invalid_focus_report")
     finally:
         await assessment_store.close()
 

@@ -7,13 +7,12 @@ param environmentId string
 param registryServer string
 param apiIdentity object
 param webIdentity object
-param oboIdentity object
 @minLength(1)
 param apiImage string
 @minLength(1)
 param webImage string
-param apiClientId string
-param webClientId string
+@allowed(['1.0', '2.0', '4.0'])
+param apiCpu string = '2.0'
 param apiEnvironment array = []
 @minValue(0)
 @maxValue(3)
@@ -27,7 +26,6 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
     type: 'UserAssigned'
     userAssignedIdentities: {
       '${apiIdentity.resourceId}': {}
-      '${oboIdentity.resourceId}': {}
     }
   }
   properties: {
@@ -48,13 +46,10 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
         {
           name: 'api'
           image: apiImage
-          resources: { cpu: json('0.5'), memory: '1Gi' }
+          resources: { cpu: json(apiCpu), memory: apiCpu == '1.0' ? '2Gi' : apiCpu == '2.0' ? '4Gi' : '8Gi' }
           env: concat([
             { name: 'AZURE_CLIENT_ID', value: apiIdentity.clientId }
             { name: 'AZURE_TENANT_ID', value: tenant().tenantId }
-            { name: 'MEGHKOSHA_API_CLIENT_ID', value: apiClientId }
-            { name: 'MEGHKOSHA_WEB_CLIENT_ID', value: webClientId }
-            { name: 'MEGHKOSHA_OBO_MANAGED_IDENTITY_CLIENT_ID', value: oboIdentity.clientId }
             { name: 'MEGHKOSHA_ACTION_WRITES_PAUSED', value: 'true' }
           ], apiEnvironment)
           probes: [

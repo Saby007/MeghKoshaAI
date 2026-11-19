@@ -43,6 +43,7 @@ $global:stagedState = @{
         APP_ASSESSMENT_FOUNDATION_ONLY = 'true'; APP_ASSESSMENT_DB_BOOTSTRAPPED = 'false'
         ASSESSMENT_BOOTSTRAP_JOB = 'job-db-bootstrap-test'; APP_WEB_ORIGIN = 'https://web.example.test'
         ASSESSMENT_DB_HOST = 'pg-test.postgres.database.azure.com'
+        WORKSPACE_VAULT_NAME = 'kv-staged-test'
         APP_FOUNDRY_ACCOUNT_NAME = 'ai-test'
         AI_SERVICES_ENDPOINT = 'https://ai-test.cognitiveservices.azure.com/'
         SERVICE_API_RESOURCE_NAME = 'ca-api-test'; SERVICE_ASSESSMENT_RESOURCE_NAME = 'ca-assessment-test'
@@ -82,6 +83,9 @@ function az {
     $command = $a[0..([Math]::Min(2,$a.Count-1))] -join ' '
     if ($a[0] -eq 'acr' -and $a[1] -eq 'show') {
         return '{"sku":{"name":"Premium"},"publicNetworkAccess":"Disabled","adminUserEnabled":false}'
+    }
+    if ($a[0] -eq 'keyvault' -and $a[1] -eq 'show') {
+        return '{"properties":{"publicNetworkAccess":"Disabled","enableRbacAuthorization":true,"enablePurgeProtection":true}}'
     }
     if ($a[0] -eq 'account' -and $a[1] -eq 'show') {
         if ($a -contains 'none') { return }
@@ -293,11 +297,7 @@ try {
     if ($global:stagedState.values.APP_ASSESSMENT_DB_BOOTSTRAPPED -ne 'false') { throw 'Failed bootstrap was marked verified.' }
     $global:stagedState.bootstrapFailed = $false
     & $script -Stage Bootstrap @common -ApproveDatabaseBootstrap | Out-Null
-    $global:stagedState.values.MEGHKOSHA_API_CLIENT_ID = '44444444-4444-4444-4444-444444444444'
-    $global:stagedState.values.MEGHKOSHA_WEB_CLIENT_ID = '55555555-5555-5555-5555-555555555555'
-    & $script -Stage Permissions @common -ApproveRoleAssignments -TargetSubscriptionId '11111111-1111-1111-1111-111111111111' | Out-Null
-    & $script -Stage Permissions @common -ApproveRoleAssignments -TargetSubscriptionId '11111111-1111-1111-1111-111111111111' | Out-Null
-    if ($global:stagedState.assignments.Count -ne 4) { throw 'Permission stage did not reuse existing scoped grants.' }
+    if ($global:stagedState.assignments.Count) { throw 'Manual FOCUS mode must not assign target roles.' }
     & $script -Stage Release @common -ApproveRelease | Out-Null
     if ($global:stagedState.values.APP_ASSESSMENT_FOUNDATION_ONLY -ne 'false') { throw 'Release stage did not open the reviewed application gate.' }
     & $script -Stage Verify @common | Out-Null
@@ -344,14 +344,14 @@ try {
     $calls=$global:stagedState.calls
     $build=$calls.IndexOf('az vm run-command invoke')
     $bootstrap=$calls.IndexOf('az containerapp job start')
-    $identity=$calls.IndexOf('identity')
-    $permissions=$calls.IndexOf('az role assignment create')
     $verify=$calls.IndexOf('az containerapp show --resource-group')
     $stop=$calls.IndexOf('az vm deallocate --resource-group')
-    if (-not (0 -le $build -and $build -lt $bootstrap -and $bootstrap -lt $identity -and $identity -lt $permissions -and $permissions -lt $verify -and $verify -lt $stop)) {
+    if (-not (0 -le $build -and $build -lt $bootstrap -and $bootstrap -lt $verify -and $verify -lt $stop) -or
+        $calls.Contains('identity') -or $calls.Contains('az role assignment create')) {
         throw "End-to-end stages ran out of order: $($calls -join ', ')"
     }
-    if ($global:stagedState.values.APP_EXPORT_TRUSTED_SERVICES -ne 'true') { throw 'End-to-end export setting was not forwarded.' }
+    if ($global:stagedState.values.APP_EXPORT_TRUSTED_SERVICES -ne 'false' -or
+        $global:stagedState.values.APP_ENABLE_PROCESSOR -ne 'false') { throw 'Manual deployment enabled native export automation.' }
     $provisions=$global:stagedState.provisions
     $global:stagedState.calls.Clear()
     $rerun=& $driver -EnvironmentName staged-test -SkipLogin -ApproveAll | ConvertFrom-Json
@@ -378,30 +378,19 @@ try {
         throw 'Resuming after bootstrap failure did not reuse the completed build.'
     }
     Reset-Rollout
-    $result=& $driver -EnvironmentName staged-test -SkipLogin -ApproveAll `
-        -TargetSubscriptionId 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' | ConvertFrom-Json
-    if ($result.assessedSubscriptions.Count -ne 2 -or $global:stagedState.assignments.Count -ne 8) {
-        throw 'The end-to-end entry point did not preserve the explicitly selected subscription scopes.'
-    }
+    Assert-Refused { & $script -Stage Initialize @common `
+        -TargetSubscriptionId 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } 'Manual FOCUS mode'
     Reset-Rollout
     $global:stagedState.values.APP_RESTORE_AI_ACCOUNT = 'true'
     $global:stagedState.values.APP_REUSE_AI_ACCOUNT = 'false'
-    $result = & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll `
-        -ApproveOwnedRegistrationMigration -PreviousWebOrigin 'https://old.example.test' `
-        -PreviousOboPrincipalId '66666666-6666-6666-6666-666666666666' `
-        -ExpectedApiClientId '44444444-4444-4444-4444-444444444444' `
-        -ExpectedWebClientId '55555555-5555-5555-5555-555555555555' | ConvertFrom-Json
+    $result = & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll | ConvertFrom-Json
     if ($result.status -ne 'deployment_completed' -or
         $global:stagedState.values.APP_RESTORE_AI_ACCOUNT -ne 'false' -or
         $global:stagedState.values.APP_REUSE_AI_ACCOUNT -ne 'true') {
         throw 'A restored Foundry foundation must switch from restore to reuse before bootstrap/release.'
     }
-    if (-not $global:stagedState.migration -or
-        $global:stagedState.migration.previousOrigin -ne 'https://old.example.test/' -or
-        $global:stagedState.migration.previousSubject -ne '66666666-6666-6666-6666-666666666666' -or
-        $global:stagedState.migration.api -ne '44444444-4444-4444-4444-444444444444' -or
-        $global:stagedState.migration.web -ne '55555555-5555-5555-5555-555555555555') {
-        throw 'The end-to-end runner lost the exact approved identity-migration boundaries.'
+    if ($global:stagedState.migration -or $global:stagedState.assignments.Count) {
+        throw 'Manual deployment must not run user sign-in migrations or target IAM writes.'
     }
     Reset-Rollout
     $global:stagedState.badBuild=$true

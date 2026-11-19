@@ -37,55 +37,7 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 
-it('filters managed budgets by expiry and forecast while preserving search and edit actions', async () => {
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-10-09T05:00:00Z'));
-  try {
-    const base = { subscriptionId: 'sub-1', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-01-01', currentSpend: 20, forecastSpend: 30 };
-    vi.mocked(listBudgets).mockResolvedValue([
-      { ...base, name: 'Soon', periodEnd: '2026-11-08' },
-      { ...base, name: 'Past', periodEnd: '2026-10-08' },
-      { ...base, name: 'Open', periodEnd: '' },
-      { ...base, name: 'Forecast', periodEnd: '2036-10-01', forecastSpend: 120 },
-      { ...base, name: 'Over', periodEnd: '2027-01-01', currentSpend: 110 },
-      { ...base, name: 'Invalid', periodEnd: 'invalid-date' },
-    ]);
-    await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="budget-polish" />));
-    await act(async () => button('Budgets').click());
-    const table = () => container.querySelector('[aria-label="Managed budgets"]');
-    const names = () => [...(table()?.querySelectorAll('tbody tr') ?? [])].map((row) => row.firstElementChild?.textContent);
-    const filter = container.querySelector<HTMLSelectElement>('[aria-label="Budget attention filter"]')!;
-    const choose = async (value: string) => act(async () => { filter.value = value; filter.dispatchEvent(new Event('change', { bubbles: true })); });
-    expect(names()).toHaveLength(6);
-    expect(table()?.querySelector('thead')?.textContent).toContain('End date');
-    await choose('expiring');
-    expect(names()).toEqual(['Soon']);
-    await choose('expired');
-    expect(names()).toEqual(['Past']);
-    await choose('forecast');
-    expect(names()).toEqual(['Forecast']);
-    await choose('over');
-    expect(names()).toEqual(['Over']);
-    await choose('open');
-    expect(names()).toEqual(['Open']);
-    await choose('all');
-    const search = container.querySelector<HTMLInputElement>('[aria-label="Search managed budgets"]')!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'soon');
-      search.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    expect(names()).toEqual(['Soon']);
-    await act(async () => button('Edit').click());
-    expect(container.querySelector<HTMLInputElement>('[aria-label="Budget name"]')?.value).toBe('Soon');
-    await choose('expired');
-    expect(table()).toBeNull();
-    expect(container.textContent).toContain('No budgets match these filters');
-    await act(async () => button('Clear budget filters').click());
-    expect(names()).toHaveLength(6);
-  } finally {
-    vi.useRealTimers();
-  }
-});
+
 
 it('shows scope and snapshot context separately from live data on every report page', async () => {
   await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="scope-polish" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} />));
@@ -93,70 +45,38 @@ it('shows scope and snapshot context separately from live data on every report p
   expect(summary.textContent).toContain('1 subscription');
   expect(summary.textContent).toContain('UTC');
   expect(summary.textContent).toContain('Snapshot:');
-  await act(async () => button('Budgets').click());
+  await act(async () => button('History').click());
   expect(container.querySelector('[aria-label="Report scope summary"]')).toBe(summary);
-  expect(container.querySelector('.live-badge')).not.toBeNull();
+  expect(container.querySelector('.live-badge')).toBeNull();
 });
 
-it('loads and submits the budget end date when editing, rejecting dates before the start', async () => {
-  const budget = { subscriptionId: 'sub-1', name: 'Finance', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '2027-09-01T00:00:00Z', currentSpend: 10, forecastSpend: 20 };
-  vi.mocked(listBudgets).mockResolvedValue([budget]);
-  vi.mocked(updateBudget).mockResolvedValue({ ...budget, periodEnd: '2028-09-01' });
-  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="form-report" />));
-  await act(async () => button('Budgets').click());
-  await act(async () => button('Edit').click());
-  const end = container.querySelector<HTMLInputElement>('[aria-label="Budget end date"]')!;
-  expect(end.value).toBe('2027-09-01');
-  const changeEnd = async (value: string) => act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(end, value);
-    end.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await changeEnd('2026-08-01');
-  await act(async () => container.querySelector('form.budget-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  expect(updateBudget).not.toHaveBeenCalled();
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain('end date must be after');
-  await changeEnd('2028-09-01');
-  await act(async () => container.querySelector('form.budget-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  expect(updateBudget).toHaveBeenCalledWith('sub-1', 'Finance', expect.objectContaining({ endDate: '2028-09-01' }));
+it('omits budgets and native export controls without requesting budget data', async () => {
+  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="manual-no-budgets" />));
+  expect(button('Budgets')).toBeUndefined();
+  expect(container.querySelector('[aria-label="Download FocusCost files"]')).toBeNull();
+  expect(container.textContent).not.toContain('Budget Context');
+  expect(listBudgets).not.toHaveBeenCalled();
 });
 
-it('submits the chosen expiry date when adding a budget', async () => {
-  const created = { subscriptionId: 'sub-1', name: 'New-budget', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-09-01', periodEnd: '2027-09-01', currentSpend: 0, forecastSpend: null };
-  vi.mocked(createBudget).mockResolvedValue(created);
-  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="form-report" />));
-  await act(async () => button('Budgets').click());
-  for (const [label, value] of [['Budget name', 'New-budget'], ['Budget amount', '100'], ['Budget start date', '2026-09-01'], ['Budget end date', '2027-09-01']]) {
-    const input = container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-  }
-  await act(async () => container.querySelector('form.budget-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  expect(createBudget).toHaveBeenCalledWith(expect.objectContaining({ name: 'New-budget', endDate: '2027-09-01' }));
-  expect(container.querySelector<HTMLInputElement>('[aria-label="Budget end date"]')?.value).toBe('');
+it('keeps uploaded financial views but leaves live API evidence unavailable without an SP', async () => {
+  const report: FullReport = { ...detailReportFixture, reportMetadata: {
+    ...detailReportFixture.reportMetadata, enrichmentStatus: 'not_configured',
+    enrichmentMessage: 'No service-principal credentials were provided.', billedResourceCount: 42,
+  } };
+  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="manual-offline" />));
+  expect(container.querySelector('[aria-label="Open savings roadmap"] .kpi-value')?.textContent).toBe('Unavailable');
+  expect(container.textContent).toContain('FOCUS billed resources');
+  await act(async () => button('Stale Resources').click());
+  expect(container.textContent).toContain('Azure evidence unavailable');
+  expect(container.textContent).toContain('No service-principal credentials were provided.');
+  expect(listBudgets).not.toHaveBeenCalled();
 });
 
-it('reports an ignored end date and switches to editing rather than offering to recreate the saved budget', async () => {
-  const saved = { subscriptionId: 'sub-1', name: 'Demo', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-10-01', periodEnd: '2036-10-01T00:00:00Z', currentSpend: null, forecastSpend: null };
-  vi.mocked(createBudget).mockResolvedValue(saved);
-  await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="ignored-end-date" />));
-  await act(async () => button('Budgets').click());
-  for (const [label, value] of [['Budget name', 'Demo'], ['Budget amount', '100'], ['Budget start date', '2026-10-01'], ['Budget end date', '2026-12-01']]) {
-    const input = container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-  }
-  await act(async () => container.querySelector('form.budget-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain('was saved, but the requested end date 2026-12-01 was not applied');
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain('2036-10-01');
-  expect(container.querySelector<HTMLInputElement>('[aria-label="Budget end date"]')?.value).toBe('2026-12-01');
-  expect(button('Save changes')).toBeDefined();
-  expect(button('Add budget')).toBeUndefined();
-  expect(container.querySelector<HTMLInputElement>('[aria-label="Budget name"]')?.disabled).toBe(true);
-});
+
+
+
+
+
 
 it('shows the actual budget expiry date without timezone shifts or invented dates', async () => {
   await act(async () => root.render(<BudgetExpiry periodEnd="2027-03-31T00:00:00Z" />));
@@ -168,34 +88,7 @@ it('shows the actual budget expiry date without timezone shifts or invented date
   expect(container.textContent).toBe('Unavailable');
 });
 
-it('flags the inclusive 30-day expiry window on the Budgets tab, including today and expired budgets', async () => {
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-10-02T10:59:59Z'));
-  try {
-    const budget = { subscriptionId: 'sub-1', category: 'Cost', amount: 100, currency: 'USD', timeGrain: 'Monthly', periodStart: '2026-01-01', currentSpend: 10, forecastSpend: 20 };
-    vi.mocked(listBudgets).mockResolvedValue([
-      { ...budget, name: 'Thirty days', periodEnd: '2026-11-01T00:00:00Z' },
-      { ...budget, name: 'Thirty-one days', periodEnd: '2026-11-02' },
-      { ...budget, name: 'Today', periodEnd: '2026-10-02' },
-      { ...budget, name: 'Past', periodEnd: '2026-10-01' },
-      { ...budget, name: 'No end', periodEnd: '' },
-    ]);
-    await act(async () => root.render(<ReportView report={reportFixture} narration={null} snapshotId="expiry-report" />));
-    expect(container.querySelector('.budget-expiry-warning')).toBeNull();
-    await act(async () => button('Budgets').click());
-    const rows = [...container.querySelectorAll('.budget-table tbody tr')];
-    const expiry = (name: string) => rows.find((row) => row.firstElementChild?.textContent === name)?.querySelector('.budget-expiry');
-    expect(expiry('Thirty days')?.classList.contains('budget-expiry-warning')).toBe(true);
-    expect(expiry('Thirty days')?.textContent).toContain('30 days left');
-    expect(expiry('Thirty-one days')?.classList.contains('budget-expiry-warning')).toBe(false);
-    expect(expiry('Today')?.textContent).toContain('Expires today');
-    expect(expiry('Past')?.textContent).toContain('Expired');
-    expect(expiry('No end')?.textContent).toBe('Open-ended');
-    expect(expiry('No end')?.classList.contains('budget-expiry-warning')).toBe(false);
-  } finally {
-    vi.useRealTimers();
-  }
-});
+
 
 it('shows point data on hover and keyboard focus while preserving day drilldown', async () => {
   const costWindow = { startDate: '2026-09-01', endDate: '2026-09-07' };
@@ -412,82 +305,15 @@ it('searches and filters budgets, and flags forecast overruns that are still wit
   expect(container.textContent).toContain('No budgets match this search or status.');
 });
 
-it('retries a failed budget read without claiming the scope is empty or losing a form draft', async () => {
-  vi.mocked(listBudgets).mockRejectedValue(new Error('Synthetic lookup denied.'));
-  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" />));
-  await act(async () => button('Budgets').click());
-  expect(container.textContent).toContain('Budget lookup unavailable');
-  expect(container.textContent).not.toContain('No budgets in this scope');
-  const name = container.querySelector<HTMLInputElement>('[aria-label="Budget name"]')!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, 'Keep this draft');
-    name.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  vi.mocked(listBudgets).mockResolvedValue([financeBudget]);
-  await act(async () => button('Retry budget lookup').click());
-  expect(container.textContent).not.toContain('Budget lookup unavailable');
-  expect(container.querySelector('.budget-management-scroll')?.textContent).toContain('Finance app budget');
-  expect(name.value).toBe('Keep this draft');
-  expect(createBudget).not.toHaveBeenCalled();
-  expect(updateBudget).not.toHaveBeenCalled();
-});
 
-it('bounds budget loading and ignores a late response after timeout', async () => {
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-  let finish!: (budgets: Budget[]) => void;
-  const pending = new Promise<Budget[]>(resolve => { finish = resolve; });
-  vi.mocked(listBudgets).mockReturnValue(pending);
-  try {
-    await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" />));
-    await act(async () => button('Budgets').click());
-    expect(container.textContent).toContain('Checking budgets');
-    await act(async () => vi.advanceTimersByTime(15000));
-    expect(container.textContent).toContain('Azure budget lookup timed out.');
-    expect(container.textContent).not.toContain('No budgets in this scope');
-    await act(async () => finish([financeBudget]));
-    expect(container.querySelector('.budget-management-scroll')).toBeNull();
-    expect(container.textContent).toContain('Budget lookup unavailable');
-  } finally {
-    vi.useRealTimers();
-  }
-});
 
-it('keeps budget write errors visible when only the list is refreshed', async () => {
-  vi.mocked(createBudget).mockRejectedValue(new Error('Synthetic save failed.'));
-  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" />));
-  await act(async () => button('Budgets').click());
-  await act(async () => container.querySelector('.budget-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  expect(container.textContent).toContain('Synthetic save failed.');
-  await act(async () => button('Refresh budgets').click());
-  expect(container.textContent).toContain('Synthetic save failed.');
-  expect(createBudget).toHaveBeenCalledOnce();
-});
 
-it('starts an empty-scope budget by focusing the form rather than creating anything', async () => {
-  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" />));
-  await act(async () => button('Budgets').click());
-  await act(async () => button('Start a budget').click());
-  await act(async () => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
-  expect(document.activeElement?.getAttribute('aria-label')).toBe('Budget name');
-  expect(createBudget).not.toHaveBeenCalled();
-});
 
-it('labels managed-budget card fields and retains a single accessible daily-spend control', async () => {
-  vi.mocked(listBudgets).mockResolvedValue([financeBudget]);
-  await act(async () => root.render(<ReportView report={detailReportFixture} narration={null} snapshotId="visual-report-1" />));
-  await act(async () => button('Budgets').click());
-  const table = container.querySelector('.budget-management-scroll .mobile-card-table')!;
-  expect(table.getAttribute('role')).toBe('table');
-  const headers = [...table.querySelectorAll('thead th')].map(header => header.textContent);
-  expect([...table.querySelectorAll('tbody td[data-label]')].map(cell => cell.getAttribute('data-label'))).toEqual(headers);
-  const daily = table.querySelector<HTMLButtonElement>('[aria-label="Daily spend for Finance app budget"]')!;
-  expect(table.querySelectorAll('[aria-label="Edit budget Finance app budget"]')).toHaveLength(1);
-  await act(async () => daily.click());
-  expect(table.querySelector('.mobile-card-detail')?.getAttribute('role')).toBe('row');
-  expect(table.querySelector('.mobile-card-detail td')?.getAttribute('role')).toBe('cell');
-  expect(createBudget).not.toHaveBeenCalled();
-  expect(updateBudget).not.toHaveBeenCalled();
-});
+
+
+
+
+
 
 it('offers a read-only budget context retry even when the section heading is hidden', async () => {
   const refresh = vi.fn();
@@ -979,75 +805,13 @@ it('drops the chosen day when the application changes, so one application\'s day
   expect(dayContributors()!.textContent).toContain('shared-disk');
   expect(dayContributors()!.textContent).not.toContain('finance-vm');
 });
-it('lists only budgets whose own filter names the chosen key and value', async () => {
-  const contactBudget = { ...financeBudget, name: 'Contact budget', filter: { tags: { name: 'contact', operator: 'In', values: ['Finance'] } } };
-  await renderTagBudgets([financeBudget, subscriptionWideBudget, foreignSubscriptionBudget, contactBudget]);
-  // A key alone shows no budget at all.
-  expect(container.querySelector('.tag-cost-budgets')).toBeNull();
 
-  await chooseTagOption('Tag value', 'Finance');
-  const budgets = container.querySelector('.tag-cost-budgets')!;
-  expect(budgets.textContent).toContain('Budget for application = Finance');
-  expect(budgets.textContent).toContain('Finance app budget');
-  expect(budgets.textContent).toContain('Expiry: Open-ended');
-  // Same-named budgets in different subscriptions are told apart by subscription.
-  expect(budgets.textContent).toContain('Demo subscription');
-  // Budgets that merely contain the spend are not this application's budget.
-  expect(budgets.textContent).not.toContain('Subscription budget');
-  expect(budgets.textContent).not.toContain('Unrelated subscription budget');
-  // Same value, different key: not a match.
-  expect(budgets.textContent).not.toContain('Contact budget');
-  expect(budgets.querySelector('.wider-budgets')).toBeNull();
 
-  // No budget names Platform, so none is shown - not a stand-in.
-  await chooseTagOption('Tag value', 'Platform');
-  expect(container.querySelector('.tag-selection')).not.toBeNull();
-  expect(container.querySelector('.tag-cost-budgets')).toBeNull();
-});
 
-it('shows one application graph when a budget tracks it, with the budget share on that graph', async () => {
-  await renderTagBudgets([financeBudget]);
-  await chooseTagOption('Tag value', 'Finance');
-  const selection = container.querySelector('.tag-selection')!;
-  // One chart only: the budget does not add a second graph.
-  expect(selection.querySelectorAll('svg')).toHaveLength(1);
-  expect(selection.querySelector('.budget-daily-chart')).toBeNull();
-  expect(selection.querySelector('.cost-chart-reference')).not.toBeNull();
-  expect(selection.textContent).toContain('Finance app budget: even daily share of USD');
-  // The budget's figures stay, as text on its card.
-  const card = selection.querySelector('.tag-budget-card')!;
-  expect(card.textContent).toContain('Finance app budget');
-  expect(card.textContent).toContain('covered days for application = Finance');
-  // Day drilldown comes from the one graph and stays inside the application.
-  await act(async () => dayBar('2026-09-03')!.click());
-  expect(dayContributors()!.textContent).toContain('finance-vm');
-  expect(dayContributors()!.textContent).not.toContain('shared-disk');
-});
 
-it('draws no budget line when several budgets track the application, but keeps one graph', async () => {
-  const second = { ...financeBudget, name: 'Finance stretch budget', amount: 2000 };
-  await renderTagBudgets([financeBudget, second]);
-  await chooseTagOption('Tag value', 'Finance');
-  const selection = container.querySelector('.tag-selection')!;
-  expect(selection.querySelectorAll('svg')).toHaveLength(1);
-  expect(selection.querySelector('.cost-chart-reference')).toBeNull();
-  expect(selection.querySelectorAll('.tag-budget-card')).toHaveLength(2);
-  expect(selection.textContent).toContain('2 budgets for application = Finance');
-  expect(selection.querySelector('.chart-context-note')?.textContent).toContain('No single budget line is shown');
-});
 
-it('matches a budget on a hyphenated tag key shown in display form', async () => {
-  const report = { ...applicationTagReport, costDetails: { ...applicationTagReport.costDetails!, rows: applicationTagReport.costDetails!.rows.map((row) => ({ ...row, tags: { 'azd-env-name': row.tags.application } })) },
-    tagCosts: { ...applicationTagReport.tagCosts, dimensions: [{ ...applicationTagReport.tagCosts.dimensions[0], tagKey: 'Azd Env Name' }] } };
-  vi.mocked(listBudgets).mockResolvedValue([{ ...financeBudget, filter: { tags: { name: 'azd-env-name', operator: 'In', values: ['Finance'] } } }] as never);
-  await act(async () => root.render(<ReportView report={report} narration={null} snapshotId="visual-report-1" costWindow={{ startDate: '2026-09-01', endDate: '2026-09-07' }} onCostWindowChange={() => {}} />));
-  await act(async () => button('Cost by Tags/Application').click());
-  await chooseTagOption('Tag key', 'Azd Env Name');
-  await chooseTagOption('Tag value', 'Finance');
-  // "Azd Env Name" in the report is `azd-env-name` on the rows and in the budget.
-  expect(container.querySelector('.tag-selection')!.textContent).toContain('$1,632.00 in the selected period');
-  expect(container.querySelector('.tag-cost-budgets')!.textContent).toContain('Finance app budget');
-});
+
+
 
 it('ignores a tag value inherited from a different tag key when scoping the selection', async () => {
   vi.mocked(listBudgets).mockResolvedValue([financeBudget]);

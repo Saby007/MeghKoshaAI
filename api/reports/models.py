@@ -379,6 +379,19 @@ class ReportMetadata(BaseModel):
     stale_days: int = Field(default=90, alias="staleDays")
     protected_tag_keys: list[str] = Field(default_factory=list, alias="protectedTagKeys")
     excluded_protected_resources: int = Field(default=0, alias="excludedProtectedResources")
+    enrichment_status: Literal["not_configured", "complete", "partial", "failed"] = Field(
+        default="complete", alias="enrichmentStatus",
+    )
+    enrichment_message: str = Field(default="", alias="enrichmentMessage")
+    upload_start: str = Field(default="", alias="uploadStart")
+    upload_end: str = Field(default="", alias="uploadEnd")
+    assessment_month_partial: bool = Field(default=False, alias="assessmentMonthPartial")
+    dataset_id: str = Field(default="", alias="datasetId")
+    billed_resource_count: int = Field(default=0, alias="billedResourceCount")
+
+    @property
+    def has_live_azure_evidence(self) -> bool:
+        return self.enrichment_status not in {"not_configured", "failed"}
 
 
 class DataCompleteness(BaseModel):

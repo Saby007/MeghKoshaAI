@@ -38,7 +38,8 @@ def _report():
         monthly_spend=cost,
     ) for index, cost in enumerate(resource_costs, start=1)]
     return SimpleNamespace(
-        report_metadata=SimpleNamespace(currency="USD", period="2026-07", cost_basis="FOCUS EffectiveCost"),
+        report_metadata=SimpleNamespace(currency="USD", period="2026-07", cost_basis="FOCUS EffectiveCost",
+                                        has_live_azure_evidence=True),
         spend_history=SimpleNamespace(months=months, status_message="7 complete months available."),
         advisor_score=SimpleNamespace(cost_score=82.0, score=80.0, monthly_change=2.0, status="Available"),
         subscription_breakdown=[SimpleNamespace(

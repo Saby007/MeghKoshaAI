@@ -15,7 +15,7 @@ from azure.core.exceptions import ClientAuthenticationError
 from azure.identity.aio import ManagedIdentityCredential
 from fastapi import HTTPException
 
-from services import access_control
+from services import manual_access as access_control, target_connection, workspace
 from services.auth import ClientPrincipal
 from services.entra_tokens import configured_uuid
 
@@ -137,23 +137,17 @@ async def _list_subscriptions(client: httpx.AsyncClient, token: str, tenant_id: 
 
 @asynccontextmanager
 async def _managed_identity_client(principal: ClientPrincipal, timeout_seconds: int = DISCOVERY_TIMEOUT_SECONDS):
-    try:
-        tenant_id = configured_uuid(os.environ.get("AZURE_TENANT_ID"))
-        managed_identity_client_id = configured_uuid(os.environ.get("AZURE_CLIENT_ID"))
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=503, detail="The backend runtime managed identity is not configured.") from None
-    if principal.tenant_id != tenant_id:
-        raise HTTPException(status_code=403, detail="This account is not authorized for this deployment.")
+    if principal.tenant_id != workspace.namespace():
+        raise HTTPException(status_code=403, detail="This request belongs to a different report workspace.")
     try:
         async with asyncio.timeout(timeout_seconds):
-            async with ManagedIdentityCredential(client_id=managed_identity_client_id) as credential:
-                token = await credential.get_token(ARM_SCOPE)
-                async with httpx.AsyncClient(base_url=ARM_BASE, timeout=10, follow_redirects=False) as client:
-                    yield client, token.token
+            token = await target_connection.access_token()
+            async with httpx.AsyncClient(base_url=ARM_BASE, timeout=10, follow_redirects=False) as client:
+                yield client, token
     except HTTPException:
         raise
     except ClientAuthenticationError:
-        raise _identity_unavailable() from None
+        raise HTTPException(503, "The configured Reader service principal could not authenticate.") from None
     except (httpx.HTTPError, TimeoutError):
         raise _unavailable() from None
     except (ValueError, TypeError, RecursionError):

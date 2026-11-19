@@ -25,6 +25,6 @@ export function CostRangeControls({ dates, value, onChange, month, monthToDate }
     </div>
     <label className="billing-filter"><span>From (UTC)</span><input type="date" aria-label="Cost window start" value={value.startDate} max={value.endDate || latest} disabled={!dates.length}     onChange={(event) => onChange({ startDate: event.target.value, endDate: value.endDate })} /></label>
         <label className="billing-filter"><span>To (UTC)</span><input type="date" aria-label="Cost window end" value={value.endDate} min={value.startDate} max={latest} disabled={!dates.length} onChange={(event) => onChange({ startDate: value.startDate, endDate: event.target.value })} /></label>
-    {dates.length > 0 && !count && <p role="alert">Select a valid date range of at most 366 days.</p>}
+    {dates.length > 0 && !count && <p role="alert">Select an ordered date range within the daily projection response budget.</p>}
   </div>;
 }

@@ -12,6 +12,8 @@ import os
 import re
 import time
 import uuid
+import zlib
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from dataclasses import dataclass, field
 from contextlib import nullcontext
@@ -212,6 +214,11 @@ def _is_extended_support_charge(row: dict[str, str]) -> bool:
 
 
 def _subscription_id(value: str) -> str:
+    if not value.strip().startswith("/"):
+        try:
+            return normalize_subscription_id(value.strip())
+        except ValueError:
+            raise FocusCostDataError(f"Invalid FOCUS SubAccountId {value!r}") from None
     match = re.fullmatch(r"/subscriptions/([^/]+)", value.strip(), flags=re.IGNORECASE)
     if not match:
         raise FocusCostDataError(f"Invalid FOCUS SubAccountId {value!r}")
@@ -255,7 +262,7 @@ def _period(blob_names: list[str]) -> tuple[str, str, str]:
     return start[:7], start, end
 
 
-def _stream_csv(content: Path, blob_name: str):
+def _stream_csv(content: Path, blob_name: str, *, account_input: bool = True):
     with content.open("rb") as raw:
         compressed = raw.read(2) == b"\x1f\x8b"
         raw.seek(0)
@@ -269,22 +276,24 @@ def _stream_csv(content: Path, blob_name: str):
                             return
                         if len(line) > 1048576:
                             raise FocusCostDataError(f"FocusCost CSV line is too large: {blob_name}")
-                        consume("expanded_bytes", len(line.encode("utf-8")))
+                        if account_input:
+                            consume("expanded_bytes", len(line.encode("utf-8")))
                         yield line
                 reader = csv.DictReader(lines())
                 missing = _REQUIRED_COLUMNS - set(reader.fieldnames or [])
                 if missing:
                     raise FocusCostDataError(f"FocusCost file is missing columns: {', '.join(sorted(missing))}")
                 for row in reader:
-                    consume("csv_rows")
+                    if account_input:
+                        consume("csv_rows")
                     yield row
-        except (gzip.BadGzipFile, UnicodeDecodeError, csv.Error) as error:
+        except (gzip.BadGzipFile, EOFError, zlib.error, UnicodeDecodeError, csv.Error) as error:
             raise FocusCostDataError(f"Invalid FocusCost CSV file {blob_name}") from error
 
 
-def _csv_reader(content: bytes | Path, blob_name: str):
+def _csv_reader(content: bytes | Path, blob_name: str, *, account_input: bool = True):
     if isinstance(content, Path):
-        return _stream_csv(content, blob_name)
+        return _stream_csv(content, blob_name, account_input=account_input)
     if content[:2] == b"\x1f\x8b":
         try:
             content = gzip.decompress(content)
@@ -325,12 +334,15 @@ class _TagRows:
 
 
 def build_focus_cost_data(
-    files: dict[str, bytes | Path],
+    files: Mapping[str, bytes | Path],
     requested_subscription_ids: list[str],
     *,
     data_version: str = FOCUS_DATA_VERSION,
     generated_at: str = "",
     resource_group_tags: dict[tuple[str, str], dict[str, str]] | None = None,
+    period_bounds: tuple[str, str] | None = None,
+    row_filter: Callable[[dict[str, str]], bool] | None = None,
+    account_input: bool = True,
 ) -> FocusCostData:
     budget = active_budget.get()
     context = TemporaryFile(mode="w+t", encoding="utf-8", dir=budget.spool_directory) if budget else nullcontext(None)
@@ -338,17 +350,21 @@ def build_focus_cost_data(
         return _build_focus_cost_data(
             files, requested_subscription_ids, _TagRows(stream), data_version=data_version,
             generated_at=generated_at, resource_group_tags=resource_group_tags,
+            period_bounds=period_bounds, row_filter=row_filter, account_input=account_input,
         )
 
 
 def _build_focus_cost_data(
-    files: dict[str, bytes | Path],
+    files: Mapping[str, bytes | Path],
     requested_subscription_ids: list[str],
     tag_rows: _TagRows,
     *,
     data_version: str,
     generated_at: str,
     resource_group_tags: dict[tuple[str, str], dict[str, str]] | None,
+    period_bounds: tuple[str, str] | None = None,
+    row_filter: Callable[[dict[str, str]], bool] | None = None,
+    account_input: bool = True,
 ) -> FocusCostData:
     if data_version != FOCUS_DATA_VERSION:
         raise FocusCostDataError(f"Unsupported FOCUS data version {data_version!r}")
@@ -356,7 +372,13 @@ def _build_focus_cost_data(
         raise FocusCostDataError("No FocusCost files are available")
 
     requested = [normalize_subscription_id(value) for value in requested_subscription_ids]
-    period, period_start, period_end = _period(list(files))
+    if period_bounds is None:
+        period, period_start, period_end = _period(list(files))
+    else:
+        period_start, period_end = period_bounds
+        if date.fromisoformat(period_start) > date.fromisoformat(period_end) or period_start[:7] != period_end[:7]:
+            raise FocusCostDataError("The monthly assessment basis has invalid bounds.")
+        period = period_start[:7]
     currencies: set[str] = set()
     pricing_currencies: set[str] = set()
     subscription_names: dict[str, str] = {}
@@ -391,7 +413,9 @@ def _build_focus_cost_data(
     }
 
     for blob_name, content in sorted(files.items()):
-        for row in _csv_reader(content, blob_name):
+        for row in _csv_reader(content, blob_name, account_input=account_input):
+            if row_filter is not None and not row_filter(row):
+                continue
             row_count += 1
             subscription_id = _subscription_id(row["SubAccountId"])
             if subscription_id not in requested:

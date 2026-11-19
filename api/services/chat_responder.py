@@ -194,6 +194,11 @@ def answer_question(question: str, report: ChatReport) -> ChatAnswer:
         deterministic += " " + report.coverage_note
 
     if "unattached" in normalized and "disk" in normalized:
+        if not report.report_metadata.has_live_azure_evidence:
+            return ChatAnswer(
+                intent="help", answer=report.report_metadata.enrichment_message or "Azure resource evidence was not collected. Configure an optional Reader service principal in Admin.",
+                dataAsOf=data_as_of, disclaimer="Uploaded financial evidence remains available; missing Azure evidence is not zero.",
+            )
         category = next((item for item in report.tier_a_categories if item.category == "unattached_disks"), None)
         lines = category.lines if category else []
         resources = [
@@ -301,4 +306,6 @@ async def respond_to_question(
     history: list[ChatTurn] | None = None,
 ) -> ChatAnswer:
     verified = answer_question(question, report)
+    if verified.intent == "help" and not report.report_metadata.has_live_azure_evidence:
+        return verified
     return await narrate_with_model_router(question, report, verified, history or [])
