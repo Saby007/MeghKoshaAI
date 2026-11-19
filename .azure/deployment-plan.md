@@ -1,6 +1,6 @@
 # MeghKoshaAI manual FOCUS and service-principal implementation plan
 
-Status: Ready for Validation
+Status: Implementation complete - locally verified; operator Azure preflight pending
 
 ## Branch and scope
 
@@ -346,7 +346,7 @@ checks are deliberately distinguished.
 | P14 | Run UI tests, production build, and browser workflow validation | Complete: 249 unit tests, production build, actual upload/replacement browser flow and mobile check |
 | P15 | Compile IaC and validate PowerShell/deployment preview behavior | Passed local compile and complete offline rollout/retry tests |
 | P16 | Record representative scale results and unverified customer-load limits | Complete; measured synthetic SQL scope and limitations below |
-| P17 | Commit/publish the new branch and prepare deployment handoff | Pending |
+| P17 | Commit/publish the new branch and prepare deployment handoff | Complete: branch published and remote implementation commit verified |
 
 Dependencies: P4/P5 before P6/P7; P6/P7 before P8; P8 before P9; P10
 coordinates with P9; P11 depends on the implemented configuration contracts;
@@ -470,3 +470,15 @@ ingestion/production-scale certification.
   15 seconds to 60 seconds (5-300 supported), and nginx's read deadline to
   120 seconds, based on those measured cold-query times. Cloud-native PostgreSQL
   performance and real customer file volume still require deployment acceptance.
+- Final combined backend/parser/export/chat/real-SQL/deadline suite: 64 passed;
+  dependency consistency check passed. Full frontend suite: 249 passed; final
+  production build passed. Existing openpyxl sheet-name warnings remain unchanged.
+- Implementation commit `76861b7718775bd5ce892edbfd71e6f00ec06de5` was published
+  to `Saby007/MeghKoshaAI`, branch `feature/manual-focus-service-principal`,
+  and verified against the remote ref.
+- Deployment handoff: [current guide](../docs/manual-focus-deployment.md).
+  Use a new environment; operator cloud validate/what-if/policy/quota/private
+  dependency checks remain required. No Azure resource deployment was executed.
+- Browser helpers were stopped and their listener ports verified closed.
+  The task-owned PostgreSQL cluster was shut down cleanly and its port verified
+  closed. No development/test service is intentionally left running.
