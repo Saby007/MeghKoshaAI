@@ -482,3 +482,9 @@ ingestion/production-scale certification.
 - Browser helpers were stopped and their listener ports verified closed.
   The task-owned PostgreSQL cluster was shut down cleanly and its port verified
   closed. No development/test service is intentionally left running.
+- First real deployment attempt (23 Nov 2026) failed at `azd provision --preview`:
+  `@allowed([false])` on two Bicep bool parameters made them literal types that
+  `main.bicepparam` could not satisfy (BCP033). Earlier validation compiled
+  `main.bicep` but not the parameter file AZD compiles. Removed the decorators, made the
+  retired scheduler constant-off in Bicep, and added `scripts/tests/test-bicepparam.ps1`
+  to compile `main.bicepparam` for foundation-only and full-release inputs.

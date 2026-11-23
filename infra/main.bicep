@@ -93,7 +93,7 @@ param minimumReplicas int = 1
 param logRetentionDays int = 30
 @allowed(['Standard_LRS', 'Standard_ZRS'])
 param storageSku string = 'Standard_LRS'
-@allowed([false])
+@description('Retired and ignored: manual FOCUS uploads never use a native-export storage ingress exception.')
 param allowNativeExportTrustedServices bool = false
 @description('Policy-restricted subscriptions: put the container registry behind a private endpoint and deny public network access. Requires the Premium registry tier and stops azd remote builds from reaching the registry.')
 param privateRegistry bool = false
@@ -123,7 +123,6 @@ param closedMonthRetentionDays int = 214
 @maxValue(6)
 param exportParallelMonths int = 1
 @description('Retired: manual FOCUS mode never deploys the native export scheduler.')
-@allowed([false])
 param enableProcessor bool = false
 @description('Only set true when redeploying the same environment name after azd down without --purge left a soft-deleted AI Foundry account behind.')
 param restoreAiAccount bool = false
@@ -152,7 +151,8 @@ var scalableEnabled = assessmentMode == 'postgres'
 var privateRegistryEnabled = privateRegistry || scalableEnabled
 var aiEnabled = profile == 'ai'
 var deployApplications = !empty(apiImage) && !empty(webImage) && !(scalableEnabled && assessmentFoundationOnly)
-var deployProcessor = dataEnabled && enableProcessor && !empty(processorImage)
+// The native-export scheduler is retired; enableProcessor is intentionally ignored.
+var deployProcessor = false
 
 resource group 'Microsoft.Resources/resourceGroups@2024-03-01' = {
   name: empty(resourceGroupName) ? 'rg-${environmentName}' : resourceGroupName

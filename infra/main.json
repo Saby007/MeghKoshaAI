@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "18380716921726057143"
+      "templateHash": "3023253150255085300"
     }
   },
   "definitions": {
@@ -342,9 +342,9 @@
     "allowNativeExportTrustedServices": {
       "type": "bool",
       "defaultValue": false,
-      "allowedValues": [
-        false
-      ]
+      "metadata": {
+        "description": "Retired and ignored: manual FOCUS uploads never use a native-export storage ingress exception."
+      }
     },
     "privateRegistry": {
       "type": "bool",
@@ -426,9 +426,6 @@
     "enableProcessor": {
       "type": "bool",
       "defaultValue": false,
-      "allowedValues": [
-        false
-      ],
       "metadata": {
         "description": "Retired: manual FOCUS mode never deploys the native export scheduler."
       }
@@ -504,7 +501,7 @@
     "privateRegistryEnabled": "[or(parameters('privateRegistry'), variables('scalableEnabled'))]",
     "aiEnabled": "[equals(parameters('profile'), 'ai')]",
     "deployApplications": "[and(and(not(empty(parameters('apiImage'))), not(empty(parameters('webImage')))), not(and(variables('scalableEnabled'), parameters('assessmentFoundationOnly'))))]",
-    "deployProcessor": "[and(and(variables('dataEnabled'), parameters('enableProcessor')), not(empty(parameters('processorImage'))))]",
+    "deployProcessor": false,
     "resourceToken": "[toLower(uniqueString(subscription().id, parameters('environmentName'), if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))))]",
     "exportName": "[format('focus-closed-month-{0}', variables('resourceToken'))]",
     "dailyExportName": "[format('focus-daily-{0}', variables('resourceToken'))]",
