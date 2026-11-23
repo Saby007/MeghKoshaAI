@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.43.8.12551",
-      "templateHash": "3023253150255085300"
+      "templateHash": "1929764338975951593"
     }
   },
   "definitions": {
@@ -3400,6 +3400,75 @@
         "workspaceVault"
       ]
     },
+    "registryPull": {
+      "condition": "[variables('scalableEnabled')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "app-registry-pull",
+      "resourceGroup": "[if(empty(parameters('resourceGroupName')), format('rg-{0}', parameters('environmentName')), parameters('resourceGroupName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "registryName": {
+            "value": "[reference('core').outputs.registryName.value]"
+          },
+          "pullers": {
+            "value": [
+              "[reference('data').outputs.processorIdentity.value]",
+              "[reference('postgres').outputs.bootstrapIdentity.value]"
+            ]
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.43.8.12551",
+              "templateHash": "2517156994440799680"
+            }
+          },
+          "parameters": {
+            "registryName": {
+              "type": "string"
+            },
+            "pullers": {
+              "type": "array",
+              "metadata": {
+                "description": "Identities that pull images from the private registry through managed identity."
+              }
+            }
+          },
+          "resources": [
+            {
+              "copy": {
+                "name": "pulls",
+                "count": "[length(parameters('pullers'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('pullers')[copyIndex()].resourceId, 'acrpull')]",
+              "properties": {
+                "principalId": "[parameters('pullers')[copyIndex()].principalId]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "core",
+        "data",
+        "group",
+        "postgres"
+      ]
+    },
     "assessmentWorker": {
       "condition": "[and(variables('scalableEnabled'), not(empty(variables('assessmentRuntimeImage'))))]",
       "type": "Microsoft.Resources/deployments",
@@ -3448,9 +3517,6 @@
           "enableWorker": {
             "value": "[variables('deployApplications')]"
           },
-          "grantWorkerRegistryPull": {
-            "value": "[not(variables('deployProcessor'))]"
-          },
           "workerCpu": {
             "value": "[parameters('assessmentWorkerCpu')]"
           },
@@ -3468,7 +3534,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.43.8.12551",
-              "templateHash": "8257846250551419741"
+              "templateHash": "18162357587609389965"
             }
           },
           "parameters": {
@@ -3511,10 +3577,6 @@
             "enableWorker": {
               "type": "bool"
             },
-            "grantWorkerRegistryPull": {
-              "type": "bool",
-              "defaultValue": true
-            },
             "workerCpu": {
               "type": "string",
               "defaultValue": "4.0",
@@ -3532,29 +3594,6 @@
             }
           },
           "resources": [
-            {
-              "condition": "[parameters('grantWorkerRegistryPull')]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName'))]",
-              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('workerIdentity').resourceId, 'acrpull')]",
-              "properties": {
-                "principalId": "[parameters('workerIdentity').principalId]",
-                "principalType": "ServicePrincipal",
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
-              }
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName'))]",
-              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('bootstrapIdentity').resourceId, 'acrpull')]",
-              "properties": {
-                "principalId": "[parameters('bootstrapIdentity').principalId]",
-                "principalType": "ServicePrincipal",
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
-              }
-            },
             {
               "condition": "[parameters('enableWorker')]",
               "type": "Microsoft.App/containerApps",
@@ -3602,10 +3641,7 @@
                     "maxReplicas": "[parameters('workerReplicas')]"
                   }
                 }
-              },
-              "dependsOn": [
-                "[extensionResourceId(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('workerIdentity').resourceId, 'acrpull'))]"
-              ]
+              }
             },
             {
               "type": "Microsoft.App/jobs",
@@ -3684,10 +3720,7 @@
                     }
                   ]
                 }
-              },
-              "dependsOn": [
-                "[extensionResourceId(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('registryName')), parameters('bootstrapIdentity').resourceId, 'acrpull'))]"
-              ]
+              }
             }
           ],
           "outputs": {
@@ -3707,6 +3740,7 @@
         "data",
         "group",
         "postgres",
+        "registryPull",
         "workspaceVault"
       ]
     }

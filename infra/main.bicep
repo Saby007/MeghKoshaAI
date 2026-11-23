@@ -384,9 +384,22 @@ module processor './modules/processor.bicep' = if (deployProcessor) {
 
 var assessmentRuntimeImage = empty(assessmentImage) ? apiImage : assessmentImage
 
+module registryPull './modules/registry-pull.bicep' = if (scalableEnabled) {
+  name: 'app-registry-pull'
+  scope: group
+  params: {
+    registryName: core.outputs.registryName
+    pullers: [
+      data!.outputs.processorIdentity
+      postgres!.outputs.bootstrapIdentity
+    ]
+  }
+}
+
 module assessmentWorker './modules/assessment-worker.bicep' = if (scalableEnabled && !empty(assessmentRuntimeImage)) {
   name: 'app-assessment-worker'
   scope: group
+  dependsOn: [registryPull]
   params: {
     resourceToken: resourceToken
     location: location
@@ -400,7 +413,6 @@ module assessmentWorker './modules/assessment-worker.bicep' = if (scalableEnable
     databaseHost: postgres!.outputs.host
     databaseName: postgres!.outputs.databaseName
     enableWorker: deployApplications
-    grantWorkerRegistryPull: !deployProcessor
     workerCpu: assessmentWorkerCpu
     workerReplicas: assessmentWorkerReplicas
     workerEnvironment: concat(assessmentEnvironment, [

@@ -11,7 +11,6 @@ param databaseHost string
 param databaseName string
 param workerEnvironment array
 param enableWorker bool
-param grantWorkerRegistryPull bool = true
 @allowed(['1.0', '2.0', '4.0'])
 param workerCpu string = '4.0'
 @minValue(1)
@@ -20,26 +19,6 @@ param workerReplicas int = 1
 
 resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
   name: registryName
-}
-
-resource workerPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (grantWorkerRegistryPull) {
-  name: guid(registry.id, workerIdentity.resourceId, 'acrpull')
-  scope: registry
-  properties: {
-    principalId: workerIdentity.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-  }
-}
-
-resource bootstrapPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(registry.id, bootstrapIdentity.resourceId, 'acrpull')
-  scope: registry
-  properties: {
-    principalId: bootstrapIdentity.principalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-  }
 }
 
 resource worker 'Microsoft.App/containerApps@2024-03-01' = if (enableWorker) {
@@ -77,7 +56,6 @@ resource worker 'Microsoft.App/containerApps@2024-03-01' = if (enableWorker) {
       scale: { minReplicas: workerReplicas, maxReplicas: workerReplicas }
     }
   }
-  dependsOn: [workerPull]
 }
 
 resource bootstrap 'Microsoft.App/jobs@2024-03-01' = {
@@ -116,7 +94,6 @@ resource bootstrap 'Microsoft.App/jobs@2024-03-01' = {
       }]
     }
   }
-  dependsOn: [bootstrapPull]
 }
 
 output workerName string = enableWorker ? worker!.name : ''

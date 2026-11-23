@@ -488,3 +488,10 @@ ingestion/production-scale certification.
   `main.bicep` but not the parameter file AZD compiles. Removed the decorators, made the
   retired scheduler constant-off in Bicep, and added `scripts/tests/test-bicepparam.ps1`
   to compile `main.bicepparam` for foundation-only and full-release inputs.
+- Second real attempt: Foundation recovered via the built-in retry, Build passed,
+  Bootstrap failed with `unable to pull image using Managed identity`. The AcrPull
+  assignment was created in the same deployment seconds before the Container App Job,
+  which validates the pull at creation. AcrPull for the worker and bootstrap identities
+  now deploys in a new `registry-pull` module during Foundation (same assignment names,
+  so existing environments reuse them), the worker module depends on it, and the
+  pull-validation error is retried after the settlement wait. Retry test added.

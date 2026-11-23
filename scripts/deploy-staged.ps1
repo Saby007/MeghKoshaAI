@@ -293,7 +293,7 @@ function Provision {
         $result = Invoke-ProvisionCommand
         if ($result.exitCode -eq 0) { Reload; return }
         $permanent = 'RequestDisallowedByPolicy|QuotaExceeded|QuotaLimitReached|AuthorizationFailed|AuthenticationFailed|InvalidAuthenticationToken|Forbidden|SkuNotAvailable|LocationNotAvailable|InvalidTemplate|MissingSubscriptionRegistration|NoRegisteredProviderFound'
-        $transient = 'AadAuthOperationCannotBePerformedWhenServerIsNotAccessible|AccountProvisioningStateInvalid|DeploymentActive|Another operation is in progress on the resource [^\r\n]*Microsoft\.CognitiveServices/accounts/'
+        $transient = 'AadAuthOperationCannotBePerformedWhenServerIsNotAccessible|AccountProvisioningStateInvalid|DeploymentActive|Another operation is in progress on the resource [^\r\n]*Microsoft\.CognitiveServices/accounts/|unable to pull image using Managed identity'
         if ($result.output -match $permanent -or $result.output -notmatch $transient) {
             throw "Provisioning failed with a permanent or unsupported error; it was not automatically retried.`n$($result.output)"
         }

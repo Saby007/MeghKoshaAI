@@ -227,6 +227,12 @@ try {
     $checks++
 
     Reset-Case
+    $global:retryState.failures.Enqueue("InvalidParameterValueInContainerTemplate: Field 'template.containers.bootstrap.image' is invalid with details: 'unable to pull image using Managed identity /subscriptions/x/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-db-bootstrap for registry acr.azurecr.io'.")
+    Provision
+    Assert ($global:retryState.provisions -eq 2) 'A role-propagation image-pull refusal was not retried after the settlement wait.'
+    $checks++
+
+    Reset-Case
     $MaxAttempts = 2
     $SettleSeconds = 7
     $global:retryState.failures.Enqueue($postgresFailure)
