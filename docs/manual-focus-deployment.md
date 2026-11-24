@@ -109,7 +109,10 @@ Identity and Permissions are no longer valid stages.
 
 1. Open the reported HTTPS URL; no account or sign-in is required.
 2. In Admin, enter one target subscription UUID and save.
-3. Upload all desired native FOCUS CSV/gzip partitions and generate the dashboard.
+3. Upload all desired native FOCUS 1.2 CSV/gzip partitions and generate the dashboard.
+   Only FOCUS 1.2 is supported: in Cost Management, create the export with dataset
+   version **1.2-preview** (FOCUS 1.0 exports name the pricing-currency column
+   `x_PricingCurrency` and are rejected).
 4. Optionally add the target tenant ID, client ID and secret of a service principal
    the customer has already provisioned with **Reader only**.
 

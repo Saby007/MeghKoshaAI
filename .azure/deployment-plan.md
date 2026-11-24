@@ -501,3 +501,6 @@ ingestion/production-scale certification.
   real files (2,989 rows, 1-23 Nov) parse and replay end to end; regression test added.
   Known: older inherited test files for retired features (auth, schedules, control API)
   still fail and are not part of the focused suite.
+- Scope decision: FOCUS 1.2 only. The x_PricingCurrency (FOCUS 1.0) alias was removed;
+  a 1.0 file is rejected with an actionable message to export dataset version
+  1.2-preview. Admin text, README and deployment guide state the requirement.

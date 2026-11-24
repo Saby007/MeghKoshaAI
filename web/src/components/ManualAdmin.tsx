@@ -147,7 +147,7 @@ export default function ManualAdmin({ onConfigurationChanged, onReady }: {
     </form>
     <section className="manual-card" aria-labelledby="upload-heading">
       <h2 id="upload-heading">2. Upload / replace FOCUS report</h2>
-      <p>Select CSV or gzip CSV files for any duration. Include all report partitions and all history you want to retain in this replacement. Reports are not appended to the previous upload.</p>
+      <p>Select FOCUS 1.2 CSV or gzip CSV files (Cost Management export dataset version 1.2-preview) for any duration. Include all report partitions and all history you want to retain in this replacement. Reports are not appended to the previous upload.</p>
       <label htmlFor="focus-files">FOCUS files<input id="focus-files" type="file" accept=".csv,.csv.gz,.gz" multiple disabled={!connection || uploading || saving}
         onChange={(event) => setFiles(Array.from(event.target.files ?? []))} /></label>
       <label className="manual-checkbox"><input type="checkbox" checked={resume} onChange={(event) => setResume(event.target.checked)} disabled={uploading} /> Resume matching interrupted files (checks existing chunk hashes)</label>

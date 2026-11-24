@@ -9,7 +9,8 @@ record the requirements, architecture, tasks and verification results.
 - **No application login:** opening the site creates an isolated anonymous browser
   workspace. Other visitors cannot see its reports, credentials or uploads.
 - **One subscription at a time:** enter the target subscription ID in **Admin**.
-- **Manual FOCUS input:** upload CSV or gzip CSV files, including all report
+- **Manual FOCUS input:** upload FOCUS 1.2 (dataset version `1.2-preview`) CSV or
+  gzip CSV files, including all report
   partitions. A successful replacement replaces the active dashboard; reports
   are not silently appended.
 - **Any uploaded duration:** short/partial periods and histories beyond six months

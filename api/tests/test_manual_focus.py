@@ -81,19 +81,14 @@ def test_invalid_or_out_of_scope_financial_rows_are_rejected(tmp_path, override)
         manual_focus.parse_files({path.name: path}, SUB, "now")
 
 
-def test_azure_focus_1_0_export_uses_x_pricing_currency(tmp_path):
+def test_only_focus_1_2_exports_are_accepted(tmp_path):
     source = write_report(tmp_path / "source.csv", [("2026-01-02", "4", {})])
     lines = source.read_text(encoding="utf-8-sig").splitlines()
-    azure = tmp_path / "azure-export.csv"
+    azure = tmp_path / "azure-focus-1-0.csv"
     azure.write_text("\n".join([lines[0].replace("PricingCurrency", "x_PricingCurrency"), *lines[1:]]), encoding="utf-8")
-    parsed = manual_focus.parse_files({azure.name: azure}, SUB, "now")
-    assert parsed.costs.pricing_currencies == ["USD"]
-    assert parsed.coverage["rowCount"] == 1
-
-    missing = tmp_path / "missing.csv"
-    missing.write_text("\n".join([lines[0].replace("PricingCurrency", "Other"), *lines[1:]]), encoding="utf-8")
-    with pytest.raises(FocusCostDataError, match="PricingCurrency"):
-        manual_focus.parse_files({missing.name: missing}, SUB, "now")
+    with pytest.raises(FocusCostDataError, match=r"missing columns: PricingCurrency\..*FOCUS 1\.2"):
+        manual_focus.parse_files({azure.name: azure}, SUB, "now")
+    assert manual_focus.parse_files({source.name: source}, SUB, "now").costs.pricing_currencies == ["USD"]
 
 
 def test_gzip_and_mixed_currency_validation(tmp_path):

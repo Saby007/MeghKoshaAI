@@ -74,17 +74,19 @@ _REQUIRED_COLUMNS = {
     "x_SkuServiceFamily",
 }
 
-# Azure's FOCUS 1.0 export names this column x_PricingCurrency; FOCUS 1.2 names it PricingCurrency.
-_COLUMN_ALTERNATES = {"PricingCurrency": "x_PricingCurrency"}
+FOCUS_PRICING_CURRENCY_HINT = (
+    " Azure's FOCUS 1.0 export (which uses x_PricingCurrency) is not supported; "
+    "export the FOCUS 1.2 dataset version (1.2-preview) from Cost Management."
+)
 
 
 def _missing_columns(fieldnames) -> set[str]:
-    present = set(fieldnames or [])
-    return {
-        column
-        for column in _REQUIRED_COLUMNS - present
-        if _COLUMN_ALTERNATES.get(column) not in present
-    }
+    return _REQUIRED_COLUMNS - set(fieldnames or [])
+
+
+def _missing_message(missing: set[str]) -> str:
+    message = f"FocusCost file is missing columns: {', '.join(sorted(missing))}."
+    return message + FOCUS_PRICING_CURRENCY_HINT if "PricingCurrency" in missing else message
 
 
 class FocusCostDataError(RuntimeError):
@@ -294,7 +296,7 @@ def _stream_csv(content: Path, blob_name: str, *, account_input: bool = True):
                 reader = csv.DictReader(lines())
                 missing = _missing_columns(reader.fieldnames)
                 if missing:
-                    raise FocusCostDataError(f"FocusCost file is missing columns: {', '.join(sorted(missing))}")
+                    raise FocusCostDataError(_missing_message(missing))
                 for row in reader:
                     if account_input:
                         consume("csv_rows")
@@ -318,7 +320,7 @@ def _csv_reader(content: bytes | Path, blob_name: str, *, account_input: bool = 
     reader = csv.DictReader(io.StringIO(text))
     missing = _missing_columns(reader.fieldnames)
     if missing:
-        raise FocusCostDataError(f"FocusCost file is missing columns: {', '.join(sorted(missing))}")
+        raise FocusCostDataError(_missing_message(missing))
     return reader
 
 
@@ -437,7 +439,7 @@ def _build_focus_cost_data(
             currency = row.get("BillingCurrency") or ""
             if currency:
                 currencies.add(currency)
-            pricing_currency = row.get("PricingCurrency") or row.get("x_PricingCurrency") or ""
+            pricing_currency = row.get("PricingCurrency") or ""
             if pricing_currency:
                 pricing_currencies.add(pricing_currency)
 
