@@ -504,3 +504,9 @@ ingestion/production-scale certification.
 - Scope decision: FOCUS 1.2 only. The x_PricingCurrency (FOCUS 1.0) alias was removed;
   a 1.0 file is rejected with an actionable message to export dataset version
   1.2-preview. Admin text, README and deployment guide state the requirement.
+- Layout defect found on the deployed app: the left "Report pages" rail overlapped the
+  report header and first KPI card. The rewritten App dropped the `view-panel` class that
+  the rail's content offset (`#workspace-main:has(.view-panel:not([hidden]) .report-sidenav)`)
+  keys on. Restored on the report and Admin panels, added an App test guard, and verified
+  in Edge against the built stylesheet (content starts right of the rail). Needs a redeploy.
+  Most "Unavailable" tiles are by design in FOCUS-only mode (no Reader service principal).

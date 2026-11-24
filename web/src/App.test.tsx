@@ -48,6 +48,8 @@ it('opens the uploaded financial report without login and defaults to all upload
   expect(container.querySelector('[data-snapshot]')?.getAttribute('data-window')).toBe('2024-01-03..2025-03-16');
   expect(getLatestReport).toHaveBeenCalledWith(expect.any(AbortSignal), ['sub-1'], 90);
   expect([...container.querySelectorAll('nav button')].map((item) => item.textContent)).toEqual([' Report', ' Chat', ' Admin']);
+  // The page rail's content offset is keyed to this wrapper; without it the rail overlaps the report.
+  expect(container.querySelector('.view-panel:not([hidden]) [data-snapshot]')).not.toBeNull();
 });
 
 it('replaces the visible dashboard when Admin completes a replacement upload', async () => {

@@ -156,7 +156,7 @@ export default function App() {
       </span>
     </header>
     <main id="workspace-main" tabIndex={-1}>
-      <div hidden={view !== 'report'}>
+      <div className="view-panel" hidden={view !== 'report'}>
         <section className="manual-scope">
           <div><strong>{subscription?.displayName ?? 'No target subscription configured'}</strong><small>{subscription?.subscriptionId ?? 'Start in Admin: target subscription, FOCUS report, optional Reader credentials.'}</small></div>
           <button type="button" className="ghost-button" disabled={!snapshot || running || loading} onClick={() => void rebuild()}><RefreshCw size={15} /> {running ? 'Processing...' : 'Rebuild from uploaded report'}</button>
@@ -178,7 +178,7 @@ export default function App() {
             snapshotCreatedAt={snapshot.createdAt} costWindow={costWindow} onCostWindowChange={setCostWindow} />
         </Suspense></ReportErrorBoundary>}
       </div>
-      <div hidden={view !== 'admin'}><Suspense fallback={<Loading label="Loading Admin..." />}>
+      <div className="view-panel" hidden={view !== 'admin'}><Suspense fallback={<Loading label="Loading Admin..." />}>
         <ManualAdmin onConfigurationChanged={() => { setSnapshot(null); setVersion((value) => value + 1); }}
           onReady={() => { setVersion((value) => value + 1); setView('report'); }} />
       </Suspense></div>
