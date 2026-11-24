@@ -280,7 +280,22 @@ function Wait-ProvisionRetry {
         Start-Sleep -Seconds 15
     }
 }
+function Align-BuilderDisk {
+    # The builder VM is deallocated after every run. Azure can leave its OS disk on a different SKU than the
+    # template declares, and a VM update may not change a disk SKU. Realign it (allowed while deallocated).
+    $vm = Value 'APP_PRIVATE_BUILDER_VM_NAME'
+    $group = Value 'AZURE_RESOURCE_GROUP'
+    if (-not $vm -or -not $group) { return }
+    $disks = @(Azure @('disk', 'list', '--resource-group', $group, '--query', "[?starts_with(name, '$vm')].{name:name,sku:sku.name}"))
+    foreach ($disk in $disks) {
+        if ($disk.sku -eq 'StandardSSD_LRS') { continue }
+        Write-Host "Builder disk $($disk.name) is $($disk.sku); realigning it to StandardSSD_LRS so the VM update is accepted."
+        $null = Azure @('vm', 'deallocate', '--resource-group', $group, '--name', $vm)
+        $null = Azure @('disk', 'update', '--resource-group', $group, '--name', $disk.name, '--sku', 'StandardSSD_LRS')
+    }
+}
 function Provision {
+    Align-BuilderDisk
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         foreach ($entry in $script:values.GetEnumerator()) {
             [Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value, 'Process')

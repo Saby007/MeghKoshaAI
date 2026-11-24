@@ -515,3 +515,9 @@ ingestion/production-scale certification.
   (staged + end-to-end): reuses the foundation, rebuilds images, reruns the idempotent
   bootstrap (schema uses IF NOT EXISTS) with the new image, releases and verifies. Without
   the switch the guard still blocks. Offline test added; documented in the deployment guide.
+- First in-place update: Build and the Bootstrap provision updated the job and the API, web
+  and worker apps, then the builder VM update failed (`OperationNotAllowed: Managed disk
+  storage account type change through Virtual Machine`). The deallocated builder's OS disk
+  was `Standard_LRS` while the unchanged private-builder template declares StandardSSD_LRS.
+  `deploy-staged.ps1` now realigns the builder OS disk to StandardSSD_LRS (deallocating first)
+  before every provision when it differs; private-builder.bicep is untouched. Test added.

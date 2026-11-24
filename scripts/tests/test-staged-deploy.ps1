@@ -29,7 +29,7 @@ $global:stagedState = @{
     environmentExists = $true; cleanupFailed = $false; imageDrift = $false; keyCreates = 0; foundryUnavailable = $false
     migration = $null
     quotaCoreUsage = 2; quotaFamilyUsage = 2; quotaCoreLimit = 150; quotaFamilyLimit = 100
-    quotaPowerState = 'VM deallocated'; malformedQuota = $false
+    quotaPowerState = 'VM deallocated'; malformedQuota = $false; diskSku = 'StandardSSD_LRS'
     values = @{
         AZURE_ENV_NAME = 'staged-test'; AZURE_SUBSCRIPTION_ID = '11111111-1111-1111-1111-111111111111'
         AZURE_TENANT_ID = '22222222-2222-2222-2222-222222222222'; AZURE_LOCATION = 'centralindia'
@@ -100,6 +100,13 @@ function az {
     }
     if ($command -eq 'postgres flexible-server show') {
         return '{"network":{"publicNetworkAccess":"Disabled"},"authConfig":{"passwordAuth":"Disabled","activeDirectoryAuth":"Enabled"}}'
+    }
+    if ($a[0] -eq 'disk' -and $a[1] -eq 'list') {
+        return (@(@{ name = 'vm-builder-test_OsDisk_1'; sku = $global:stagedState.diskSku }) | ConvertTo-Json -AsArray)
+    }
+    if ($a[0] -eq 'disk' -and $a[1] -eq 'update') {
+        $global:stagedState.diskSku = $a[[array]::IndexOf($a, '--sku') + 1]
+        return '{}'
     }
     if ($a[0] -eq 'vm' -and $a[1] -eq 'list-skus') {
         return '[{"name":"Standard_D2s_v5","family":"standardDSv5Family","restrictions":[],"capabilities":[{"name":"vCPUs","value":"2"}]}]'
@@ -369,6 +376,7 @@ try {
     # A new commit means an older release and an older verified bootstrap image.
     $global:stagedState.values.APP_STAGED_RELEASE_COMMIT='d'*40
     $global:stagedState.values.APP_STAGED_BOOTSTRAP_IMAGE='acrstagedtest.azurecr.io/meghkoshaai-api@sha256:'+('0'*64)
+    $global:stagedState.diskSku='Standard_LRS'
     $global:stagedState.calls.Clear()
     $update=& $driver -EnvironmentName staged-test -SkipLogin -ApproveAll -ApproveApplicationUpdate | ConvertFrom-Json
     if ($update.status -ne 'deployment_completed' -or $global:stagedState.values.APP_APPLICATIONS_DEPLOYED -ne 'true') {
@@ -376,6 +384,9 @@ try {
     }
     if ($global:stagedState.provisions -ne $provisions + 2) { throw 'An update must reprovision only bootstrap and release, not the foundation.' }
     $calls=$global:stagedState.calls
+    if ($global:stagedState.diskSku -ne 'StandardSSD_LRS' -or -not $calls.Contains('az disk update --resource-group')) {
+        throw 'A drifted builder OS disk SKU was not realigned before provisioning the VM.'
+    }
     if (-not ($calls.Contains('az vm run-command invoke') -and $calls.Contains('az containerapp job start'))) {
         throw 'An update must rebuild images and rerun the idempotent bootstrap.'
     }

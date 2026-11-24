@@ -6,7 +6,7 @@ $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
-$definitions = foreach ($name in @('Invoke-ProvisionCommand', 'Wait-ProvisionRetry', 'Provision')) {
+$definitions = foreach ($name in @('Invoke-ProvisionCommand', 'Wait-ProvisionRetry', 'Align-BuilderDisk', 'Provision')) {
     $definition = $ast.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
