@@ -16,7 +16,8 @@ record the requirements, architecture, tasks and verification results.
 - **Any uploaded duration:** short/partial periods and histories beyond six months
   are supported. There is no 12-month selection or 366-day query restriction.
 - **Optional service principal:** FOCUS alone creates financial dashboards. Add
-  tenant ID, client ID and client secret to enable live Azure evidence using a
+  client ID and client secret (tenant ID is optional and detected from the
+  subscription) to enable live Azure evidence using a
   manually provisioned **Reader** service principal.
 - **No budgets or automated exports:** no budget controls, native export setup,
   scheduled cost pulls, target IAM grants, or user-sign-in registration stages.

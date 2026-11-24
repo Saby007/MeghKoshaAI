@@ -113,8 +113,12 @@ Identity and Permissions are no longer valid stages.
    Only FOCUS 1.2 is supported: in Cost Management, create the export with dataset
    version **1.2-preview** (FOCUS 1.0 exports name the pricing-currency column
    `x_PricingCurrency` and are rejected).
-4. Optionally add the target tenant ID, client ID and secret of a service principal
-   the customer has already provisioned with **Reader only**.
+4. Optionally add the client ID and secret of a service principal the customer has
+   already provisioned with **Reader only** on the target subscription. The tenant
+   ID is optional; when blank it is detected from the subscription. On save the app
+   signs in as the service principal and reads the subscription to verify the grant.
+   Then use **Rebuild from this report** (or save again) to populate the Azure
+   inventory, Advisor and metric sections.
 
 The SP is used only for target Azure reads. Backend managed identities access the
 private database, storage, vault, registry and optional Foundry. The API stores a

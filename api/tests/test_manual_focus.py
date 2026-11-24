@@ -209,6 +209,89 @@ def test_configured_scope_is_single_subscription_not_sp_discovery(monkeypatch):
     assert outside.value.status_code == 403
 
 
+def test_tenant_is_optional_and_detected_from_the_arm_challenge(monkeypatch):
+    tenant = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    challenge = (f'Bearer authorization_uri="https://login.windows.net/{tenant}", error="invalid_token", '
+                 'error_description="The authentication failed because of missing \'Authorization\' header."')
+
+    class Client:
+        status, header = 401, challenge
+
+        def __init__(self, **_):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def get(self, url, **_):
+            assert url.startswith("https://management.azure.com/subscriptions/") and "headers" not in _
+            return httpx.Response(self.status, headers={"www-authenticate": self.header} if self.header else {})
+
+    monkeypatch.setattr(target_connection.httpx, "AsyncClient", Client)
+    assert str(asyncio.run(target_connection._discover_tenant(UUID(SUB)))) == tenant
+    for status, header in ((401, ""), (401, 'Bearer realm="x"'), (200, challenge)):
+        Client.status, Client.header = status, header
+        with pytest.raises(HTTPException) as failure:
+            asyncio.run(target_connection._discover_tenant(UUID(SUB)))
+        assert failure.value.status_code == 422 and "tenant" in failure.value.detail.lower()
+
+    ok = {"subscriptionId": SUB, "clientId": OTHER, "clientSecret": "secret"}
+    assert target_connection.ConnectionInput.model_validate(ok).tenant_id is None
+    for invalid in ({"subscriptionId": SUB, "clientId": OTHER}, {"subscriptionId": SUB, "clientSecret": "secret"},
+                    {"subscriptionId": SUB, "tenantId": tenant}):
+        with pytest.raises(ValueError):
+            target_connection.ConnectionInput.model_validate(invalid)
+
+
+def test_save_uses_the_detected_tenant_to_validate_and_store(monkeypatch):
+    tenant = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+    seen = {}
+
+    async def validate(body):
+        seen["tenant"] = body.tenant_id
+        return "Target"
+
+    class Transaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+    class Db:
+        def acquire(self, **_):
+            return self
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        def transaction(self):
+            return Transaction()
+
+        async def fetchrow(self, *_):
+            return {"configuration_revision": 3}
+
+        async def execute(self, *arguments):
+            seen["insert"] = arguments
+
+    monkeypatch.setattr(target_connection.workspace, "namespace", lambda: WORKSPACE)
+    monkeypatch.setattr(target_connection, "load", AsyncMock(return_value=None))
+    monkeypatch.setattr(target_connection, "_discover_tenant", AsyncMock(return_value=tenant))
+    monkeypatch.setattr(target_connection, "_validate", validate)
+    monkeypatch.setattr(target_connection, "_store_secret", AsyncMock(return_value="v1"))
+    monkeypatch.setattr(target_connection.assessment_store, "pool", AsyncMock(return_value=Db()))
+    saved = asyncio.run(target_connection.save(target_connection.ConnectionInput.model_validate(
+        {"subscriptionId": SUB, "clientId": OTHER, "clientSecret": "secret"})))
+    assert seen["tenant"] == tenant and saved.target_tenant_id == str(tenant) and saved.client_id == OTHER
+    assert str(tenant) in seen["insert"] and "secret" not in str(saved.public())
+
+
 def test_target_credentials_are_shared_only_within_one_context_and_closed(monkeypatch):
     created = []
     configuration = target_connection.Connection(WORKSPACE, 7, SUB, "Target", WORKSPACE, OTHER, "version-7")

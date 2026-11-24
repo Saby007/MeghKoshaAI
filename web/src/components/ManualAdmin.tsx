@@ -78,13 +78,13 @@ export default function ManualAdmin({ onConfigurationChanged, onReady }: {
     setSaving(true); setError(null); setNotice(null);
     try {
       const replacing = enabled && (!connection?.hasCredentials || connection.subscriptionId !== subscription.trim().toLowerCase()
-        || connection.tenantId !== tenant.trim().toLowerCase() || connection.clientId !== client.trim().toLowerCase());
-      if (replacing && !secret) throw new Error('Enter all three credential fields to enable or replace the optional service principal.');
+        || (tenant.trim() !== '' && connection.tenantId !== tenant.trim().toLowerCase()) || connection.clientId !== client.trim().toLowerCase());
+      if (replacing && !secret) throw new Error('Enter the client ID and client secret to enable or replace the optional service principal.');
       const result = await saveConnection({
         subscriptionId: subscription.trim(), clearCredentials: !enabled,
-        ...(enabled && secret ? { tenantId: tenant.trim(), clientId: client.trim(), clientSecret: secret } : {}),
+        ...(enabled && secret ? { clientId: client.trim(), clientSecret: secret, ...(tenant.trim() ? { tenantId: tenant.trim() } : {}) } : {}),
       });
-      setConnection(result.connection); setSecret(''); onConfigurationChanged();
+      setConnection(result.connection); setSecret(''); setTenant(result.connection.tenantId ?? ''); onConfigurationChanged();
       const previous = uploads.find((item) => item.status === 'ready' && item.subscriptionId === result.connection.subscriptionId);
       if (previous) {
         const job = await retryUpload(previous.datasetId);
@@ -136,11 +136,12 @@ export default function ManualAdmin({ onConfigurationChanged, onReady }: {
       <p>FOCUS files alone populate financial views. Add a manually provisioned service principal with <strong>Reader only</strong> to populate Azure inventory, Advisor and metric evidence. This application does not grant roles or change Azure resources.</p>
       {enabled && <fieldset disabled={saving || uploading}>
         <legend>Optional Azure enrichment</legend>
-        <label htmlFor="target-tenant">Tenant ID<input id="target-tenant" required value={tenant} onChange={(event) => setTenant(event.target.value)} autoComplete="off" /></label>
-        <label htmlFor="target-client">Application / client ID<input id="target-client" required value={client} onChange={(event) => setClient(event.target.value)} autoComplete="off" /></label>
+        <label htmlFor="target-client">Application (client) ID<input id="target-client" required value={client} onChange={(event) => setClient(event.target.value)} autoComplete="off" /></label>
         <label htmlFor="target-secret">Client secret<input id="target-secret" type="password" value={secret} onChange={(event) => setSecret(event.target.value)}
           autoComplete="new-password" placeholder={connection?.hasCredentials ? 'Leave unchanged, or enter a replacement' : 'Secret value, not secret ID'} /></label>
-        <p>Secrets are stored in the private server-side Key Vault and are never returned to the browser.</p>
+        <label htmlFor="target-tenant">Tenant ID (optional)<input id="target-tenant" value={tenant} onChange={(event) => setTenant(event.target.value)}
+          autoComplete="off" placeholder="Detected from the subscription when blank" /></label>
+        <p>The service principal signs in with these credentials and reads the subscription with its Reader role. Secrets are stored in the private server-side Key Vault and are never returned to the browser.</p>
       </fieldset>}
       <button type="submit" className="dark-button" disabled={saving || uploading || loading}>{saving ? 'Validating / saving...' : 'Save target and optional credentials'}</button>
       {connection && <p>Current mode: <strong>{connection.hasCredentials ? 'FOCUS + Reader service principal' : 'FOCUS only; live Azure sections unavailable'}</strong></p>}

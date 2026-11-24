@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -56,10 +57,13 @@ class ConnectionInput(BaseModel):
 
     @model_validator(mode="after")
     def credentials_are_complete(self):
-        supplied = (self.tenant_id is not None, self.client_id is not None, self.client_secret is not None)
+        # Tenant is optional: when omitted it is detected from the target subscription.
+        supplied = (self.client_id is not None, self.client_secret is not None)
         if any(supplied) and not all(supplied):
-            raise ValueError("Provide tenant ID, client ID and client secret together, or omit all three.")
-        if self.clear_credentials and any(supplied):
+            raise ValueError("Provide client ID and client secret together, or omit both.")
+        if self.tenant_id is not None and not all(supplied):
+            raise ValueError("A tenant ID can only be supplied with a client ID and client secret.")
+        if self.clear_credentials and (any(supplied) or self.tenant_id is not None):
             raise ValueError("Choose either credential replacement or credential removal.")
         if self.subscription_id.int == 0 or self.tenant_id is not None and self.tenant_id.int == 0 \
                 or self.client_id is not None and self.client_id.int == 0:
@@ -152,6 +156,26 @@ async def _read_secret(connection: Connection) -> str:
     return secret.value
 
 
+_TENANT_CHALLENGE = re.compile(r"login\.(?:microsoftonline\.com|windows\.net)/([0-9a-fA-F-]{36})", re.IGNORECASE)
+
+
+async def _discover_tenant(subscription_id: UUID) -> UUID:
+    """Azure answers an unauthenticated subscription read with a challenge that names the owning tenant."""
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            response = await client.get(f"{ARM_BASE}/subscriptions/{subscription_id}?api-version=2022-12-01")
+    except httpx.HTTPError:
+        raise HTTPException(502, "The tenant could not be detected from Azure. Check connectivity or enter the tenant ID.") from None
+    match = _TENANT_CHALLENGE.search(response.headers.get("www-authenticate", "")) if response.status_code == 401 else None
+    try:
+        tenant = UUID(match.group(1)) if match else None
+    except ValueError:
+        tenant = None
+    if tenant is None or tenant.int == 0:
+        raise HTTPException(422, "The tenant could not be detected for this subscription. Enter the tenant ID.")
+    return tenant
+
+
 async def _validate(body: ConnectionInput) -> str:
     if body.tenant_id is None or body.client_id is None or body.client_secret is None:
         raise ValueError("Complete credentials are required for an Azure connection test.")
@@ -186,6 +210,8 @@ async def save(body: ConnectionInput) -> Connection:
     name = subscription
     tenant = client_id = version = None
     if body.client_secret is not None:
+        if body.tenant_id is None:
+            body = body.model_copy(update={"tenant_id": await _discover_tenant(body.subscription_id)})
         name = await _validate(body)
         tenant, client_id = str(body.tenant_id), str(body.client_id)
         version = await _store_secret(body.client_secret)

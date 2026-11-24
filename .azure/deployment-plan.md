@@ -526,3 +526,10 @@ ingestion/production-scale certification.
   The VM's own background apt job raced the build. `deploy-staged.ps1` now retries the build up
   to three attempts (fresh nonce each, 90 s apart) only for apt/dpkg lock errors; other build
   errors still stop immediately. private-builder.sh/bicep remain unchanged. Tests added.
+- Service-principal Admin flow reviewed after deployment. All target Azure reads already go
+  through the workspace SP (ARM client, Resource Graph, Advisor, metrics, SQL metrics); backend
+  managed identities only serve PostgreSQL, Blob, Key Vault and ACR. Logs showed no failed SP
+  save/call. The Admin form required a tenant ID although only client ID and secret were
+  expected: the tenant is now optional and detected from the subscription's ARM sign-in
+  challenge (`WWW-Authenticate` authorization_uri), with an explicit value still honoured.
+  Tests added (backend detection/save, frontend form). Needs an application update.
