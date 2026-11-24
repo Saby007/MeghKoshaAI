@@ -521,3 +521,8 @@ ingestion/production-scale certification.
   was `Standard_LRS` while the unchanged private-builder template declares StandardSSD_LRS.
   `deploy-staged.ps1` now realigns the builder OS disk to StandardSSD_LRS (deallocating first)
   before every provision when it differs; private-builder.bicep is untouched. Test added.
+- Second update attempt: Build failed on the freshly started builder VM (`E: Could not get
+  lock /var/lib/apt/lists/lock ... held by process (apt-get)`, phase install-prerequisites).
+  The VM's own background apt job raced the build. `deploy-staged.ps1` now retries the build up
+  to three attempts (fresh nonce each, 90 s apart) only for apt/dpkg lock errors; other build
+  errors still stop immediately. private-builder.sh/bicep remain unchanged. Tests added.

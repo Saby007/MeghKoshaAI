@@ -641,6 +641,9 @@ try {
                 $details = Azure @('vm', 'show', '--resource-group', $group, '--name', $vm, '--show-details')
                 if ($details.publicIps) { throw 'Builder VM must not have a public IP.' }
                 $null = Azure @('vm', 'start', '--resource-group', $group, '--name', $vm)
+                # A freshly started VM often runs its own apt update; the build installs packages and can lose that race.
+                $aptBusy = 'Could not get lock /var/lib/(apt|dpkg)|Unable to lock directory /var/lib/apt|dpkg frontend lock'
+                for ($buildAttempt = 1; ; $buildAttempt++) {
                 $nonce = [guid]::NewGuid().ToString('N')
                 $config = @{
                     repository = $Repository; commit = $SourceCommit; nonce = $nonce
@@ -666,11 +669,18 @@ try {
                 $matches = [regex]::Matches($text, '(?m)^MEGHKOSHA_BUILD_RESULT (\{[^\r\n]+\})\s*$')
                 $failed = @($response.value | Where-Object { $_.level -eq 'Error' -or $_.code -match '/failed$' })
                 if ($matches.Count -ne 1 -or $failed.Count -or $text -match '(?m)^MEGHKOSHA_BUILD_ERROR ') {
+                    if ($text -match $aptBusy -and $buildAttempt -lt 3) {
+                        Write-Warning "The builder's package manager was busy (attempt $buildAttempt of 3). Waiting 90 seconds, then rebuilding."
+                        Start-Sleep -Seconds 90
+                        continue
+                    }
                     $details = [regex]::Replace($text, '(?i)(Authorization:\s*Bearer\s+)\S+', '$1[redacted]')
                     $details = [regex]::Replace($details, '\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b', '[redacted-token]')
                     if ($details.Length -gt 3500) { $details = $details.Substring($details.Length - 3500) }
                     if ([string]::IsNullOrWhiteSpace($details)) { $details = 'Run Command returned no stdout/stderr. The image build was not verified.' }
                     throw "Private build did not return one successful, error-free attestation. Saved diagnostics: $responsePath`nRun Command output:`n$details"
+                }
+                break
                 }
                 $result = $matches[0].Groups[1].Value | ConvertFrom-Json -AsHashtable
                 if ($result.commit -ne $SourceCommit -or $result.nonce -ne $nonce -or $result.registry -ne (Value 'AZURE_CONTAINER_REGISTRY_ENDPOINT')) {

@@ -155,6 +155,10 @@ function az {
                 $message = "Enable succeeded: `n[stdout]`nMEGHKOSHA_BUILD_STARTED $($config.nonce)`n`n[stderr]`nPrivate build failed (exit 100).`nCould not resolve package mirror.`nMEGHKOSHA_BUILD_ERROR {`"phase`":`"install-prerequisites`",`"exitCode`":100}`n"
             }
             'empty' { $message = "Enable succeeded: `n[stdout]`n`n[stderr]`n" }
+            'apt-busy' {
+                $message = "Enable succeeded: `n[stdout]`nMEGHKOSHA_BUILD_STARTED $($config.nonce)`n`n[stderr]`nPrivate build failed (exit 100).`nE: Could not get lock /var/lib/apt/lists/lock. It is held by process 2837 (apt-get)`nMEGHKOSHA_BUILD_ERROR {`"phase`":`"install-prerequisites`",`"exitCode`":100}`n"
+                if ($global:stagedState.aptBusyFailures -gt 0) { $global:stagedState.aptBusyFailures-- } else { $global:stagedState.buildResponse = 'success'; $message = "Enable succeeded: `n[stdout]`nMEGHKOSHA_BUILD_STARTED $($config.nonce)`nMEGHKOSHA_BUILD_RESULT $result`n`n[stderr]`n" }
+            }
             'provider-failure' { $level = 'Error'; $code = 'ProvisioningState/failed' }
         }
         return (@{ value = @(@{ code = $code; level = $level; message = $message }) } | ConvertTo-Json -Depth 5)
@@ -294,6 +298,14 @@ try {
     $global:stagedState.buildResponse = 'provider-failure'
     Assert-Refused { & $script -Stage Build @common -ApproveImagePublication } 'error-free attestation'
     if ($global:stagedState.values.APP_STAGED_API_IMAGE -ne $verifiedImage) { throw 'Failed/empty build result overwrote the verified images.' }
+    $global:stagedState.buildResponse = 'apt-busy'; $global:stagedState.aptBusyFailures = 2
+    $before = @($global:stagedState.calls | Where-Object { $_ -eq 'az vm run-command invoke' }).Count
+    & $script -Stage Build @common -ApproveImagePublication | Out-Null
+    if (@($global:stagedState.calls | Where-Object { $_ -eq 'az vm run-command invoke' }).Count -ne $before + 3) { throw 'A busy package manager was not retried with fresh builds.' }
+    $global:stagedState.buildResponse = 'apt-busy'; $global:stagedState.aptBusyFailures = 99
+    $before = @($global:stagedState.calls | Where-Object { $_ -eq 'az vm run-command invoke' }).Count
+    Assert-Refused { & $script -Stage Build @common -ApproveImagePublication } 'Could not get lock'
+    if (@($global:stagedState.calls | Where-Object { $_ -eq 'az vm run-command invoke' }).Count -ne $before + 3) { throw 'Package-manager retries must stop after three attempts.' }
     $global:stagedState.buildResponse = 'success'
     $global:stagedState.badBuild = $true
     Assert-Refused { & $script -Stage Build @common -ApproveImagePublication } 'does not match'
