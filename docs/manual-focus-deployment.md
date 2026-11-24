@@ -178,6 +178,23 @@ scheduled/running export work remains, review obsolete permissions and complete
 the new schema/bootstrap before approving any in-place release. No automated
 destructive migration or account/registration deletion is provided.
 
+### Updating an environment created by this branch
+
+After `git pull`, the deployment script refuses to run over applications that
+already run a different commit. To roll the new commit out in place, add
+`-ApproveApplicationUpdate`:
+
+```powershell
+.\scripts\deploy-end-to-end.ps1 -EnvironmentName $EnvName -SubscriptionId $HostingSubscriptionId `
+    -Location centralindia -FoundryLocation eastus2 -ApproveApplicationUpdate
+```
+
+It reuses the foundation, rebuilds the images for the new commit, reruns the
+idempotent schema bootstrap with the new image, then releases it and verifies the
+apps. Uploaded reports and workspaces stay in PostgreSQL. The API, web and worker
+apps restart briefly. Use a new environment instead if a release changes the
+schema incompatibly.
+
 ## Acceptance after deployment
 
 - ACR remains Premium/public-disabled/admin-disabled; private pulls/builds work.

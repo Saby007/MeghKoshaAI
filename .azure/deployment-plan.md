@@ -510,3 +510,8 @@ ingestion/production-scale certification.
   keys on. Restored on the report and Admin panels, added an App test guard, and verified
   in Edge against the built stylesheet (content starts right of the rail). Needs a redeploy.
   Most "Unavailable" tiles are by design in FOCUS-only mode (no Reader service principal).
+- Redeploy over the running environment was refused ("already runs a different source
+  commit"): the runner only supported fresh environments. Added `-ApproveApplicationUpdate`
+  (staged + end-to-end): reuses the foundation, rebuilds images, reruns the idempotent
+  bootstrap (schema uses IF NOT EXISTS) with the new image, releases and verifies. Without
+  the switch the guard still blocks. Offline test added; documented in the deployment guide.

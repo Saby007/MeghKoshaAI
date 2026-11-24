@@ -38,7 +38,8 @@ param(
     [switch] $ApproveDatabaseBootstrap,
     [switch] $ApproveIdentityChanges,
     [switch] $ApproveRoleAssignments,
-    [switch] $ApproveRelease
+    [switch] $ApproveRelease,
+    [switch] $ApproveApplicationUpdate
 )
 
 Set-StrictMode -Version Latest
@@ -428,10 +429,14 @@ function Invoke-AllStages {
     $account = Azure @('account', 'show')
     if ($account.state -ne 'Enabled') { throw 'The selected subscription is not enabled.' }
     $deployed = (Value 'APP_APPLICATIONS_DEPLOYED') -eq 'true'
-    if ($deployed -and (Value 'APP_STAGED_BUILD_COMMIT') -ne $commit) {
-        throw 'This environment already runs a different source commit. Review its image/schema update before using the individual stages; no automatic migration was started.'
+    $updating = $deployed -and (Value 'APP_STAGED_BUILD_COMMIT') -ne $commit
+    if ($updating -and -not $ApproveApplicationUpdate) {
+        throw 'This environment already runs a different source commit. To roll the new commit out over the running applications (new images, idempotent schema bootstrap, then release), rerun with -ApproveApplicationUpdate.'
     }
     Write-Host "`nEnd-to-end private deployment: $EnvironmentName"
+    if ($updating) {
+        Write-Host "UPDATE of running applications: $(Value 'APP_STAGED_BUILD_COMMIT') -> $commit. Foundation is reused; uploaded reports and workspaces in PostgreSQL are kept. Expect a brief restart of the API, web and worker apps."
+    }
     Write-Host "Hosting subscription: $script:subscription; tenant: $($account.tenantId); region: $Location"
     Write-Host "Private Foundry/Model Router region: $FoundryLocation. Chat is included; the hosted-agent narrator remains separate and opt-in."
     Write-Host 'The target subscription and optional Reader service-principal credentials are configured in the no-login Admin workspace after deployment.'
@@ -467,6 +472,7 @@ function Invoke-AllStages {
         BlobDataProtection = $BlobDataProtection; IncludeLocalhostRedirects = $IncludeLocalhostRedirects
         MaxAttempts = $MaxAttempts; SettleSeconds = $SettleSeconds
     }
+    if ($ApproveApplicationUpdate) { $common.ApproveApplicationUpdate = $true }
     if ($ApproveOwnedRegistrationMigration) {
         $common.ApproveOwnedRegistrationMigration = $true
         $common.PreviousWebOrigin = $PreviousWebOrigin
@@ -665,12 +671,19 @@ try {
                 Save 'APP_STAGED_API_IMAGE' $result.apiImage
                 Save 'APP_STAGED_WEB_IMAGE' $result.webImage
                 Save 'SERVICE_ASSESSMENT_IMAGE_NAME' $result.apiImage
-                Save 'APP_ASSESSMENT_DB_BOOTSTRAPPED' 'false'
+                # An approved update keeps the previous verified-bootstrap flag so the running applications stay
+                # provisionable; Release still requires APP_STAGED_BOOTSTRAP_IMAGE to equal this new API image.
+                if (-not ($ApproveApplicationUpdate -and (Value 'APP_APPLICATIONS_DEPLOYED') -eq 'true')) {
+                    Save 'APP_ASSESSMENT_DB_BOOTSTRAPPED' 'false'
+                }
             }
             'Bootstrap' {
                 Check-Private
                 Check-Build
-                if ((Value 'APP_ASSESSMENT_FOUNDATION_ONLY') -ne 'true') { throw 'Bootstrap requires foundation-only staging before release.' }
+                if ((Value 'APP_ASSESSMENT_FOUNDATION_ONLY') -ne 'true' -and
+                    -not ($ApproveApplicationUpdate -and (Value 'APP_APPLICATIONS_DEPLOYED') -eq 'true')) {
+                    throw 'Bootstrap requires foundation-only staging before release.'
+                }
                 Save 'SERVICE_ASSESSMENT_IMAGE_NAME' (Value 'APP_STAGED_API_IMAGE')
                 Provision
                 if ($PreviewOnly) { break }

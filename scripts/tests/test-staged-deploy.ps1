@@ -364,7 +364,22 @@ try {
     Assert-Refused { & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll } 'reviewed immutable image'
     $global:stagedState.imageDrift=$false
     $global:stagedState.values.APP_STAGED_BUILD_COMMIT='d'*40
-    Assert-Refused { & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll } 'different source commit'
+    Assert-Refused { & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll } 'different source commit.*-ApproveApplicationUpdate'
+    $provisions=$global:stagedState.provisions
+    # A new commit means an older release and an older verified bootstrap image.
+    $global:stagedState.values.APP_STAGED_RELEASE_COMMIT='d'*40
+    $global:stagedState.values.APP_STAGED_BOOTSTRAP_IMAGE='acrstagedtest.azurecr.io/meghkoshaai-api@sha256:'+('0'*64)
+    $global:stagedState.calls.Clear()
+    $update=& $driver -EnvironmentName staged-test -SkipLogin -ApproveAll -ApproveApplicationUpdate | ConvertFrom-Json
+    if ($update.status -ne 'deployment_completed' -or $global:stagedState.values.APP_APPLICATIONS_DEPLOYED -ne 'true') {
+        throw 'An approved update over running applications did not complete.'
+    }
+    if ($global:stagedState.provisions -ne $provisions + 2) { throw 'An update must reprovision only bootstrap and release, not the foundation.' }
+    $calls=$global:stagedState.calls
+    if (-not ($calls.Contains('az vm run-command invoke') -and $calls.Contains('az containerapp job start'))) {
+        throw 'An update must rebuild images and rerun the idempotent bootstrap.'
+    }
+    $global:stagedState.values.APP_STAGED_BUILD_COMMIT='d'*40
     Reset-Rollout
     $global:stagedState.bootstrapFailed=$true
     Assert-Refused { & $driver -EnvironmentName staged-test -SkipLogin -ApproveAll } 'bootstrap failed'

@@ -35,6 +35,7 @@ param(
     [switch] $BlobDataProtection,
     [switch] $SkipLogin,
     [switch] $ApproveAll,
+    [switch] $ApproveApplicationUpdate,
     [switch] $PlanOnly
 )
 
@@ -50,6 +51,7 @@ $arguments = @{
     BuilderVmSize = $BuilderVmSize; BuilderSshPublicKeyPath = $BuilderSshPublicKeyPath
     MaxAttempts = $MaxAttempts; SettleSeconds = $SettleSeconds
     BlobDataProtection = $BlobDataProtection; SkipLogin = $SkipLogin; ApproveAll = $ApproveAll
+    ApproveApplicationUpdate = $ApproveApplicationUpdate
     Apply = -not $PlanOnly; ApproveAzureChanges = -not $PlanOnly
     WhatIf = [bool]$WhatIfPreference
 }
