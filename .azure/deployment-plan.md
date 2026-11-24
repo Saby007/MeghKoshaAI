@@ -495,3 +495,9 @@ ingestion/production-scale certification.
   now deploys in a new `registry-pull` module during Foundation (same assignment names,
   so existing environments reuse them), the worker module depends on it, and the
   pull-validation error is retried after the settlement wait. Retry test added.
+- First real upload: Azure's FOCUS 1.0 Cost Management export names the pricing
+  currency `x_PricingCurrency`; the parser demanded the FOCUS 1.2 `PricingCurrency` and
+  rejected the file. Either name is now accepted (the column is still required). The two
+  real files (2,989 rows, 1-23 Nov) parse and replay end to end; regression test added.
+  Known: older inherited test files for retired features (auth, schedules, control API)
+  still fail and are not part of the focused suite.

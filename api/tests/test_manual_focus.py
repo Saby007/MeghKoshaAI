@@ -81,6 +81,21 @@ def test_invalid_or_out_of_scope_financial_rows_are_rejected(tmp_path, override)
         manual_focus.parse_files({path.name: path}, SUB, "now")
 
 
+def test_azure_focus_1_0_export_uses_x_pricing_currency(tmp_path):
+    source = write_report(tmp_path / "source.csv", [("2026-01-02", "4", {})])
+    lines = source.read_text(encoding="utf-8-sig").splitlines()
+    azure = tmp_path / "azure-export.csv"
+    azure.write_text("\n".join([lines[0].replace("PricingCurrency", "x_PricingCurrency"), *lines[1:]]), encoding="utf-8")
+    parsed = manual_focus.parse_files({azure.name: azure}, SUB, "now")
+    assert parsed.costs.pricing_currencies == ["USD"]
+    assert parsed.coverage["rowCount"] == 1
+
+    missing = tmp_path / "missing.csv"
+    missing.write_text("\n".join([lines[0].replace("PricingCurrency", "Other"), *lines[1:]]), encoding="utf-8")
+    with pytest.raises(FocusCostDataError, match="PricingCurrency"):
+        manual_focus.parse_files({missing.name: missing}, SUB, "now")
+
+
 def test_gzip_and_mixed_currency_validation(tmp_path):
     csv_path = write_report(tmp_path / "input.csv", [("2026-01-01", "1", {})])
     compressed = tmp_path / "arbitrary.data"

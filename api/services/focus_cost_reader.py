@@ -74,6 +74,18 @@ _REQUIRED_COLUMNS = {
     "x_SkuServiceFamily",
 }
 
+# Azure's FOCUS 1.0 export names this column x_PricingCurrency; FOCUS 1.2 names it PricingCurrency.
+_COLUMN_ALTERNATES = {"PricingCurrency": "x_PricingCurrency"}
+
+
+def _missing_columns(fieldnames) -> set[str]:
+    present = set(fieldnames or [])
+    return {
+        column
+        for column in _REQUIRED_COLUMNS - present
+        if _COLUMN_ALTERNATES.get(column) not in present
+    }
+
 
 class FocusCostDataError(RuntimeError):
     pass
@@ -280,7 +292,7 @@ def _stream_csv(content: Path, blob_name: str, *, account_input: bool = True):
                             consume("expanded_bytes", len(line.encode("utf-8")))
                         yield line
                 reader = csv.DictReader(lines())
-                missing = _REQUIRED_COLUMNS - set(reader.fieldnames or [])
+                missing = _missing_columns(reader.fieldnames)
                 if missing:
                     raise FocusCostDataError(f"FocusCost file is missing columns: {', '.join(sorted(missing))}")
                 for row in reader:
@@ -304,7 +316,7 @@ def _csv_reader(content: bytes | Path, blob_name: str, *, account_input: bool = 
     except UnicodeDecodeError as error:
         raise FocusCostDataError(f"FocusCost file is not UTF-8: {blob_name}") from error
     reader = csv.DictReader(io.StringIO(text))
-    missing = _REQUIRED_COLUMNS - set(reader.fieldnames or [])
+    missing = _missing_columns(reader.fieldnames)
     if missing:
         raise FocusCostDataError(f"FocusCost file is missing columns: {', '.join(sorted(missing))}")
     return reader
@@ -425,7 +437,7 @@ def _build_focus_cost_data(
             currency = row.get("BillingCurrency") or ""
             if currency:
                 currencies.add(currency)
-            pricing_currency = row.get("PricingCurrency") or ""
+            pricing_currency = row.get("PricingCurrency") or row.get("x_PricingCurrency") or ""
             if pricing_currency:
                 pricing_currencies.add(pricing_currency)
 
