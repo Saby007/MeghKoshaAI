@@ -246,6 +246,33 @@ def test_tenant_is_optional_and_detected_from_the_arm_challenge(monkeypatch):
             target_connection.ConnectionInput.model_validate(invalid)
 
 
+def test_validation_failure_reports_the_azure_error_code_without_the_secret(monkeypatch):
+    class Credential:
+        def __init__(self, *_):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def get_token(self, *_):
+            raise ClientAuthenticationError(
+                "AADSTS53003: Access has been blocked by Conditional Access policies. The access policy "
+                "does not allow token issuance.\r\nTrace ID: abc\r\nCorrelation ID: def")
+
+    monkeypatch.setattr(target_connection, "ClientSecretCredential", Credential)
+    monkeypatch.setattr(target_connection.workspace, "namespace", lambda: WORKSPACE)
+    body = target_connection.ConnectionInput.model_validate(
+        {"subscriptionId": SUB, "tenantId": WORKSPACE, "clientId": OTHER, "clientSecret": "s3cret-value"})
+    with pytest.raises(HTTPException) as failure:
+        asyncio.run(target_connection._validate(body))
+    assert failure.value.status_code == 422
+    assert "AADSTS53003: Access has been blocked by Conditional Access policies." in failure.value.detail
+    assert "s3cret-value" not in failure.value.detail and "Trace ID" not in failure.value.detail
+
+
 def test_save_uses_the_detected_tenant_to_validate_and_store(monkeypatch):
     tenant = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
     seen = {}

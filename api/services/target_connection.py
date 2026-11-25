@@ -176,6 +176,18 @@ async def _discover_tenant(subscription_id: UUID) -> UUID:
     return tenant
 
 
+_AAD_ERROR = re.compile(r"(AADSTS\d{3,7})\s*:?\s*([^\r\n]*)")
+
+
+def _azure_error_summary(failure: Exception) -> str:
+    """Return Azure's AADSTS code and its first sentence; the secret is never part of these messages."""
+    match = _AAD_ERROR.search(str(failure))
+    if match is None:
+        return ""
+    description = re.split(r"\.\s|Trace ID:", match.group(2), maxsplit=1)[0].strip()[:200]
+    return f" Azure error {match.group(1)}" + (f": {description}." if description else ".")
+
+
 async def _validate(body: ConnectionInput) -> str:
     if body.tenant_id is None or body.client_id is None or body.client_secret is None:
         raise ValueError("Complete credentials are required for an Azure connection test.")
@@ -196,9 +208,12 @@ async def _validate(body: ConnectionInput) -> str:
         if str(payload.get("subscriptionId", "")).lower() != str(body.subscription_id):
             raise HTTPException(502, "Azure returned a different subscription than the configured target.")
         return str(payload.get("displayName") or body.subscription_id)
-    except ClientAuthenticationError:
-        logger.warning("Target service-principal validation failed for workspace %s", workspace.namespace())
-        raise HTTPException(422, "Service-principal authentication failed. Verify tenant, client ID and secret.") from None
+    except ClientAuthenticationError as failure:
+        summary = _azure_error_summary(failure)
+        logger.warning("Target service-principal validation failed for workspace %s.%s", workspace.namespace(), summary)
+        raise HTTPException(
+            422, f"Service-principal authentication failed.{summary} Verify tenant, client ID and secret.",
+        ) from None
     except (httpx.HTTPError, ValueError):
         logger.warning("Target subscription validation was unavailable for workspace %s", workspace.namespace())
         raise HTTPException(502, "The target subscription could not be validated. Check connectivity and retry.") from None
