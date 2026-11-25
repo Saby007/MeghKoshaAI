@@ -81,6 +81,22 @@ Target Azure calls use `ClientSecretCredential`. Hosting managed identities stil
 authenticate to PostgreSQL, Blob, Key Vault, ACR and optional Foundry. Target
 tenant and hosting tenant are separate configuration concepts.
 
+## Screenshots
+
+Captured from a deployed instance with a small **synthetic** FOCUS 1.2 sample
+(a fictional "Contoso Demo Subscription"); no real tenant, subscription or cost data.
+Without the optional Reader service principal, the live Azure sections show
+"Unavailable" by design.
+
+| | |
+| --- | --- |
+| ![Admin: target subscription and FOCUS upload](docs/images/admin.png) | ![Executive Summary](docs/images/executive-summary.png) |
+| Admin: target subscription, optional service principal and upload | Executive Summary with period comparison |
+| ![Subscription Breakdown](docs/images/subscription-breakdown.png) | ![Cost Anomalies](docs/images/cost-anomalies.png) |
+| Subscription Breakdown by resource | Cost Anomalies and period cost spikes |
+
+![Cost by Tags/Application](docs/images/cost-by-tags.png)
+
 ## Deploy
 
 Use the [manual FOCUS deployment guide](docs/manual-focus-deployment.md). It
