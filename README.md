@@ -52,23 +52,14 @@ optional results remain unavailable rather than blocking uploaded financial data
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    Browser["No-login browser / isolated workspace"] --> Web["HTTPS web / nginx"]
-    Web --> API["Internal API / bounded upload chunks"]
-    API --> Blob["Private Blob / immutable finalized uploads"]
-    API --> PG["Private PostgreSQL / workspace, jobs, reports"]
-    API --> Vault["Private Key Vault / SP secret versions"]
-    Worker["Isolated assessment worker"] --> Blob
-    Worker --> PG
-    Worker --> Vault
-    Worker -. "Only when optional SP is configured" .-> Target["Target Azure subscription / Reader APIs"]
-    API -. "Optional" .-> AI["Private Foundry / grounded chat"]
-    Builder["Existing private build VM"] --> ACR["Private Premium ACR"]
-    ACR --> Web
-    ACR --> API
-    ACR --> Worker
-```
+![MeghKoshaAI architecture](docs/images/architecture.png)
+
+Diagram source: [architecture.svg](docs/images/architecture.svg), drawn with the official
+[Azure architecture icons](https://learn.microsoft.com/azure/architecture/icons/).
+The browser reaches the web front end over HTTPS. The API and the isolated
+assessment worker use private Blob, PostgreSQL and Key Vault. Foundry chat and the
+target-subscription Reader calls are optional. A private build VM publishes images
+to the private ACR.
 
 Files transfer in 8 MiB chunks through the API, so the browser does not need
 network access to private storage. PostgreSQL persists resumable checkpoints.
