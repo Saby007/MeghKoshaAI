@@ -182,37 +182,6 @@ scheduled/running export work remains, review obsolete permissions and complete
 the new schema/bootstrap before approving any in-place release. No automated
 destructive migration or account/registration deletion is provided.
 
-### Quick start: first deployment from a clean Windows checkout
-
-The condensed steps for a first deployment into a new environment. Replace the
-placeholders; no secret is needed.
-
-```powershell
-$ErrorActionPreference = 'Stop'
-$PSNativeCommandUseErrorActionPreference = $true
-
-New-Item -ItemType Directory C:\src -Force | Out-Null
-Set-Location C:\src
-git clone --branch feature/manual-focus-service-principal --single-branch `
-    https://github.com/Saby007/MeghKoshaAI.git MeghKoshaAI-manual
-Set-Location .\MeghKoshaAI-manual
-git rev-parse HEAD     # confirm it is the reviewed commit or later
-git status --short     # must print nothing
-
-$TenantId = '<hosting-tenant-uuid>'
-$HostingSubscriptionId = '<hosting-subscription-uuid>'
-$EnvName = 'meghkoshaai-manual-1'
-
-az account set --subscription $HostingSubscriptionId
-
-.\scripts\deploy-end-to-end.ps1 -EnvironmentName $EnvName -SubscriptionId $HostingSubscriptionId `
-    -Location centralindia -FoundryLocation eastus2
-```
-
-Without `-ApproveAll` the runner asks for approval before provisioning. Sign in with
-`az login --tenant $TenantId` and `azd auth login --tenant-id $TenantId` first if
-the sessions have expired.
-
 ### Updating an environment created by this branch
 
 After `git pull`, the deployment script refuses to run over applications that

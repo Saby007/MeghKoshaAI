@@ -87,6 +87,40 @@ Use the [manual FOCUS deployment guide](docs/manual-focus-deployment.md). It
 includes the plan-only command, prerequisites, approved rollout, stages, sizing,
 recovery and migration restrictions.
 
+### Quick start: first deployment from a clean Windows checkout
+
+Replace the placeholders; no secret is needed. Sign in with
+`az login --tenant $TenantId` and `azd auth login --tenant-id $TenantId` first if
+the sessions have expired.
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+
+New-Item -ItemType Directory C:\src -Force | Out-Null
+Set-Location C:\src
+git clone --branch feature/manual-focus-service-principal --single-branch `
+    https://github.com/Saby007/MeghKoshaAI.git MeghKoshaAI-manual
+Set-Location .\MeghKoshaAI-manual
+git rev-parse HEAD     # confirm it is the reviewed commit or later
+git status --short     # must print nothing
+
+$TenantId = '<hosting-tenant-uuid>'
+$HostingSubscriptionId = '<hosting-subscription-uuid>'
+$EnvName = 'meghkoshaai-manual-1'
+
+az account set --subscription $HostingSubscriptionId
+
+.\scripts\deploy-end-to-end.ps1 -EnvironmentName $EnvName -SubscriptionId $HostingSubscriptionId `
+    -Location centralindia -FoundryLocation eastus2
+```
+
+Without `-ApproveAll` the runner asks for approval before provisioning. To roll a
+newer commit onto the same environment, `git pull` and rerun the script with
+`-ApproveApplicationUpdate` (see the deployment guide).
+
+To inspect the plan without any Azure calls:
+
 ```powershell
 .\scripts\deploy-end-to-end.ps1 `
     -EnvironmentName 'meghkoshaai-manual' `
