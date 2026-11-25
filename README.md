@@ -198,6 +198,29 @@ regional quota/cost prerequisites. The separate hosted-agent narrator stays off.
   deployments require a reviewed migration; incremental Bicep does not stop or
   remove old scheduled jobs or revoke old role assignments.
 
+### Scale and known limitations
+
+Large estates (for example more than 10,000 resources) are designed for but
+**have not been load-tested**. Plan for validation before relying on them.
+
+- **Designed for volume.** Uploads are chunked and resumable; the worker streams
+  CSV into PostgreSQL in bounded batches; Resource Graph inventory is paged
+  (1,000 rows per request, with throttling retries). Budgets (4 GiB input, 8 GiB
+  expanded, 20 million CSV/history rows, 500,000 inventory rows by default; the
+  `ASSESSMENT_*` worker settings) stop a run with an explicit error instead of
+  truncating totals. The worker also stops near 85% of its memory limit.
+- **Azure SQL metrics are capped at 100 resources** per run, so larger SQL
+  estates get partial metric evidence.
+- **Per-resource metric collection is untested at 10,000+ resources.** Runs are
+  bounded by the worker timeout (one hour by default).
+- **Report UI responsiveness with thousands of table rows is unverified.**
+- **Capacity.** The default worker (4 vCPU / 8 GiB) and PostgreSQL sizes are
+  starting points. Roughly 10,000 resources over 90 days is about 1-2 million FOCUS
+  rows, within the default row budget; validate time and memory for your data.
+- Without the optional Reader service principal, live-Azure sections (inventory,
+  Advisor, wastage, savings, idle resources) show "Unavailable" by design. Previous
+  period and cost-spike tiles need uploaded data covering the preceding period.
+
 ## Validation
 
 Focused checks cover anonymous workspace/CSRF isolation, no-SP processing, SP
